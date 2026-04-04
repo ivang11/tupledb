@@ -24,6 +24,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   Dialog,
   DialogContent,
@@ -253,7 +254,7 @@ const filteredConnections = computed(() => {
 
 <template>
   <div class="h-full flex flex-col bg-muted/30">
-    <div class="flex-1 flex flex-col items-center p-8 overflow-auto">
+    <ScrollArea class="flex-1 flex flex-col items-center p-8">
       <div class="max-w-4xl w-full flex flex-col gap-6">
         
         <!-- Header -->
@@ -315,7 +316,7 @@ const filteredConnections = computed(() => {
           </div>
         </div>
       </div>
-    </div>
+    </ScrollArea>
 
     <!-- Connection Dialog (New/Edit) -->
     <Dialog :open="showDialog" @update:open="(val: boolean) => !val && (showDialog = false)">
@@ -529,19 +530,3 @@ const filteredConnections = computed(() => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.2);
-  border-radius: 10px;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.4);
-}
-</style>

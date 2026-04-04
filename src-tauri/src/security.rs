@@ -34,6 +34,15 @@ pub fn get_secret(conn_id: Uuid, secret_type: SecretType) -> Result<Option<Strin
     }
 }
 
+/// Valid identifier for ORDER BY (avoids injection; matches typical MySQL column names).
+pub fn is_safe_sort_column(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$' || c == '-')
+}
+
 pub fn is_query_safe(query: &str, environment: Environment) -> Result<(), String> {
     if environment == Environment::Production {
         let q = query.trim().to_uppercase();

@@ -404,6 +404,52 @@ pub async fn get_foreign_keys(
     }).collect())
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TableIndex {
+    pub key_name: String,
+    pub non_unique: bool,
+    pub column_name: String,
+    pub seq_in_index: u64,
+    pub index_type: String,
+    pub nullable: bool,
+    pub comment: String,
+}
+
+#[tauri::command]
+pub async fn get_table_indexes(
+    state: State<'_, AppState>,
+    connection_id: Uuid,
+    database: String,
+    table: String,
+) -> Result<Vec<TableIndex>, String> {
+    let pool = {
+        let sessions = state.active_sessions.read();
+        sessions.get(&connection_id).ok_or("No active session found")?.pool.clone()
+    };
+
+    let query = format!("SHOW INDEX FROM `{}`.`{}`", database, table);
+    let rows = sqlx::query(&query)
+        .fetch_all(&pool)
+        .await
+        .map_err(|e| format!("Failed to fetch indexes: {}", e))?;
+
+    Ok(rows.iter().map(|row| {
+        let non_unique_str = get_string_lossy(row, 1);
+        let non_unique: bool = non_unique_str != "0";
+        let seq: u64 = get_string_lossy(row, 3).parse().unwrap_or(1);
+        let nullable = get_string_lossy(row, 9) == "YES";
+        TableIndex {
+            key_name: get_string_lossy(row, 2),
+            non_unique,
+            column_name: get_string_lossy(row, 4),
+            seq_in_index: seq,
+            index_type: get_string_lossy(row, 10),
+            nullable,
+            comment: get_string_lossy(row, 11),
+        }
+    }).collect())
+}
+
 #[tauri::command]
 pub async fn get_tables(state: State<'_, AppState>, connection_id: Uuid, database: String) -> Result<Vec<Table>, String> {
     println!("Fetching tables for database: '{}'", database);

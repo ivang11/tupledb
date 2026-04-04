@@ -8,46 +8,51 @@ use crate::ssh::SshTunnel;
 #[tauri::command]
 pub async fn get_connections(state: State<'_, AppState>) -> Result<Vec<Connection>, String> {
     let connections = state.connections_config.read();
-    Ok(connections.values().cloned().collect())
+    // Strip passwords before sending to frontend
+    Ok(connections.values().map(|c| {
+        let mut c = c.clone();
+        c.mysql.password = None;
+        if let Some(ssh) = &mut c.ssh {
+            match &mut ssh.auth {
+                crate::connections::SshAuth::Password { password } => { *password = String::new(); }
+                crate::connections::SshAuth::Key { passphrase, .. } => { *passphrase = None; }
+            }
+        }
+        c
+    }).collect())
 }
 
-use crate::security::{SecretType, get_secret, set_secret};
 
 #[tauri::command]
 pub async fn add_connection(state: State<'_, AppState>, mut connection: Connection) -> Result<(), String> {
     println!("Saving connection: {} (Env: {:?})", connection.name, connection.environment);
-    
-    // Solo protegemos con Keyring si NO es LOCAL
-    if connection.environment != crate::connections::Environment::Local {
-        // 1. Move MySQL password to secure store
-        if let Some(pw) = &connection.mysql.password {
-            if !pw.is_empty() {
-                println!("  -> Storing MySQL password in keyring...");
-                set_secret(connection.id, SecretType::MySql, pw)?;
-            }
-        }
-        connection.mysql.password = None; // Strip password
 
-        // 2. Move SSH password to secure store
-        if let Some(ssh) = &mut connection.ssh {
-            match &mut ssh.auth {
-                crate::connections::SshAuth::Password { password } => {
-                    if !password.is_empty() {
-                        println!("  -> Storing SSH password in keyring...");
-                        set_secret(connection.id, SecretType::Ssh, password)?;
+    // If editing and a password field is empty, preserve the existing stored password
+    {
+        let existing = state.connections_config.read();
+        if let Some(existing_conn) = existing.get(&connection.id) {
+            if connection.mysql.password.as_deref().unwrap_or("").is_empty() {
+                connection.mysql.password = existing_conn.mysql.password.clone();
+                println!("  -> Preserving existing MySQL password");
+            }
+            if let (Some(new_ssh), Some(old_ssh)) = (&mut connection.ssh, &existing_conn.ssh) {
+                match (&mut new_ssh.auth, &old_ssh.auth) {
+                    (crate::connections::SshAuth::Password { password: new_pw }, crate::connections::SshAuth::Password { password: old_pw }) => {
+                        if new_pw.is_empty() && !old_pw.is_empty() {
+                            *new_pw = old_pw.clone();
+                            println!("  -> Preserving existing SSH password");
+                        }
                     }
-                    *password = "".to_string(); // Strip password
+                    _ => {}
                 }
-                _ => {}
             }
         }
-    } else {
-        println!("  -> Local environment: keeping password in config file for convenience.");
     }
 
+    // Store full connection (with passwords) in config
     let mut connections = state.connections_config.write();
     connections.insert(connection.id, connection);
-    drop(connections); 
+    drop(connections);
     state.save()
 }
 
@@ -74,22 +79,17 @@ pub async fn remove_connection(state: State<'_, AppState>, id: Uuid) -> Result<(
 }
 
 #[tauri::command]
-pub async fn connect(state: State<'_, AppState>, mut connection: Connection) -> Result<(), String> {
+pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Result<(), String> {
     println!("Connecting to {} ({})", connection.name, connection.mysql.host);
-    
-    // Si no hay contraseña en el objeto, intentamos sacarla del Keyring
-    if connection.mysql.password.is_none() || connection.mysql.password.as_ref().unwrap().is_empty() {
-        match get_secret(connection.id, SecretType::MySql) {
-            Ok(Some(pw)) => {
-                println!("  -> MySQL password retrieved from keyring");
-                connection.mysql.password = Some(pw);
-            }
-            Ok(None) => println!("  -> No MySQL password found in keyring"),
-            Err(e) => println!("  -> Keyring error: {}", e),
+
+    // Always use stored passwords from config (frontend never has them)
+    let mut connection = {
+        let configs = state.connections_config.read();
+        match configs.get(&connection.id) {
+            Some(stored) => stored.clone(),
+            None => connection, // fallback to what frontend sent (new connection not yet saved)
         }
-    } else {
-        println!("  -> Using password provided in connection object.");
-    }
+    };
 
     let (host, port, tunnel) = if let Some(ssh_settings) = &connection.ssh {
         println!("  -> Opening SSH tunnel to {}", ssh_settings.host);

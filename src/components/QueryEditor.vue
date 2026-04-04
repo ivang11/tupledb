@@ -13,6 +13,7 @@ import {
   TrashIcon,
   WandSparklesIcon,
 } from 'lucide-vue-next'
+import { ScrollArea } from '@/components/ui/scroll-area'
 
 const props = defineProps<{
   connectionId: string
@@ -257,9 +258,9 @@ onMounted(() => {
           />
         </div>
 
-        <!-- Results area: relative wrapper + absolute inner guarantees scroll works -->
-        <div class="flex-1 min-h-0 relative bg-muted/5">
-          <div class="absolute inset-0 overflow-auto results-scroll">
+        <!-- Results: contenedor flex + ScrollArea absoluto (altura estable en columna flex) -->
+        <div class="flex-1 min-h-0 min-w-0 relative bg-muted/5">
+          <ScrollArea class="absolute inset-0">
 
             <!-- Error state -->
             <div v-if="queryError" class="m-4 p-4 rounded-lg bg-destructive/10 border border-destructive/20 flex items-start gap-3">
@@ -300,8 +301,8 @@ onMounted(() => {
                       class="sticky top-0 z-20 bg-background/95 backdrop-blur-md px-4 py-3 border-b border-r last:border-r-0 text-left whitespace-nowrap"
                       style="min-width: 140px;"
                     >
-                      <div class="text-[10px] font-black tracking-widest text-foreground uppercase">{{ col.name }}</div>
-                      <div class="text-[9px] font-bold uppercase tracking-tighter text-muted-foreground opacity-70">{{ col.type_name }}</div>
+                      <div class="text-xs font-semibold font-mono tracking-normal text-foreground">{{ col.name }}</div>
+                      <div class="text-[9px] font-medium font-mono tracking-normal text-muted-foreground opacity-70">{{ col.type_name }}</div>
                     </th>
                   </tr>
                 </thead>
@@ -331,7 +332,7 @@ onMounted(() => {
               <p class="text-xs font-bold uppercase tracking-widest">Results will appear here</p>
             </div>
 
-          </div>
+          </ScrollArea>
         </div>
 
         <!-- Result count footer -->
@@ -370,7 +371,7 @@ onMounted(() => {
           </div>
         </div>
 
-        <div class="flex-1 overflow-y-auto custom-scrollbar">
+        <ScrollArea class="flex-1">
           <div v-if="history.length === 0" class="flex items-center justify-center h-full text-muted-foreground/30 text-xs p-4 text-center">
             No history yet
           </div>
@@ -408,28 +409,8 @@ onMounted(() => {
               </div>
             </button>
           </div>
-        </div>
+        </ScrollArea>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.results-scroll::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-.results-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-.results-scroll::-webkit-scrollbar-thumb {
-  background: hsl(var(--muted-foreground) / 0.35);
-  border-radius: 99px;
-}
-.results-scroll::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.6);
-}
-.results-scroll::-webkit-scrollbar-corner {
-  background: transparent;
-}
-</style>

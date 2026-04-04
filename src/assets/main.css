@@ -135,3 +135,45 @@
     @apply h-full;
   }
 }
+
+/* Scrollbars: colores válidos con variables hex + refuerzo al hover del panel (estilo TablePlus) */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 22%, transparent) transparent;
+}
+
+.custom-scrollbar:hover {
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 52%, transparent) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  background-color: color-mix(in srgb, var(--muted-foreground) 18%, transparent);
+}
+
+.custom-scrollbar:hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--muted-foreground) 48%, transparent);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--muted-foreground) 62%, transparent);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:active {
+  background-color: color-mix(in srgb, var(--primary) 55%, transparent);
+}

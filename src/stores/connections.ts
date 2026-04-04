@@ -24,6 +24,7 @@ export const useConnectionStore = defineStore('connections', () => {
   const activeFilters = ref<any | null>(null)
   const queryResult = ref<any | null>(null)
   const tableStructure = ref<any[]>([])
+  const tableIndexes = ref<any[]>([])
   const isLoading = ref(false)
   const foreignKeys = ref<any[]>([])
 
@@ -53,7 +54,27 @@ export const useConnectionStore = defineStore('connections', () => {
     }
   }
 
-  async function fetchTableData(tableName: string, page = 0, pageSize = 50, filters = activeFilters.value) {
+  async function fetchTableIndexes(tableName: string) {
+    if (!activeConnection.value || !activeDatabase.value) return
+    try {
+      tableIndexes.value = await invoke('get_table_indexes', {
+        connectionId: activeConnection.value.id,
+        database: activeDatabase.value,
+        table: tableName,
+      })
+    } catch (error) {
+      console.error('Failed to fetch table indexes:', error)
+      tableIndexes.value = []
+    }
+  }
+
+  async function fetchTableData(
+    tableName: string,
+    page = 0,
+    pageSize = 50,
+    filters = activeFilters.value,
+    sort: { column: string; desc: boolean } | null = null,
+  ) {
     if (!activeConnection.value || !activeDatabase.value) return
 
     isLoading.value = true
@@ -67,7 +88,9 @@ export const useConnectionStore = defineStore('connections', () => {
         table: tableName,
         page,
         pageSize,
-        filters
+        filters,
+        sortColumn: sort?.column ?? null,
+        sortDesc: sort?.desc ?? null,
       })
     } catch (error) {
       console.error('Failed to fetch table data:', error)
@@ -204,7 +227,9 @@ export const useConnectionStore = defineStore('connections', () => {
     tableStructure,
     isLoading,
     foreignKeys,
+    tableIndexes,
     fetchForeignKeys,
+    fetchTableIndexes,
     fetchConnections,
     addConnection,
     removeConnection,
