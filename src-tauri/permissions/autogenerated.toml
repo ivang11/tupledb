@@ -1,0 +1,89 @@
+[[permission]]
+identifier = "allow-get-connections"
+description = "Permite obtener la lista de conexiones"
+commands.allow = ["get_connections"]
+
+[[permission]]
+identifier = "allow-add-connection"
+description = "Permite añadir una nueva conexión"
+commands.allow = ["add_connection"]
+
+[[permission]]
+identifier = "allow-remove-connection"
+description = "Permite eliminar una conexión"
+commands.allow = ["remove_connection"]
+
+[[permission]]
+identifier = "allow-test-connection"
+description = "Permite probar una conexión"
+commands.allow = ["test_connection"]
+
+[[permission]]
+identifier = "allow-connect"
+description = "Permite establecer una conexión activa"
+commands.allow = ["connect"]
+
+[[permission]]
+identifier = "allow-get-databases"
+description = "Permite listar las bases de datos"
+commands.allow = ["get_databases"]
+
+[[permission]]
+identifier = "allow-get-tables"
+description = "Permite listar las tablas"
+commands.allow = ["get_tables"]
+
+[[permission]]
+identifier = "allow-get-table-data"
+description = "Permite obtener los datos de una tabla"
+commands.allow = ["get_table_data"]
+
+[[permission]]
+identifier = "allow-get-table-structure"
+description = "Permite obtener la estructura de una tabla"
+commands.allow = ["get_table_structure"]
+
+[[permission]]
+identifier = "allow-export-table"
+description = "Permite exportar los datos de una tabla a un archivo"
+commands.allow = ["export_table"]
+
+[[permission]]
+identifier = "allow-export-database"
+description = "Permite exportar una base de datos completa a un archivo SQL"
+commands.allow = ["export_database"]
+
+[[permission]]
+identifier = "allow-create-database"
+description = "Permite crear una nueva base de datos"
+commands.allow = ["create_database"]
+
+[[permission]]
+identifier = "allow-import-sql"
+description = "Permite importar un archivo SQL en una base de datos"
+commands.allow = ["import_sql"]
+
+[[permission]]
+identifier = "allow-apply-table-changes"
+description = "Permite aplicar cambios (updates/deletes) a una tabla"
+commands.allow = ["apply_table_changes"]
+
+[[permission]]
+identifier = "allow-drop-table"
+description = "Permite borrar una tabla físicamente"
+commands.allow = ["drop_table"]
+
+[[permission]]
+identifier = "allow-truncate-table"
+description = "Permite vaciar una tabla"
+commands.allow = ["truncate_table"]
+
+[[permission]]
+identifier = "allow-get-foreign-keys"
+description = "Permite obtener las claves foráneas de una tabla"
+commands.allow = ["get_foreign_keys"]
+
+[[permission]]
+identifier = "allow-execute-query"
+description = "Permite ejecutar una consulta SQL arbitraria"
+commands.allow = ["execute_query"]

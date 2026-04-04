@@ -1,0 +1,36 @@
+[package]
+name = "db-viewer"
+version = "0.1.0"
+description = "A secure MySQL client built with Tauri and Vue"
+authors = ["Ivan"]
+edition = "2021"
+
+[lib]
+name = "app_lib"
+path = "src/lib.rs"
+
+[dependencies]
+tauri = { version = "2.1.1", features = [] }
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sqlx = { version = "0.8", features = ["mysql", "runtime-tokio", "tls-rustls", "chrono"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+thiserror = "1.0"
+parking_lot = "0.12"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+keyring = "3"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[profile.dev]
+opt-level = 0
+incremental = true
+panic = 'abort'
+
+[profile.dev.package."*"]
+opt-level = 2 # Compila las dependencias con optimización para que la app corra fluida, pero el código de tu app rápido sin optimizar.
