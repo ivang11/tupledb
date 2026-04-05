@@ -87,3 +87,8 @@ commands.allow = ["get_foreign_keys"]
 identifier = "allow-execute-query"
 description = "Permite ejecutar una consulta SQL arbitraria"
 commands.allow = ["execute_query"]
+
+[[permission]]
+identifier = "allow-insert-row"
+description = "Permite insertar una nueva fila en una tabla"
+commands.allow = ["insert_row"]

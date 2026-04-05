@@ -139,16 +139,18 @@
 /* Scrollbars: colores válidos con variables hex + refuerzo al hover del panel (estilo TablePlus) */
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 22%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 22%, transparent)
+    transparent;
 }
 
 .custom-scrollbar:hover {
-  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 52%, transparent) transparent;
+  scrollbar-color: color-mix(in srgb, var(--muted-foreground) 52%, transparent)
+    transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 16px;
+  height: 16px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-corner {
@@ -163,15 +165,27 @@
   border-radius: 99px;
   border: 2px solid transparent;
   background-clip: padding-box;
-  background-color: color-mix(in srgb, var(--muted-foreground) 18%, transparent);
+  background-color: color-mix(
+    in srgb,
+    var(--muted-foreground) 18%,
+    transparent
+  );
 }
 
 .custom-scrollbar:hover::-webkit-scrollbar-thumb {
-  background-color: color-mix(in srgb, var(--muted-foreground) 48%, transparent);
+  background-color: color-mix(
+    in srgb,
+    var(--muted-foreground) 48%,
+    transparent
+  );
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: color-mix(in srgb, var(--muted-foreground) 62%, transparent);
+  background-color: color-mix(
+    in srgb,
+    var(--muted-foreground) 62%,
+    transparent
+  );
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:active {

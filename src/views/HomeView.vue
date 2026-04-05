@@ -7,6 +7,7 @@ import {
   DatabaseIcon,
   TableIcon,
   ChevronRightIcon,
+  ChevronLeftIcon,
   ChevronDownIcon,
   LayoutListIcon,
   TablePropertiesIcon,
@@ -557,6 +558,86 @@ function isTableActiveInAnyPane(
 const isSaving = ref(false);
 const disableFkChecks = ref(false);
 
+// ── Insert row inline ─────────────────────────────────────────────────────────
+const insertingRowPaneId = ref<string | null>(null);
+const insertRowValues = ref<Record<string, string>>({});
+const insertRowLoading = ref(false);
+const insertRowError = ref<string | null>(null);
+
+function isColAutoIncrement(pane: PaneState, colName: string): boolean {
+  const tab = getPaneTab(pane);
+  if (!tab) return false;
+  return (tab.tableStructure as any[]).find((c: any) => c.field === colName)?.extra === "auto_increment";
+}
+
+function isBooleanCol(pane: PaneState, colName: string): boolean {
+  const tab = getPaneTab(pane);
+  if (!tab) return false;
+  const col = (tab.tableStructure as any[]).find((c: any) => c.field === colName);
+  const type = (col?.type ?? "").toLowerCase();
+  return type === "tinyint(1)" || type === "boolean" || type === "bool";
+}
+
+function openInsertRowDialog(pane: PaneState) {
+  if (insertingRowPaneId.value === pane.id) {
+    insertingRowPaneId.value = null;
+    return;
+  }
+  const tab = getPaneTab(pane);
+  if (!tab) return;
+  insertRowValues.value = Object.fromEntries(
+    (tab.tableStructure as any[])
+      .filter((col: any) => col.extra !== "auto_increment")
+      .map((col: any) => [col.field, col.default ?? ""])
+  );
+  insertRowError.value = null;
+  insertingRowPaneId.value = pane.id;
+  nextTick(() => {
+    const firstInput = document.querySelector<HTMLInputElement>(".insert-row-input");
+    firstInput?.focus();
+  });
+}
+
+function cancelInsertRow() {
+  insertingRowPaneId.value = null;
+  insertRowError.value = null;
+}
+
+async function submitInsertRow(pane: PaneState) {
+  const tab = getPaneTab(pane);
+  const conn = getPaneConnection(pane);
+  if (!tab || !conn) return;
+  insertRowLoading.value = true;
+  insertRowError.value = null;
+  try {
+    const values = Object.entries(insertRowValues.value).map(([column, value]) => {
+      if (value === "" || value === null) return { column, value: null };
+      // Convertir true/false a 1/0 siempre (cubre tinyint(1) y cualquier variante)
+      const lower = String(value).toLowerCase().trim();
+      if (lower === "true") return { column, value: 1 };
+      if (lower === "false") return { column, value: 0 };
+      return { column, value };
+    });
+    syncStoreForFetch(tab.connectionId, tab.database);
+    await invoke("insert_row", {
+      connectionId: conn.id,
+      database: tab.database,
+      table: tab.tableName,
+      values,
+      disableFkChecks: disableFkChecks.value,
+    });
+    insertingRowPaneId.value = null;
+    await refreshActiveTab(pane.id);
+  } catch (e: any) {
+    const msg = String(e);
+    // Extraer solo el mensaje de MySQL si está disponible
+    const match = msg.match(/: (\d{4} \(.+?\): .+)$/);
+    insertRowError.value = match ? match[1] : msg;
+  } finally {
+    insertRowLoading.value = false;
+  }
+}
+
 function getActiveTab(paneId?: string): TableTab | null {
   return getPaneTab(getPane(paneId));
 }
@@ -780,6 +861,35 @@ async function changePage(pane: PaneState, delta: number) {
     tab.filters,
     sortPayload(tab),
   );
+  saveToActiveTab(pane);
+}
+
+async function changeLimit(pane: PaneState, newLimit: number) {
+  if (!newLimit || newLimit < 1) return;
+  const tab = getPaneTab(pane);
+  if (!tab) return;
+  const offset = pane.page * pane.pageSize;
+  pane.pageSize = newLimit;
+  tab.pageSize = newLimit;
+  pane.page = Math.floor(offset / newLimit);
+  tab.page = pane.page;
+  tab.selectedRowPk = null;
+  tab.inlineEditColumn = null;
+  syncStoreForFetch(tab.connectionId, tab.database);
+  await store.fetchTableData(tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab));
+  saveToActiveTab(pane);
+}
+
+async function gotoOffset(pane: PaneState, newOffset: number) {
+  if (newOffset < 0) return;
+  const tab = getPaneTab(pane);
+  if (!tab) return;
+  tab.selectedRowPk = null;
+  tab.inlineEditColumn = null;
+  pane.page = Math.floor(newOffset / pane.pageSize);
+  tab.page = pane.page;
+  syncStoreForFetch(tab.connectionId, tab.database);
+  await store.fetchTableData(tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab));
   saveToActiveTab(pane);
 }
 
@@ -2002,34 +2112,6 @@ watch(
             <!-- Table controls (Content/Structure + Filter + Refresh) -->
             <template v-if="getPaneTab(pane)">
               <div class="flex items-center gap-1 px-2 border-r h-full">
-                <div
-                  class="flex items-center rounded border bg-muted/30 p-0.5 gap-0.5"
-                >
-                  <button
-                    type="button"
-                    @click="setViewMode(pane, 'content')"
-                    :class="[
-                      'flex items-center gap-1 px-2 h-6 rounded text-[10px] font-bold uppercase tracking-wider transition-all',
-                      pane.viewMode === 'content'
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground',
-                    ]"
-                  >
-                    <LayoutListIcon class="size-3" /> Content
-                  </button>
-                  <button
-                    type="button"
-                    @click="setViewMode(pane, 'structure')"
-                    :class="[
-                      'flex items-center gap-1 px-2 h-6 rounded text-[10px] font-bold uppercase tracking-wider transition-all',
-                      pane.viewMode === 'structure'
-                        ? 'bg-background text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground',
-                    ]"
-                  >
-                    <TablePropertiesIcon class="size-3" /> Structure
-                  </button>
-                </div>
                 <button
                   type="button"
                   class="size-6 flex items-center justify-center rounded border transition-colors"
@@ -2692,6 +2774,30 @@ watch(
                           />
                         </td>
                       </tr>
+                      <tr
+                        v-if="insertingRowPaneId === pane.id"
+                        class="bg-emerald-500/10 ring-1 ring-inset ring-emerald-500/20"
+                      >
+                        <td
+                          v-for="col in getPaneTab(pane)?.queryResult?.columns"
+                          :key="(col as any).name"
+                          class="px-1 py-1 border-b border-r last:border-r-0"
+                          :style="getColWidth(pane, (col as any).name) ? { width: getColWidth(pane, (col as any).name) + 'px', maxWidth: getColWidth(pane, (col as any).name) + 'px' } : { maxWidth: '300px' }"
+                        >
+                          <span
+                            v-if="isColAutoIncrement(pane, (col as any).name)"
+                            class="px-3 text-xs text-muted-foreground italic"
+                          >auto</span>
+                          <input
+                            v-else
+                            v-model="insertRowValues[(col as any).name]"
+                            :placeholder="isBooleanCol(pane, (col as any).name) ? '0 / 1' : ''"
+                            class="insert-row-input w-full h-7 px-3 text-sm bg-transparent focus:outline-none focus:ring-1 focus:ring-emerald-500/50 rounded"
+                            @keydown.enter="submitInsertRow(pane)"
+                            @keydown.escape="cancelInsertRow"
+                          />
+                        </td>
+                      </tr>
                     </tbody>
                   </table>
                   <div
@@ -2946,44 +3052,116 @@ watch(
 
             <!-- Pagination Footer -->
             <footer
-              v-if="pane.viewMode === 'content'"
+              v-if="getPaneTab(pane) && !isPaneActiveTabQuery(pane)"
               class="h-12 border-t flex items-center justify-between px-6 bg-background shrink-0"
             >
-              <div
-                class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider"
-              >
-                {{ pane.page * pane.pageSize + 1 }} -
-                {{
-                  Math.min(
-                    (pane.page + 1) * pane.pageSize,
-                    getPaneTab(pane)?.queryResult?.total_count || 0,
-                  )
-                }}
-                of {{ getPaneTab(pane)?.queryResult?.total_count }} rows
-              </div>
               <div class="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="h-7 text-[10px] font-bold px-4"
-                  :disabled="pane.page === 0"
-                  @click="changePage(pane, -1)"
-                  >PREVIOUS</Button
-                >
-                <div class="text-[10px] font-bold px-3">
-                  PAGE {{ pane.page + 1 }}
+                <div class="flex items-center rounded border bg-muted/30 p-0.5 gap-0.5">
+                  <button
+                    type="button"
+                    @click="setViewMode(pane, 'content')"
+                    :class="[
+                      'flex items-center gap-1 px-2 h-6 rounded text-[10px] font-bold uppercase tracking-wider transition-all',
+                      pane.viewMode === 'content'
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground',
+                    ]"
+                  >
+                    <LayoutListIcon class="size-3" /> Data
+                  </button>
+                  <button
+                    type="button"
+                    @click="setViewMode(pane, 'structure')"
+                    :class="[
+                      'flex items-center gap-1 px-2 h-6 rounded text-[10px] font-bold uppercase tracking-wider transition-all',
+                      pane.viewMode === 'structure'
+                        ? 'bg-background text-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground',
+                    ]"
+                  >
+                    <TablePropertiesIcon class="size-3" /> Structure
+                  </button>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  class="h-7 text-[10px] font-bold px-4"
-                  :disabled="
-                    (pane.page + 1) * pane.pageSize >=
-                    (getPaneTab(pane)?.queryResult?.total_count || 0)
-                  "
-                  @click="changePage(pane, +1)"
-                  >NEXT</Button
+                <button
+                  type="button"
+                  :class="[
+                    'size-6 flex items-center justify-center rounded border transition-colors',
+                    insertingRowPaneId === pane.id
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-500'
+                      : 'border-transparent text-muted-foreground hover:border-border hover:bg-muted/30 hover:text-foreground'
+                  ]"
+                  title="Insert new row"
+                  @click="openInsertRowDialog(pane)"
                 >
+                  <PlusIcon class="size-3.5" />
+                </button>
+              </div>
+              <div v-if="insertingRowPaneId === pane.id" class="flex items-center gap-2">
+                <span v-if="insertRowError" class="text-[10px] text-destructive max-w-xs truncate cursor-help" :title="insertRowError">{{ insertRowError }}</span>
+                <span v-else class="text-[10px] text-muted-foreground">Enter · Esc to cancel</span>
+                <Button size="sm" class="h-6 text-[10px] px-3 bg-emerald-600 hover:bg-emerald-700" :disabled="insertRowLoading" @click="submitInsertRow(pane)">
+                  {{ insertRowLoading ? '...' : 'Insert' }}
+                </Button>
+                <Button size="sm" variant="ghost" class="h-6 text-[10px] px-2" @click="cancelInsertRow">Cancel</Button>
+              </div>
+              <div v-else-if="pane.viewMode === 'content'" class="flex items-center gap-3">
+                <div
+                  class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider"
+                >
+                  {{ pane.page * pane.pageSize + 1 }} -
+                  {{
+                    Math.min(
+                      (pane.page + 1) * pane.pageSize,
+                      getPaneTab(pane)?.queryResult?.total_count || 0,
+                    )
+                  }}
+                  of {{ getPaneTab(pane)?.queryResult?.total_count }} rows
+                </div>
+                <div class="flex items-center gap-3">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Limit</span>
+                  <input
+                    type="number"
+                    :value="pane.pageSize"
+                    min="1"
+                    class="h-6 w-16 rounded border border-input bg-transparent px-2 text-[11px] font-bold text-center focus:outline-none focus:ring-1 focus:ring-ring [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    @change="changeLimit(pane, +($event.target as HTMLInputElement).value)"
+                  />
+                </div>
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Offset</span>
+                  <input
+                    type="number"
+                    :value="pane.page * pane.pageSize"
+                    min="0"
+                    class="h-6 w-16 rounded border border-input bg-transparent px-2 text-[11px] font-bold text-center focus:outline-none focus:ring-1 focus:ring-ring [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    @change="gotoOffset(pane, +($event.target as HTMLInputElement).value)"
+                  />
+                </div>
+                <div class="flex items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-7 w-7 p-0"
+                    :disabled="pane.page === 0"
+                    @click="changePage(pane, -1)"
+                  >
+                    <ChevronLeftIcon class="size-4" />
+                  </Button>
+                  <div class="text-[10px] font-bold px-1">
+                    {{ pane.page + 1 }}
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    class="h-7 w-7 p-0"
+                    :disabled="(pane.page + 1) * pane.pageSize >= (getPaneTab(pane)?.queryResult?.total_count || 0)"
+                    @click="changePage(pane, +1)"
+                  >
+                    <ChevronRightIcon class="size-4" />
+                  </Button>
+                </div>
+              </div>
               </div>
             </footer>
           </template>
@@ -3128,6 +3306,7 @@ watch(
         </div>
       </DialogContent>
     </Dialog>
+
 
     <!-- Import Progress Dialog -->
     <Dialog :open="isImporting">

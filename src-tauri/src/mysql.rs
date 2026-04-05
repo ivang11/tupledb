@@ -511,6 +511,89 @@ pub async fn apply_table_changes(
 }
 
 #[tauri::command]
+pub async fn insert_row(
+    state: State<'_, AppState>,
+    connection_id: Uuid,
+    database: String,
+    table: String,
+    values: Vec<TableChange>,
+    disable_fk_checks: bool,
+) -> Result<(), String> {
+    if values.is_empty() {
+        return Err("No values provided".to_string());
+    }
+
+    let pool = {
+        let sessions = state.active_sessions.read();
+        sessions.get(&connection_id).ok_or("No active session found")?.pool.clone()
+    };
+
+    fn is_sql_expression(s: &str) -> bool {
+        let upper = s.trim().to_uppercase();
+        matches!(upper.as_str(),
+            "NOW()" | "CURRENT_TIMESTAMP" | "CURRENT_TIMESTAMP()" |
+            "CURRENT_DATE" | "CURRENT_DATE()" | "CURRENT_TIME" | "CURRENT_TIME()" |
+            "UUID()" | "NULL"
+        )
+    }
+
+    let columns: Vec<String> = values.iter().map(|v| format!("`{}`", v.column)).collect();
+    let placeholders: Vec<String> = values.iter().map(|v| {
+        if let Value::String(s) = &v.value {
+            if is_sql_expression(s) { return s.trim().to_uppercase(); }
+        }
+        "?".to_string()
+    }).collect();
+
+    let query = format!(
+        "INSERT INTO `{}`.`{}` ({}) VALUES ({})",
+        database, table,
+        columns.join(", "),
+        placeholders.join(", ")
+    );
+
+    let mut q = sqlx::query(&query);
+
+    for v in &values {
+        if let Value::String(s) = &v.value {
+            if is_sql_expression(s) { continue; }
+        }
+        q = match &v.value {
+            Value::Null => q.bind(None::<String>),
+            Value::Bool(b) => q.bind(if *b { 1i64 } else { 0i64 }),
+            Value::Number(n) => {
+                if let Some(i) = n.as_i64() { q.bind(i) }
+                else if let Some(f) = n.as_f64() { q.bind(f.to_string()) }
+                else { return Err("Invalid number".to_string()); }
+            }
+            Value::String(s) => q.bind(s.clone()),
+            _ => return Err("Unsupported value type".to_string()),
+        };
+    }
+
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+
+    if disable_fk_checks {
+        sqlx::query("SET FOREIGN_KEY_CHECKS = 0")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    q.execute(&mut *tx).await.map_err(|e| e.to_string())?;
+
+    if disable_fk_checks {
+        sqlx::query("SET FOREIGN_KEY_CHECKS = 1")
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    tx.commit().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn drop_table(
     state: State<'_, AppState>,
     connection_id: Uuid,

@@ -7,8 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "tauri:dev": "WEBKIT_DISABLE_COMPOSITING_MODE=1 tauri dev -- -- -j 4",
-    "tauri:dev:x11": "GDK_BACKEND=x11 WEBKIT_DISABLE_COMPOSITING_MODE=1 tauri dev -- -- -j 4"
+    "dev:app": "tauri dev",
+    "build:app": "NO_STRIP=true tauri build"
   },
   "dependencies": {
     "@tanstack/vue-table": "^8.21.3",

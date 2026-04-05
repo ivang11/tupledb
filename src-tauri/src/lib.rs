@@ -35,6 +35,7 @@ pub fn run() {
             crate::mysql::get_table_data,
             crate::mysql::export_table,
             crate::mysql::apply_table_changes,
+            crate::mysql::insert_row,
             crate::mysql::drop_table,
             crate::mysql::truncate_table,
             crate::schema::get_foreign_keys,

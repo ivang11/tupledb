@@ -83,7 +83,7 @@ pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Resu
     println!("Connecting to {} ({})", connection.name, connection.mysql.host);
 
     // Always use stored passwords from config (frontend never has them)
-    let mut connection = {
+    let connection = {
         let configs = state.connections_config.read();
         match configs.get(&connection.id) {
             Some(stored) => stored.clone(),
