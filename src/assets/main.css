@@ -114,6 +114,10 @@
   body,
   #app {
     height: 100%;
+    width: 100%;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
   }
 
   html {
@@ -126,13 +130,6 @@
 
   body {
     @apply bg-background text-foreground;
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-  }
-
-  #app {
-    @apply h-full;
   }
 }
 
@@ -190,4 +187,9 @@
 
 .custom-scrollbar::-webkit-scrollbar-thumb:active {
   background-color: color-mix(in srgb, var(--primary) 55%, transparent);
+}
+
+/* Data grid: disable default browser stripe on even rows */
+.data-grid tr:nth-child(even) {
+  background: transparent;
 }
