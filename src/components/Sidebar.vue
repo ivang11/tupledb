@@ -36,6 +36,7 @@ const props = defineProps<{
   isTableActive: (name: string, db: string, connId: string) => boolean;
   isTableOpen: (name: string, db: string, connId: string) => boolean;
   filteredTables: (connId: string, db: string) => any[];
+  isTableSelected: (connId: string, db: string, tableName: string) => boolean;
 }>();
 
 const emit = defineEmits<{
@@ -48,6 +49,8 @@ const emit = defineEmits<{
   "toggle-database": [connId: string, db: string];
   "load-table": [tableName: string, connId: string, db: string];
   "create-database": [connId: string];
+  "toggle-table-selection": [connId: string, db: string, tableName: string];
+  "delete-selected-tables": [];
   "context-menu-connection": [e: MouseEvent, conn: Connection];
   "context-menu-table": [
     e: MouseEvent,
@@ -89,6 +92,17 @@ const getEnvBorderColor = (env: Environment): string => {
 };
 
 const dbKey = (connId: string, db: string) => `${connId}:${db}`;
+
+function handleTableClick(e: MouseEvent, connId: string, db: string, tableName: string) {
+  if (e.ctrlKey || e.metaKey) {
+    // Ctrl+click para seleccionar/deseleccionar
+    e.preventDefault();
+    emit('toggle-table-selection', connId, db, tableName);
+  } else {
+    // Click normal para abrir tabla
+    emit('load-table', tableName, connId, db);
+  }
+}
 </script>
 
 <template>
@@ -296,7 +310,7 @@ const dbKey = (connId: string, db: string) => `${connId}:${db}`;
               <button
                 v-for="table in filteredTables(connId as string, db)"
                 :key="table.name"
-                @click="emit('load-table', table.name, connId as string, db)"
+                @click="handleTableClick($event, connId as string, db, table.name)"
                 @contextmenu="
                   emit(
                     'context-menu-table',
@@ -309,6 +323,7 @@ const dbKey = (connId: string, db: string) => `${connId}:${db}`;
                 :class="[
                   'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-all text-left group/tbl',
                   isTableOpen(table.name, db, connId as string) ? 'ml-2' : '',
+                  isTableSelected(connId as string, db, table.name) ? 'bg-primary/20 border border-primary/30' : '',
                   isTableActive(table.name, db, connId as string)
                     ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'hover:bg-primary/5 text-foreground',

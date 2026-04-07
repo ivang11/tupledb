@@ -327,6 +327,160 @@ export function useSidebarManager(ctx: SidebarContext) {
     }
   }
 
+  // ── Multiple table selection ────────────────────────────────────────────────
+
+  const selectedTables = ref<Set<string>>(new Set());
+  const showBulkTableActionDialog = ref(false);
+  const isExecutingBulkTableAction = ref(false);
+
+  function tableSelectionKey(
+    connectionId: string,
+    database: string,
+    tableName: string,
+  ): string {
+    return `${connectionId}:${database}:${tableName}`;
+  }
+
+  function isTableSelected(
+    connectionId: string,
+    database: string,
+    tableName: string,
+  ): boolean {
+    return selectedTables.value.has(
+      tableSelectionKey(connectionId, database, tableName),
+    );
+  }
+
+  function toggleTableSelection(
+    connectionId: string,
+    database: string,
+    tableName: string,
+  ) {
+    const key = tableSelectionKey(connectionId, database, tableName);
+    if (selectedTables.value.has(key)) {
+      selectedTables.value.delete(key);
+    } else {
+      selectedTables.value.add(key);
+    }
+  }
+
+  function clearTableSelection() {
+    selectedTables.value.clear();
+  }
+
+  async function executeBulkTableDeletion(disableFk: boolean) {
+    if (selectedTables.value.size === 0) return;
+
+    isExecutingBulkTableAction.value = true;
+    try {
+      const toDelete: Array<{
+        connectionId: string;
+        database: string;
+        table: string;
+      }> = [];
+
+      for (const key of selectedTables.value) {
+        const [connectionId, database, tableName] = key.split(":");
+        toDelete.push({ connectionId, database, table: tableName });
+      }
+
+      // Execute all deletes
+      for (const item of toDelete) {
+        await invoke("drop_table", {
+          connectionId: item.connectionId,
+          database: item.database,
+          table: item.table,
+          disableFkChecks: disableFk,
+        });
+
+        // Close related tabs
+        for (const pane of panes.value) {
+          const related = pane.tabs.filter(
+            (t) =>
+              t.type === "table" &&
+              (t as TableTab).tableName === item.table &&
+              (t as TableTab).database === item.database &&
+              t.connectionId === item.connectionId,
+          );
+          related.forEach((t) => closeTab(t.id, pane.id));
+        }
+      }
+
+      // Refresh the databases that were affected
+      const affectedDbs = new Set<string>();
+      for (const key of selectedTables.value) {
+        const [connectionId, database] = key.split(":");
+        affectedDbs.add(`${connectionId}:${database}`);
+      }
+
+      for (const dbKey of affectedDbs) {
+        const [connectionId, database] = dbKey.split(":");
+        await store.fetchTablesForConnection(connectionId, database);
+      }
+
+      selectedTables.value.clear();
+      showBulkTableActionDialog.value = false;
+      // Note: showBulkDeleteDialog is handled in HomeView.vue
+    } catch (e: any) {
+      alert(`Failed to delete tables: ${e}`);
+    } finally {
+      isExecutingBulkTableAction.value = false;
+    }
+  }
+
+  async function executeBulkTableTruncation(disableFk: boolean) {
+    if (selectedTables.value.size === 0) return;
+
+    isExecutingBulkTableAction.value = true;
+    try {
+      const toTruncate: Array<{
+        connectionId: string;
+        database: string;
+        table: string;
+      }> = [];
+
+      for (const key of selectedTables.value) {
+        const [connectionId, database, tableName] = key.split(":");
+        toTruncate.push({ connectionId, database, table: tableName });
+      }
+
+      // Execute all truncates
+      for (const item of toTruncate) {
+        await invoke("truncate_table", {
+          connectionId: item.connectionId,
+          database: item.database,
+          table: item.table,
+          disableFkChecks: disableFk,
+        });
+
+        // Reset pending changes for truncated tables
+        for (const pane of panes.value) {
+          const tab = pane.tabs.find(
+            (t) =>
+              t.type === "table" &&
+              (t as TableTab).tableName === item.table &&
+              (t as TableTab).database === item.database &&
+              t.connectionId === item.connectionId,
+          ) as TableTab | undefined;
+          if (tab) {
+            tab.pendingTruncate = false;
+            tab.pendingChanges = {};
+            tab.pendingDeletions = {};
+            if (tab.id === pane.activeTabId) await refreshActiveTab(pane.id);
+          }
+        }
+      }
+
+      selectedTables.value.clear();
+      showBulkTruncateDialog.value = false;
+      // Note: showBulkTruncateDialog is handled in HomeView.vue
+    } catch (e: any) {
+      alert(`Failed to truncate tables: ${e}`);
+    } finally {
+      isExecutingBulkTableAction.value = false;
+    }
+  }
+
   // ── Database actions ────────────────────────────────────────────────────────
 
   const showDatabaseActionDialog = ref(false);
@@ -388,6 +542,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     connectionId: "",
     database: "",
     tableName: "",
+    selectedCount: 0,
   });
   const sidebarDatabaseContextMenu = ref({
     show: false,
@@ -427,6 +582,7 @@ export function useSidebarManager(ctx: SidebarContext) {
       connectionId,
       database,
       tableName,
+      selectedCount: selectedTables.value.size,
     };
     const close = () => {
       sidebarTableContextMenu.value.show = false;
@@ -572,6 +728,15 @@ export function useSidebarManager(ctx: SidebarContext) {
     isExecutingTableAction,
     confirmSidebarTableAction,
     executeTableAction,
+    // Multiple table selection
+    selectedTables,
+    showBulkTableActionDialog,
+    isExecutingBulkTableAction,
+    isTableSelected,
+    toggleTableSelection,
+    clearTableSelection,
+    executeBulkTableDeletion,
+    executeBulkTableTruncation,
     // Database actions
     showDatabaseActionDialog,
     databaseActionData,

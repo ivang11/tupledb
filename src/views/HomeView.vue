@@ -19,6 +19,7 @@ import ProgressDialog from "@/components/dialogs/ProgressDialog.vue";
 import ImportResultDialog from "@/components/dialogs/ImportResultDialog.vue";
 import ExportResultDialog from "@/components/dialogs/ExportResultDialog.vue";
 import TableActionDialog from "@/components/dialogs/TableActionDialog.vue";
+import BulkTableActionDialog from "@/components/dialogs/BulkTableActionDialog.vue";
 import DatabaseActionDialog from "@/components/dialogs/DatabaseActionDialog.vue";
 import ConnectionContextMenu from "@/components/ConnectionContextMenu.vue";
 import TableContextMenu from "@/components/TableContextMenu.vue";
@@ -121,6 +122,8 @@ const {
   loadTableData,
 });
 
+const showBulkTruncateDialog = ref(false);
+
 const {
   search,
   expandedConnections,
@@ -155,6 +158,14 @@ const {
   isExecutingTableAction,
   confirmSidebarTableAction,
   executeTableAction,
+  // Multiple table selection
+  selectedTables,
+  showBulkTableActionDialog,
+  isExecutingBulkTableAction,
+  isTableSelected,
+  toggleTableSelection,
+  executeBulkTableDeletion,
+  executeBulkTableTruncation,
   // Database actions
   showDatabaseActionDialog,
   databaseActionData,
@@ -259,6 +270,7 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       :is-table-active="isTableActiveInAnyPane"
       :is-table-open="isTableOpenInAnyPane"
       :filtered-tables="filteredTables"
+      :is-table-selected="isTableSelected"
       @update:search="search = $event"
       @update:show-new-db="showNewDb = $event"
       @update:new-db-name="newDbName = $event"
@@ -267,6 +279,7 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       @toggle-connection="toggleConnection"
       @toggle-database="toggleDatabase"
       @load-table="loadTableData"
+      @toggle-table-selection="toggleTableSelection"
       @open-query="openQueryTab"
       @import-sql="importSql"
       @export-database="openExportSelector"
@@ -551,6 +564,30 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       "
       @confirm="executeTableAction"
     />
+    <BulkTableActionDialog
+      :open="showBulkTableActionDialog"
+      :count="selectedTables.size"
+      :is-executing="isExecutingBulkTableAction"
+      type="drop"
+      @update:open="
+        (val) => {
+          if (!val) showBulkTableActionDialog = false;
+        }
+      "
+      @confirm="executeBulkTableDeletion"
+    />
+    <BulkTableActionDialog
+      :open="showBulkTruncateDialog"
+      :count="selectedTables.size"
+      :is-executing="isExecutingBulkTableAction"
+      type="truncate"
+      @update:open="
+        (val) => {
+          if (!val) showBulkTruncateDialog = false;
+        }
+      "
+      @confirm="executeBulkTableTruncation"
+    />
     <DatabaseActionDialog
       v-if="databaseActionData"
       :open="showDatabaseActionDialog"
@@ -594,6 +631,7 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       :x="sidebarTableContextMenu.x"
       :y="sidebarTableContextMenu.y"
       :table-name="sidebarTableContextMenu.tableName"
+      :selected-count="sidebarTableContextMenu.selectedCount"
       @truncate="
         confirmSidebarTableAction(
           'truncate',
@@ -610,6 +648,8 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
           sidebarTableContextMenu.tableName,
         )
       "
+      @truncate-selected="showBulkTruncateDialog = true"
+      @drop-selected="showBulkTableActionDialog = true"
     />
     <DatabaseContextMenu
       :show="sidebarDatabaseContextMenu.show"
