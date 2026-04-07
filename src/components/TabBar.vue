@@ -79,7 +79,7 @@ const getEnvDotColor = (env: Environment): string => {
       v-for="tab in tabs"
       :key="tab.id"
       @click="emit('switch-tab', tab.id)"
-      @mouseup="(e) => { if (e.button === 1) { e.preventDefault(); e.stopPropagation(); emit('close-tab', tab.id, e); } }"
+      @mousedown="(e) => { if (e.button === 1) { e.preventDefault(); e.stopPropagation(); emit('close-tab', tab.id, e); } }"
       :class="[
         'relative flex items-center gap-2 px-3 h-full border-r transition-colors min-w-0 max-w-55 group/tab shrink-0',
         tab.id === activeTabId
