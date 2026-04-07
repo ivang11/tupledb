@@ -1,9 +1,11 @@
 use tauri::State;
 use uuid::Uuid;
+use std::sync::Arc;
 use sqlx::{mysql::MySqlConnectOptions, mysql::MySqlSslMode};
 use crate::connections::Connection;
-use crate::state::AppState;
+use crate::state::{AppState, ActiveConnection};
 use crate::ssh::SshTunnel;
+use crate::mysql::MySqlDriver;
 
 #[tauri::command]
 pub async fn get_connections(state: State<'_, AppState>) -> Result<Vec<Connection>, String> {
@@ -21,7 +23,6 @@ pub async fn get_connections(state: State<'_, AppState>) -> Result<Vec<Connectio
         c
     }).collect())
 }
-
 
 #[tauri::command]
 pub async fn add_connection(state: State<'_, AppState>, mut connection: Connection) -> Result<(), String> {
@@ -49,7 +50,6 @@ pub async fn add_connection(state: State<'_, AppState>, mut connection: Connecti
         }
     }
 
-    // Store full connection (with passwords) in config
     let mut connections = state.connections_config.write();
     connections.insert(connection.id, connection);
     drop(connections);
@@ -59,8 +59,8 @@ pub async fn add_connection(state: State<'_, AppState>, mut connection: Connecti
 #[tauri::command]
 pub async fn remove_connection(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
     println!("Removing connection: {}", id);
-    
-    // 1. Clean up active session if exists
+
+    // Clean up active session if exists
     let mut sessions = state.active_sessions.write();
     if let Some(session) = sessions.remove(&id) {
         if let Some(tunnel) = session.tunnel {
@@ -69,12 +69,10 @@ pub async fn remove_connection(state: State<'_, AppState>, id: Uuid) -> Result<(
     }
     drop(sessions);
 
-    // 2. Remove from config
     let mut connections = state.connections_config.write();
     connections.remove(&id);
     drop(connections);
 
-    // 3. Save config
     state.save()
 }
 
@@ -87,7 +85,7 @@ pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Resu
         let configs = state.connections_config.read();
         match configs.get(&connection.id) {
             Some(stored) => stored.clone(),
-            None => connection, // fallback to what frontend sent (new connection not yet saved)
+            None => connection,
         }
     };
 
@@ -121,20 +119,17 @@ pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Resu
         })?;
 
     println!("  -> Connection successful!");
+
+    let driver = Arc::new(MySqlDriver::new(pool));
+
     let mut sessions = state.active_sessions.write();
-    // ... rest of logic
-    // Clean up existing session if any
     if let Some(old_session) = sessions.remove(&connection.id) {
         if let Some(old_tunnel) = old_session.tunnel {
             old_tunnel.disconnect();
         }
     }
 
-    sessions.insert(connection.id, crate::state::ActiveConnection {
-        pool,
-        tunnel,
-    });
-
+    sessions.insert(connection.id, ActiveConnection { driver, tunnel });
     Ok(())
 }
 
@@ -156,7 +151,7 @@ pub async fn test_connection(connection: Connection) -> Result<String, String> {
     if let Some(pw) = &connection.mysql.password {
         opts = opts.password(pw);
     }
-    
+
     if let Some(db) = &connection.mysql.database {
         opts = opts.database(db);
     }
@@ -167,7 +162,6 @@ pub async fn test_connection(connection: Connection) -> Result<String, String> {
         .await
         .map_err(|e| format!("MySQL Connection failed: {}", e))?;
 
-    // Ping to verify
     sqlx::query("SELECT 1")
         .fetch_one(&pool)
         .await

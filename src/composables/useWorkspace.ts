@@ -68,7 +68,7 @@ export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
   }
 
   function isPaneActiveTabQuery(pane: PaneState): boolean {
-    return pane.tabs.find(t => t.id === pane.activeTabId)?.type === 'query' ?? false
+    return (pane.tabs.find(t => t.id === pane.activeTabId)?.type ?? '') === 'query'
   }
 
   function getPaneQueryTabs(pane: PaneState): QueryTab[] {

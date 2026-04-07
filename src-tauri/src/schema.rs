@@ -1,15 +1,13 @@
 use tauri::State;
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
-use crate::state::AppState;
 use chrono::Local;
+use crate::state::AppState;
+use crate::driver::{ForeignKey, ImportResult, Table, TableIndex, ColumnStructure};
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct ImportResult {
-    pub executed: usize,
-    pub errors: Vec<String>,
-}
+// --------------------------------------------------------------------------
+// SQL file splitter (used by import_sql)
+// --------------------------------------------------------------------------
 
 fn split_sql_statements(sql: &str) -> Vec<String> {
     let mut statements = Vec::new();
@@ -44,11 +42,15 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
                 in_backtick = !in_backtick;
                 current.push(ch);
             }
-            '-' if !in_single_quote && !in_double_quote && !in_backtick && chars.peek() == Some(&'-') => {
+            '-' if !in_single_quote && !in_double_quote && !in_backtick
+                && chars.peek() == Some(&'-') =>
+            {
                 chars.next();
                 for c in chars.by_ref() { if c == '\n' { break; } }
             }
-            '/' if !in_single_quote && !in_double_quote && !in_backtick && chars.peek() == Some(&'*') => {
+            '/' if !in_single_quote && !in_double_quote && !in_backtick
+                && chars.peek() == Some(&'*') =>
+            {
                 chars.next();
                 loop {
                     match chars.next() {
@@ -72,98 +74,21 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
     statements
 }
 
+// --------------------------------------------------------------------------
+// Tauri commands
+// --------------------------------------------------------------------------
+
 #[tauri::command]
-pub async fn import_sql(
-    window: tauri::Window,
+pub async fn get_databases(
     state: State<'_, AppState>,
     connection_id: Uuid,
-    database: String,
-    path: String,
-) -> Result<ImportResult, String> {
-    let env = {
-        let configs = state.connections_config.read();
-        configs.get(&connection_id).map(|c| c.environment).unwrap_or(crate::connections::Environment::Local)
-    };
-
-    if env == crate::connections::Environment::Production {
-        return Err("Import blocked: Production environment is READ-ONLY.".into());
-    }
-
-    let pool = {
-        let sessions = state.active_sessions.read();
-        sessions.get(&connection_id).ok_or("No active session found")?.pool.clone()
-    };
-
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
-
-    let mut conn = pool.acquire().await
-        .map_err(|e| format!("Failed to acquire connection: {}", e))?;
-
-    use sqlx::Executor;
-    use tauri::Emitter;
-
-    #[derive(Clone, Serialize)]
-    struct Progress {
-        current: usize,
-        total: usize,
-        status: String,
-    }
-
-    // Usar .execute(String) directamente para evitar problemas de lifetimes con raw_sql
-    let use_query = format!("USE `{}`", database);
-    conn.execute(use_query.as_str())
-        .await
-        .map_err(|e| format!("Failed to select database: {}", e))?;
-
-    conn.execute("SET FOREIGN_KEY_CHECKS=0")
-        .await
-        .map_err(|e| format!("Failed to disable FK checks: {}", e))?;
-
-    let statements = split_sql_statements(&content);
-    let total = statements.len();
-    let mut executed = 0usize;
-    let mut errors: Vec<String> = Vec::new();
-
-    for (i, stmt) in statements.iter().enumerate() {
-        if i % 10 == 0 || i == total - 1 {
-            let _ = window.emit("import-progress", Progress {
-                current: i + 1,
-                total,
-                status: format!("Executing statement {} of {}", i + 1, total),
-            });
-        }
-
-        match conn.execute(stmt.as_str()).await {
-            Ok(_) => executed += 1,
-            Err(e) => errors.push(format!("{}: {}", &stmt[..stmt.len().min(60)], e)),
-        }
-    }
-
-    let _ = conn.execute("SET FOREIGN_KEY_CHECKS=1").await;
-
-    Ok(ImportResult { executed, errors })
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Table {
-    pub name: String,
-    pub table_type: String,
-}
-
-/// Intenta obtener un String de una columna, manejando conversiones de bytes si es necesario
-fn get_string_lossy(row: &sqlx::mysql::MySqlRow, index: usize) -> String {
-    // 1. Intentar como String normal
-    if let Ok(s) = row.try_get::<String, _>(index) {
-        return s;
-    }
-    
-    // 2. Si falla, intentar como bytes (Vec<u8>)
-    if let Ok(b) = row.try_get::<Vec<u8>, _>(index) {
-        return String::from_utf8_lossy(&b).to_string();
-    }
-
-    "unknown".to_string()
+) -> Result<Vec<String>, String> {
+    let driver = state.get_driver(&connection_id)?;
+    let t0 = std::time::Instant::now();
+    let result = driver.get_databases().await;
+    let ms = t0.elapsed().as_millis() as u64;
+    state.emit_query_log("SELECT schema_name FROM information_schema.schemata ORDER BY schema_name ASC", ms, result.as_ref().err().map(|e| e.as_str()));
+    result
 }
 
 #[tauri::command]
@@ -175,40 +100,26 @@ pub async fn create_database(
     if name.is_empty() || name.contains('`') || name.contains(';') {
         return Err("Invalid database name".into());
     }
-    let pool = {
-        let sessions = state.active_sessions.read();
-        sessions.get(&connection_id).ok_or("No active session found")?.pool.clone()
-    };
-    sqlx::query(&format!("CREATE DATABASE `{}`", name))
-        .execute(&pool)
-        .await
-        .map_err(|e| format!("Failed to create database: {}", e))?;
-    Ok(())
+    let driver = state.get_driver(&connection_id)?;
+    driver.create_database(&name).await
 }
 
 #[tauri::command]
-pub async fn get_databases(state: State<'_, AppState>, connection_id: Uuid) -> Result<Vec<String>, String> {
-    let pool = {
-        let sessions = state.active_sessions.read();
-        sessions.get(&connection_id).ok_or("No active session found")?.pool.clone()
-    };
-
-    let rows = sqlx::query("SELECT schema_name FROM information_schema.schemata ORDER BY schema_name ASC")
-        .fetch_all(&pool)
-        .await
-        .map_err(|e| format!("Failed to fetch databases: {}", e))?;
-
-    Ok(rows.iter().map(|row| get_string_lossy(row, 0)).collect())
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ColumnStructure {
-    pub field: String,
-    pub field_type: String,
-    pub nullable: bool,
-    pub key: String,
-    pub default_value: Option<String>,
-    pub extra: String,
+pub async fn get_tables(
+    state: State<'_, AppState>,
+    connection_id: Uuid,
+    database: String,
+) -> Result<Vec<Table>, String> {
+    println!("Fetching tables for database: '{}'", database);
+    let driver = state.get_driver(&connection_id)?;
+    let t0 = std::time::Instant::now();
+    let result = driver.get_tables(&database).await;
+    let ms = t0.elapsed().as_millis() as u64;
+    let sql = format!("SHOW FULL TABLES FROM `{}`", database);
+    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    let tables = result?;
+    println!("  -> Found {} tables", tables.len());
+    Ok(tables)
 }
 
 #[tauri::command]
@@ -218,27 +129,37 @@ pub async fn get_table_structure(
     database: String,
     table: String,
 ) -> Result<Vec<ColumnStructure>, String> {
-    let pool = {
-        let sessions = state.active_sessions.read();
-        sessions.get(&connection_id).ok_or("No active session found")?.pool.clone()
-    };
+    let driver = state.get_driver(&connection_id)?;
+    driver.get_table_structure(&database, &table).await
+}
 
-    let query = format!("SHOW COLUMNS FROM `{}`.`{}`", database, table);
-    let rows = sqlx::query(&query)
-        .fetch_all(&pool)
-        .await
-        .map_err(|e| format!("Failed to fetch structure: {}", e))?;
+#[tauri::command]
+pub async fn get_foreign_keys(
+    state: State<'_, AppState>,
+    connection_id: Uuid,
+    database: String,
+    table: String,
+) -> Result<Vec<ForeignKey>, String> {
+    let driver = state.get_driver(&connection_id)?;
+    driver.get_foreign_keys(&database, &table).await
+}
 
-    let columns = rows.iter().map(|row| ColumnStructure {
-        field: get_string_lossy(row, 0),
-        field_type: get_string_lossy(row, 1),
-        nullable: get_string_lossy(row, 2) == "YES",
-        key: get_string_lossy(row, 3),
-        default_value: row.try_get::<Option<String>, _>(4).ok().flatten(),
-        extra: get_string_lossy(row, 5),
-    }).collect();
+#[tauri::command]
+pub async fn get_table_indexes(
+    state: State<'_, AppState>,
+    connection_id: Uuid,
+    database: String,
+    table: String,
+) -> Result<Vec<TableIndex>, String> {
+    let driver = state.get_driver(&connection_id)?;
+    driver.get_table_indexes(&database, &table).await
+}
 
-    Ok(columns)
+#[derive(Clone, Serialize, Deserialize)]
+struct Progress {
+    current: usize,
+    total: usize,
+    status: String,
 }
 
 #[tauri::command]
@@ -251,36 +172,13 @@ pub async fn export_database(
     path: String,
     tables: Option<Vec<String>>,
 ) -> Result<usize, String> {
-    let pool = {
-        let sessions = state.active_sessions.read();
-        sessions.get(&connection_id).ok_or("No active session found")?.pool.clone()
-    };
-
     use tauri::Emitter;
 
-    #[derive(Clone, serde::Serialize)]
-    struct Progress {
-        current: usize,
-        total: usize,
-        status: String,
-    }
+    let driver = state.get_driver(&connection_id)?;
 
-    let tables_to_export = if let Some(t) = tables {
-        t
-    } else {
-        // Get all base tables (skip views) if none provided
-        let tables_query = format!(
-            "SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = '{}' AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME",
-            database.replace('\'', "\\'")
-        );
-        let table_rows = sqlx::query(&tables_query)
-            .fetch_all(&pool)
-            .await
-            .map_err(|e| format!("Failed to fetch tables: {}", e))?;
-
-        table_rows.iter()
-            .map(|r| get_string_lossy(r, 0))
-            .collect()
+    let tables_to_export = match tables {
+        Some(t) => t,
+        None => driver.get_base_tables(&database).await?,
     };
 
     let total_tables = tables_to_export.len();
@@ -289,7 +187,9 @@ pub async fn export_database(
 
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let mut out = format!(
-        "-- DB Viewer Export\n-- Database: `{}`\n-- Mode: {}\n-- Generated: {}\n-- --------------------------------------------------------\n\nSET FOREIGN_KEY_CHECKS=0;\n\n",
+        "-- DB Viewer Export\n-- Database: `{}`\n-- Mode: {}\n-- Generated: {}\n\
+         -- --------------------------------------------------------\n\n\
+         SET FOREIGN_KEY_CHECKS=0;\n\n",
         database, mode, now
     );
 
@@ -302,42 +202,38 @@ pub async fn export_database(
             status: format!("Exporting table {} of {} ({})", i + 1, total_tables, table),
         });
 
-        out.push_str(&format!("-- --------------------------------------------------------\n-- Table: `{}`\n-- --------------------------------------------------------\n\n", table));
+        out.push_str(&format!(
+            "-- --------------------------------------------------------\n\
+             -- Table: `{}`\n\
+             -- --------------------------------------------------------\n\n",
+            table
+        ));
 
         if include_structure {
-            let ddl_query = format!("SHOW CREATE TABLE `{}`.`{}`", database, table);
-            let ddl_row = sqlx::query(&ddl_query)
-                .fetch_one(&pool)
-                .await
-                .map_err(|e| format!("Failed to get DDL for {}: {}", table, e))?;
-
-            let create_sql = get_string_lossy(&ddl_row, 1);
+            let create_sql = driver.get_table_ddl(&database, table).await?;
             out.push_str(&format!("DROP TABLE IF EXISTS `{}`;\n", table));
             out.push_str(&create_sql);
             out.push_str(";\n\n");
         }
 
         if include_data {
-            let data_query = format!("SELECT * FROM `{}`.`{}`", database, table);
-            let rows = sqlx::query(&data_query)
-                .fetch_all(&pool)
-                .await
-                .map_err(|e| format!("Failed to fetch data for {}: {}", table, e))?;
-
-            if !rows.is_empty() {
-                let (columns, result_rows) = crate::mysql::rows_to_parsed(rows);
+            let (columns, result_rows) = driver.get_all_rows(&database, table).await?;
+            if !result_rows.is_empty() {
                 let col_names = columns.iter()
                     .map(|c| format!("`{}`", c.name))
                     .collect::<Vec<_>>()
                     .join(", ");
-
                 for row in &result_rows {
                     if let serde_json::Value::Object(map) = row {
                         let values: Vec<String> = columns.iter().map(|c| {
                             match map.get(&c.name) {
                                 Some(serde_json::Value::Null) | None => "NULL".to_string(),
-                                Some(serde_json::Value::String(s)) => format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'")),
-                                Some(serde_json::Value::Bool(b)) => if *b { "1".to_string() } else { "0".to_string() },
+                                Some(serde_json::Value::String(s)) => {
+                                    format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
+                                }
+                                Some(serde_json::Value::Bool(b)) => {
+                                    if *b { "1".to_string() } else { "0".to_string() }
+                                }
                                 Some(v) => v.to_string(),
                             }
                         }).collect();
@@ -365,124 +261,56 @@ pub async fn export_database(
     Ok(total_rows)
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct ForeignKey {
-    pub column: String,
-    pub referenced_table: String,
-    pub referenced_column: String,
-}
-
 #[tauri::command]
-pub async fn get_foreign_keys(
+pub async fn import_sql(
+    window: tauri::Window,
     state: State<'_, AppState>,
     connection_id: Uuid,
     database: String,
-    table: String,
-) -> Result<Vec<ForeignKey>, String> {
-    let pool = {
-        let sessions = state.active_sessions.read();
-        sessions.get(&connection_id).ok_or("No active session found")?.pool.clone()
+    path: String,
+) -> Result<ImportResult, String> {
+    use tauri::Emitter;
+
+    let env = {
+        let configs = state.connections_config.read();
+        configs
+            .get(&connection_id)
+            .map(|c| c.environment)
+            .unwrap_or(crate::connections::Environment::Local)
     };
 
-    let query = format!(
-        "SELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME \
-         FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE \
-         WHERE TABLE_SCHEMA = '{}' AND TABLE_NAME = '{}' AND REFERENCED_TABLE_NAME IS NOT NULL",
-        database.replace('\'', "\\'"),
-        table.replace('\'', "\\'")
-    );
+    if env == crate::connections::Environment::Production {
+        return Err("Import blocked: Production environment is READ-ONLY.".into());
+    }
 
-    let rows = sqlx::query(&query)
-        .fetch_all(&pool)
-        .await
-        .map_err(|e| format!("Failed to fetch foreign keys: {}", e))?;
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+    let statements = split_sql_statements(&content);
+    let total = statements.len();
 
-    Ok(rows.iter().map(|row| ForeignKey {
-        column: get_string_lossy(row, 0),
-        referenced_table: get_string_lossy(row, 1),
-        referenced_column: get_string_lossy(row, 2),
-    }).collect())
-}
+    let _ = window.emit("import-progress", Progress {
+        current: 0,
+        total,
+        status: format!("Executing {} statements...", total),
+    });
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TableIndex {
-    pub key_name: String,
-    pub non_unique: bool,
-    pub column_name: String,
-    pub seq_in_index: u64,
-    pub index_type: String,
-    pub nullable: bool,
-    pub comment: String,
-}
+    let driver = state.get_driver(&connection_id)?;
+    let results = driver.execute_statements(&database, &statements).await;
 
-#[tauri::command]
-pub async fn get_table_indexes(
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-    database: String,
-    table: String,
-) -> Result<Vec<TableIndex>, String> {
-    let pool = {
-        let sessions = state.active_sessions.read();
-        sessions.get(&connection_id).ok_or("No active session found")?.pool.clone()
-    };
+    let executed = results.iter().filter(|r| r.is_ok()).count();
+    let errors: Vec<String> = results
+        .into_iter()
+        .zip(statements.iter())
+        .filter_map(|(r, stmt)| {
+            r.err().map(|e| format!("{}: {}", &stmt[..stmt.len().min(60)], e))
+        })
+        .collect();
 
-    let query = format!("SHOW INDEX FROM `{}`.`{}`", database, table);
-    let rows = sqlx::query(&query)
-        .fetch_all(&pool)
-        .await
-        .map_err(|e| format!("Failed to fetch indexes: {}", e))?;
+    let _ = window.emit("import-progress", Progress {
+        current: total,
+        total,
+        status: "Import complete".to_string(),
+    });
 
-    Ok(rows.iter().map(|row| {
-        let non_unique_str = get_string_lossy(row, 1);
-        let non_unique: bool = non_unique_str != "0";
-        let seq: u64 = get_string_lossy(row, 3).parse().unwrap_or(1);
-        let nullable = get_string_lossy(row, 9) == "YES";
-        TableIndex {
-            key_name: get_string_lossy(row, 2),
-            non_unique,
-            column_name: get_string_lossy(row, 4),
-            seq_in_index: seq,
-            index_type: get_string_lossy(row, 10),
-            nullable,
-            comment: get_string_lossy(row, 11),
-        }
-    }).collect())
-}
-
-#[tauri::command]
-pub async fn get_tables(state: State<'_, AppState>, connection_id: Uuid, database: String) -> Result<Vec<Table>, String> {
-    println!("Fetching tables for database: '{}'", database);
-    
-    let pool = {
-        let sessions = state.active_sessions.read();
-        sessions.get(&connection_id).ok_or("No active session found")?.pool.clone()
-    };
-
-    // Usamos SHOW FULL TABLES escapando el nombre de la DB. 
-    // Esto es más fiable en algunos servidores que filtrar information_schema.
-    let query = format!("SHOW FULL TABLES FROM `{}`", database);
-    
-    let rows = sqlx::query(&query)
-        .fetch_all(&pool)
-        .await
-        .map_err(|e| {
-            println!("  -> Error fetching tables: {}", e);
-            format!("Failed to fetch tables: {}", e)
-        })?;
-
-    println!("  -> Found {} tables", rows.len());
-
-    let mut tables: Vec<Table> = rows.iter().map(|row| {
-        Table {
-            name: get_string_lossy(row, 0),
-            // El segundo campo en SHOW FULL TABLES indica si es BASE TABLE o VIEW
-            table_type: get_string_lossy(row, 1),
-        }
-    }).collect();
-
-    // Ordenar alfabéticamente
-    tables.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
-    Ok(tables)
+    Ok(ImportResult { executed, errors })
 }

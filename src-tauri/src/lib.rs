@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod connections;
+pub mod driver;
 pub mod ssh;
 pub mod mysql;
 pub mod schema;

@@ -24,6 +24,7 @@ export default defineConfig({
       protocol: 'ws',
       host: '127.0.0.1',
       port: 1421,
+      overlay: false,
     },
     watch: {
       // 3. tell vite to ignore watching `src-tauri`

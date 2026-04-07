@@ -33,63 +33,155 @@ const store = useConnectionStore();
 
 const panesContainer = ref<HTMLElement | null>(null);
 const {
-  panes, activePaneId, paneWidths, draggingPaneIdx,
-  getPane, addPane, removePane, startPaneResize,
-  getPaneTab, isPaneActiveTabQuery, getPaneQueryTabs,
-  getPrimaryKey, hasPendingChangesInPane, getFkMap,
-  getPaneConnection, isTableOpenInAnyPane, isTableActiveInAnyPane,
+  panes,
+  activePaneId,
+  paneWidths,
+  draggingPaneIdx,
+  getPane,
+  addPane,
+  removePane,
+  startPaneResize,
+  getPaneTab,
+  isPaneActiveTabQuery,
+  getPaneQueryTabs,
+  getPrimaryKey,
+  hasPendingChangesInPane,
+  getFkMap,
+  getPaneConnection,
+  isTableOpenInAnyPane,
+  isTableActiveInAnyPane,
 } = useWorkspace(panesContainer);
 
 const {
-  sidePanelWidths, startSidePanelResize,
-  startColResize, getColumnWidths,
-  structureIndexHeights, startStructureResize,
+  sidePanelWidths,
+  startSidePanelResize,
+  startColResize,
+  getColumnWidths,
+  structureIndexHeights,
+  startStructureResize,
   resizeAllPanelTextareas,
 } = usePanelResizing();
 
 // ── Composables ───────────────────────────────────────────────────────────────
 
 const {
-  syncStoreForFetch, openQueryTab, switchToTab, closeTab,
-  loadTableData, refreshActiveTab, sortPayload,
-  changePage, changeLimit, gotoOffset, onSortColumn,
-  connectionNames, getAvailableDatabases,
-} = useTableTabs({ panes, activePaneId, getPane, getPaneTab, getPrimaryKey, getPaneConnection });
+  openQueryTab,
+  switchToTab,
+  closeTab,
+  loadTableData,
+  refreshActiveTab,
+  sortPayload,
+  changePage,
+  changeLimit,
+  gotoOffset,
+  onSortColumn,
+  connectionNames,
+  getAvailableDatabases,
+} = useTableTabs({
+  panes,
+  activePaneId,
+  getPane,
+  getPaneTab,
+  getPrimaryKey,
+  getPaneConnection,
+});
 
 const {
-  isSaving, disableFkChecks,
-  insertingRowPaneId, insertRowValues, insertRowLoading, insertRowError,
-  isColAutoIncrement, isBooleanCol,
-  openInsertRowDialog, cancelInsertRow, submitInsertRow,
-  updatePendingChange, discardChanges,
-  clearRowSelection, getSelectedRow,
-  onTableRowClick, onCellDblclick, onCellBlur, cellEditValue,
-  setViewMode, applyChanges, navigateToRelated,
-} = useRowEditing({ panes, getPane, getPaneTab, getPrimaryKey, getPaneConnection, refreshActiveTab, loadTableData, syncStoreForFetch });
+  isSaving,
+  disableFkChecks,
+  insertingRowPaneId,
+  insertRowValues,
+  insertRowLoading,
+  insertRowError,
+  isColAutoIncrement,
+  isBooleanCol,
+  openInsertRowDialog,
+  cancelInsertRow,
+  submitInsertRow,
+  updatePendingChange,
+  discardChanges,
+  clearRowSelection,
+  getSelectedRow,
+  onTableRowClick,
+  onCellDblclick,
+  onCellBlur,
+  cellEditValue,
+  setViewMode,
+  applyChanges,
+  navigateToRelated,
+} = useRowEditing({
+  panes,
+  getPaneTab,
+  getPrimaryKey,
+  getPaneConnection,
+  refreshActiveTab,
+  loadTableData,
+});
 
 const {
-  search, expandedConnections, expandedDatabases, showNewDb, newDbName, isCreatingDb, connectingId,
-  closedConnections, filteredTables, connectSaved, toggleConnection, toggleDatabase, disconnectConn, createDatabase,
-  isImporting, importResult, importProgress, importSql,
-  showTableSelector, selectedExportTables, currentExportMode, exportContext,
-  isExportingDb, exportProgress, exportResult, exportContextTables,
-  openExportSelector, startExport,
-  showTableActionDialog, tableActionData, isExecutingTableAction,
-  confirmSidebarTableAction, executeTableAction,
-  sidebarContextMenu, sidebarTableContextMenu,
-  openSidebarContextMenu, openSidebarTableContextMenu,
-  showNewConnDialog, isSavingConn, newConn,
-  openNewConnDialog, openEditConnDialog, handleDuplicateConnection, saveNewConn,
-  showDeleteConnDialog, confirmDeleteConn, deleteConn,
+  search,
+  expandedConnections,
+  expandedDatabases,
+  showNewDb,
+  newDbName,
+  isCreatingDb,
+  connectingId,
+  closedConnections,
+  filteredTables,
+  connectSaved,
+  toggleConnection,
+  toggleDatabase,
+  disconnectConn,
+  createDatabase,
+  isImporting,
+  importResult,
+  importProgress,
+  importSql,
+  showTableSelector,
+  selectedExportTables,
+  currentExportMode,
+  exportContext,
+  isExportingDb,
+  exportProgress,
+  exportResult,
+  exportContextTables,
+  openExportSelector,
+  startExport,
+  showTableActionDialog,
+  tableActionData,
+  isExecutingTableAction,
+  confirmSidebarTableAction,
+  executeTableAction,
+  sidebarContextMenu,
+  sidebarTableContextMenu,
+  openSidebarContextMenu,
+  openSidebarTableContextMenu,
+  showNewConnDialog,
+  isSavingConn,
+  newConn,
+  openNewConnDialog,
+  openEditConnDialog,
+  handleDuplicateConnection,
+  saveNewConn,
+  showDeleteConnDialog,
+  confirmDeleteConn,
+  deleteConn,
 } = useSidebarManager({
-  panes, activePaneId, getPane, getPaneTab,
-  switchToTab, closeTab, refreshActiveTab, loadTableData, openQueryTab, syncStoreForFetch,
+  panes,
+  activePaneId,
+  getPane,
+  getPaneTab,
+  switchToTab,
+  closeTab,
+  refreshActiveTab,
+  loadTableData,
+  openQueryTab,
 });
 
 // ── Cross-composable wiring ───────────────────────────────────────────────────
 
 watch(
-  () => panes.value.map(p => getPaneTab(p)?.selectedRowPk).join(","),
+  () => panes.value.map((p) => getPaneTab(p)?.selectedRowPk).join(","),
   () => resizeAllPanelTextareas(),
 );
 
@@ -98,19 +190,35 @@ watch(
 async function applyFilters(pane: ReturnType<typeof getPane>, filters: any) {
   const t = getPaneTab(pane);
   if (!t) return;
-  t.selectedRowPk = null; t.inlineEditColumn = null;
-  syncStoreForFetch(t.connectionId, t.database);
-  await store.fetchTableData(t.tableName, pane.page, pane.pageSize, filters, sortPayload(t));
-  t.filters = filters; t.queryResult = store.queryResult;
+  t.selectedRowPk = null;
+  t.inlineEditColumn = null;
+  t.filters = filters;
+  t.queryResult = await store.fetchTableData(
+    t.connectionId,
+    t.database,
+    t.tableName,
+    pane.page,
+    pane.pageSize,
+    filters,
+    sortPayload(t),
+  );
 }
 
 async function clearFilters(pane: ReturnType<typeof getPane>) {
   const t = getPaneTab(pane);
   if (!t) return;
-  t.selectedRowPk = null; t.inlineEditColumn = null;
-  syncStoreForFetch(t.connectionId, t.database);
-  await store.fetchTableData(t.tableName, pane.page, pane.pageSize, null, sortPayload(t));
-  t.filters = null; t.queryResult = store.queryResult;
+  t.selectedRowPk = null;
+  t.inlineEditColumn = null;
+  t.filters = null;
+  t.queryResult = await store.fetchTableData(
+    t.connectionId,
+    t.database,
+    t.tableName,
+    pane.page,
+    pane.pageSize,
+    null,
+    sortPayload(t),
+  );
 }
 </script>
 
@@ -163,7 +271,11 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
         <div
           class="flex flex-col min-h-0 min-w-0 overflow-hidden bg-background"
           :style="{ flex: paneWidths[paneIdx] }"
-          :class="panes.length > 1 && pane.id === activePaneId ? 'ring-1 ring-inset ring-primary/10' : ''"
+          :class="
+            panes.length > 1 && pane.id === activePaneId
+              ? 'ring-1 ring-inset ring-primary/10'
+              : ''
+          "
           @mousedown.capture="activePaneId = pane.id"
         >
           <!-- Tab bar -->
@@ -172,7 +284,17 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
             :tabs="pane.tabs as any[]"
             :active-tab-id="pane.activeTabId"
             :connection-names="connectionNames()"
-            :has-open-connections="Object.keys(store.openConnections).length > 0"
+            :connection-environments="
+              Object.fromEntries(
+                Object.entries(store.openConnections).map(([id, state]) => [
+                  id,
+                  state.connection.environment,
+                ]),
+              )
+            "
+            :has-open-connections="
+              Object.keys(store.openConnections).length > 0
+            "
             :first-connection-id="Object.keys(store.openConnections)[0] ?? null"
             :show-filters="pane.showFilters"
             :has-active-table-tab="!!getPaneTab(pane)"
@@ -188,7 +310,10 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
           />
 
           <!-- Query Editors -->
-          <div v-if="isPaneActiveTabQuery(pane)" class="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div
+            v-if="isPaneActiveTabQuery(pane)"
+            class="flex-1 min-h-0 flex flex-col overflow-hidden"
+          >
             <QueryEditor
               v-for="qTab in getPaneQueryTabs(pane)"
               v-show="qTab.id === pane.activeTabId"
@@ -223,7 +348,10 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
             />
 
             <!-- Data table + row detail panel -->
-            <div v-if="pane.viewMode === 'content'" class="flex flex-1 min-h-0 min-w-0 flex-row">
+            <div
+              v-if="pane.viewMode === 'content'"
+              class="flex flex-1 min-h-0 min-w-0 flex-row"
+            >
               <DataGrid
                 :columns="getPaneTab(pane)?.queryResult?.columns ?? []"
                 :rows="getPaneTab(pane)?.queryResult?.rows ?? []"
@@ -246,11 +374,21 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
                 @row-click="(row, e) => onTableRowClick(pane, row, e)"
                 @cell-dblclick="(row, col) => onCellDblclick(pane, row, col)"
                 @cell-blur="onCellBlur(pane)"
-                @cell-input="(row, col, val) => updatePendingChange(pane, row, col, val)"
+                @cell-input="
+                  (row, col, val) => updatePendingChange(pane, row, col, val)
+                "
                 @sort="(col) => onSortColumn(pane, col)"
-                @start-col-resize="(e, col) => startColResize(e, getPaneTab(pane), col)"
-                @navigate-related="(table, col, val) => navigateToRelated(pane, table, col, val)"
-                @insert-row-input="(col, val) => { insertRowValues[col] = val }"
+                @start-col-resize="
+                  (e, col) => startColResize(e, getPaneTab(pane), col)
+                "
+                @navigate-related="
+                  (table, col, val) => navigateToRelated(pane, table, col, val)
+                "
+                @insert-row-input="
+                  (col, val) => {
+                    insertRowValues[col] = val;
+                  }
+                "
                 @insert-row-submit="submitInsertRow(pane)"
                 @insert-row-cancel="cancelInsertRow"
               />
@@ -266,18 +404,30 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
                 :width="sidePanelWidths[pane.id] ?? 320"
                 :get-cell-value="(row, col) => cellEditValue(pane, row, col)"
                 @close="clearRowSelection(pane)"
-                @cell-input="(col, val) => updatePendingChange(pane, getSelectedRow(pane)!, col, val)"
-                @navigate-related="(table, col, val) => navigateToRelated(pane, table, col, val)"
+                @cell-input="
+                  (col, val) =>
+                    updatePendingChange(pane, getSelectedRow(pane)!, col, val)
+                "
+                @navigate-related="
+                  (table, col, val) => navigateToRelated(pane, table, col, val)
+                "
                 @start-resize="(e) => startSidePanelResize(e, pane.id)"
               />
             </div>
 
             <!-- Pending Changes Bar -->
             <PendingChangesBar
-              v-if="hasPendingChangesInPane(pane) && (panes.length === 1 || pane.id === activePaneId)"
+              v-if="
+                hasPendingChangesInPane(pane) &&
+                (panes.length === 1 || pane.id === activePaneId)
+              "
               :pending-truncate="getPaneTab(pane)?.pendingTruncate ?? false"
-              :pending-changes-count="Object.keys(getPaneTab(pane)?.pendingChanges || {}).length"
-              :pending-deletions-count="Object.keys(getPaneTab(pane)?.pendingDeletions || {}).length"
+              :pending-changes-count="
+                Object.keys(getPaneTab(pane)?.pendingChanges || {}).length
+              "
+              :pending-deletions-count="
+                Object.keys(getPaneTab(pane)?.pendingDeletions || {}).length
+              "
               :disable-fk-checks="disableFkChecks"
               :is-saving="isSaving"
               @update:disable-fk-checks="disableFkChecks = $event"
@@ -320,28 +470,50 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       :tables="exportContextTables"
       :selected-tables="selectedExportTables"
       :current-mode="currentExportMode"
-      @update:open="(val) => { if (!val) showTableSelector = false }"
+      @update:open="
+        (val) => {
+          if (!val) showTableSelector = false;
+        }
+      "
       @update:selected-tables="selectedExportTables = $event"
       @update:current-mode="currentExportMode = $event"
       @start="startExport"
     />
-    <ProgressDialog :open="isImporting" title="Importing SQL" description="Please wait while the SQL file is being imported." :progress="importProgress" />
+    <ProgressDialog
+      :open="isImporting"
+      title="Importing SQL"
+      description="Please wait while the SQL file is being imported."
+      :progress="importProgress"
+    />
     <ImportResultDialog :result="importResult" @close="importResult = null" />
-    <ProgressDialog :open="isExportingDb" title="Exporting Data" description="Please wait while the data is being exported." :progress="exportProgress" />
+    <ProgressDialog
+      :open="isExportingDb"
+      title="Exporting Data"
+      description="Please wait while the data is being exported."
+      :progress="exportProgress"
+    />
     <ExportResultDialog :result="exportResult" @close="exportResult = null" />
     <ConnectionDialog
       :open="showNewConnDialog"
       :connection="newConn"
       :is-saving="isSavingConn"
       :show-connect-button="true"
-      @update:open="(val) => { if (!val) showNewConnDialog = false }"
+      @update:open="
+        (val) => {
+          if (!val) showNewConnDialog = false;
+        }
+      "
       @save="saveNewConn"
     />
     <DeleteConfirmDialog
       :open="showDeleteConnDialog"
       title="Delete Connection"
       description="Are you sure you want to delete this connection? This action cannot be undone."
-      @update:open="(val) => { if (!val) showDeleteConnDialog = false }"
+      @update:open="
+        (val) => {
+          if (!val) showDeleteConnDialog = false;
+        }
+      "
       @confirm="deleteConn"
     />
     <TableActionDialog
@@ -350,7 +522,11 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       :type="tableActionData.type"
       :table-name="tableActionData.tableName"
       :is-executing="isExecutingTableAction"
-      @update:open="(val) => { if (!val) showTableActionDialog = false }"
+      @update:open="
+        (val) => {
+          if (!val) showTableActionDialog = false;
+        }
+      "
       @confirm="executeTableAction"
     />
 
@@ -360,10 +536,23 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       :x="sidebarContextMenu.x"
       :y="sidebarContextMenu.y"
       :connection="sidebarContextMenu.connection"
-      :is-connected="!!sidebarContextMenu.connection && !!store.openConnections[sidebarContextMenu.connection.id]"
-      @edit="(conn) => { openEditConnDialog(conn); sidebarContextMenu.show = false }"
+      :is-connected="
+        !!sidebarContextMenu.connection &&
+        !!store.openConnections[sidebarContextMenu.connection.id]
+      "
+      @edit="
+        (conn) => {
+          openEditConnDialog(conn);
+          sidebarContextMenu.show = false;
+        }
+      "
       @duplicate="handleDuplicateConnection"
-      @disconnect="(id) => { disconnectConn(id); sidebarContextMenu.show = false }"
+      @disconnect="
+        (id) => {
+          disconnectConn(id);
+          sidebarContextMenu.show = false;
+        }
+      "
       @delete="confirmDeleteConn"
     />
     <TableContextMenu
@@ -371,8 +560,22 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       :x="sidebarTableContextMenu.x"
       :y="sidebarTableContextMenu.y"
       :table-name="sidebarTableContextMenu.tableName"
-      @truncate="confirmSidebarTableAction('truncate', sidebarTableContextMenu.connectionId, sidebarTableContextMenu.database, sidebarTableContextMenu.tableName)"
-      @drop="confirmSidebarTableAction('drop', sidebarTableContextMenu.connectionId, sidebarTableContextMenu.database, sidebarTableContextMenu.tableName)"
+      @truncate="
+        confirmSidebarTableAction(
+          'truncate',
+          sidebarTableContextMenu.connectionId,
+          sidebarTableContextMenu.database,
+          sidebarTableContextMenu.tableName,
+        )
+      "
+      @drop="
+        confirmSidebarTableAction(
+          'drop',
+          sidebarTableContextMenu.connectionId,
+          sidebarTableContextMenu.database,
+          sidebarTableContextMenu.tableName,
+        )
+      "
     />
   </div>
 </template>

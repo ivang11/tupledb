@@ -1,22 +1,18 @@
 import { ref, nextTick, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import { useConnectionStore } from '@/stores/connections'
 import type { PaneState, TableTab } from '@/types/workspace'
 
 interface RowEditingContext {
   panes: Ref<PaneState[]>
-  getPane: (paneId?: string) => PaneState
   getPaneTab: (pane: PaneState) => TableTab | null
   getPrimaryKey: (pane: PaneState) => string | null
   getPaneConnection: (pane: PaneState) => any
   refreshActiveTab: (paneId?: string) => Promise<void>
   loadTableData: (tableName: string, connectionId: string, database: string, initialFilter?: any, paneId?: string) => Promise<void>
-  syncStoreForFetch: (connectionId: string, database: string) => void
 }
 
 export function useRowEditing(ctx: RowEditingContext) {
-  const store = useConnectionStore()
-  const { getPane, getPaneTab, getPrimaryKey, getPaneConnection, refreshActiveTab, loadTableData, syncStoreForFetch } = ctx
+  const { getPaneTab, getPrimaryKey, getPaneConnection, refreshActiveTab, loadTableData } = ctx
 
   // ── Core state ──────────────────────────────────────────────────────────────
 
@@ -77,7 +73,6 @@ export function useRowEditing(ctx: RowEditingContext) {
         if (lower === 'false') return { column, value: 0 }
         return { column, value }
       })
-      syncStoreForFetch(tab.connectionId, tab.database)
       await invoke('insert_row', {
         connectionId: conn.id, database: tab.database, table: tab.tableName,
         values, disableFkChecks: disableFkChecks.value,

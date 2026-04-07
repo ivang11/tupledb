@@ -84,6 +84,11 @@ description = "Permite obtener las claves foráneas de una tabla"
 commands.allow = ["get_foreign_keys"]
 
 [[permission]]
+identifier = "allow-get-table-indexes"
+description = "Permite obtener los índices de una tabla"
+commands.allow = ["get_table_indexes"]
+
+[[permission]]
 identifier = "allow-execute-query"
 description = "Permite ejecutar una consulta SQL arbitraria"
 commands.allow = ["execute_query"]

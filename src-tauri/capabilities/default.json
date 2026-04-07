@@ -32,6 +32,7 @@
     "allow-drop-table",
     "allow-truncate-table",
     "allow-get-foreign-keys",
+    "allow-get-table-indexes",
     "allow-execute-query",
     "allow-insert-row"
   ]

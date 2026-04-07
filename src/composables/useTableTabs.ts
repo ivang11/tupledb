@@ -13,25 +13,7 @@ interface WorkspaceContext {
 
 export function useTableTabs(ctx: WorkspaceContext) {
   const store = useConnectionStore()
-  const { panes, activePaneId, getPane, getPaneTab } = ctx
-
-  // ── Store sync ──────────────────────────────────────────────────────────────
-
-  function syncStoreForFetch(connectionId: string, database: string) {
-    const connState = store.openConnections[connectionId]
-    store.activeConnection = connState?.connection ?? null
-    store.activeDatabase = database
-    store.tables = connState?.tables[database] ?? []
-  }
-
-  function saveToActiveTab(pane: PaneState) {
-    const tab = getPaneTab(pane)
-    if (!tab) return
-    tab.queryResult = store.queryResult
-    tab.tableStructure = store.tableStructure
-    tab.tableIndexes = store.tableIndexes
-    tab.foreignKeys = store.foreignKeys
-  }
+  const { getPane, getPaneTab } = ctx
 
   // ── Tab lifecycle ───────────────────────────────────────────────────────────
 
@@ -62,22 +44,6 @@ export function useTableTabs(ctx: WorkspaceContext) {
       pane.viewMode = t.viewMode
       pane.page = t.page
       pane.pageSize = t.pageSize
-      if (pane.id === activePaneId.value) {
-        syncStoreForFetch(t.connectionId, t.database)
-        store.activeTable = t.tableName
-        store.queryResult = t.queryResult
-        store.tableStructure = t.tableStructure
-        store.tableIndexes = t.tableIndexes
-        store.foreignKeys = t.foreignKeys
-      }
-    } else {
-      if (pane.id === activePaneId.value) {
-        store.activeTable = null
-        store.queryResult = null
-        store.tableStructure = []
-        store.tableIndexes = []
-        store.foreignKeys = []
-      }
     }
   }
 
@@ -90,12 +56,6 @@ export function useTableTabs(ctx: WorkspaceContext) {
     if (pane.activeTabId === tabId) {
       if (pane.tabs.length === 0) {
         pane.activeTabId = null
-        if (pane.id === activePaneId.value) {
-          store.activeTable = null
-          store.queryResult = null
-          store.tableStructure = []
-          store.foreignKeys = []
-        }
       } else {
         switchToTab(pane.tabs[Math.min(idx, pane.tabs.length - 1)].id, pane.id)
       }
@@ -103,6 +63,27 @@ export function useTableTabs(ctx: WorkspaceContext) {
   }
 
   // ── Data loading ────────────────────────────────────────────────────────────
+
+  async function _fetchAllTabData(pane: PaneState, page: number, pageSize: number, filters: any, sort: { column: string; desc: boolean } | null) {
+    // Use getPaneTab to get the reactive proxy, not the local plain-object reference
+    const tab = getPaneTab(pane)
+    if (!tab) { console.error('[fetchAllTabData] getPaneTab returned null'); return }
+    const { connectionId, database, tableName } = tab
+    const [queryResult, tableStructure, tableIndexes, foreignKeys] = await Promise.all([
+      store.fetchTableData(connectionId, database, tableName, page, pageSize, filters, sort).catch((e: any) => {
+        console.error('[fetchTableData]', e);
+        return { columns: [], rows: [], total_count: 0 };
+      }),
+      store.fetchTableStructure(connectionId, database, tableName).catch((e: any) => { console.error('[fetchTableStructure]', e); return [] }),
+      store.fetchTableIndexes(connectionId, database, tableName).catch((e: any) => { console.error('[fetchTableIndexes]', e); return [] }),
+      store.fetchForeignKeys(connectionId, database, tableName).catch((e: any) => { console.error('[fetchForeignKeys]', e); return [] }),
+    ])
+    // Write to the reactive proxy so Vue detects the changes
+    tab.queryResult = queryResult
+    tab.tableStructure = tableStructure
+    tab.tableIndexes = tableIndexes
+    tab.foreignKeys = foreignKeys
+  }
 
   async function loadTableData(
     tableName: string,
@@ -121,7 +102,6 @@ export function useTableTabs(ctx: WorkspaceContext) {
       )
       if (existing) { switchToTab(existing.id, pane.id); return }
     }
-    syncStoreForFetch(connectionId, database)
     const id = crypto.randomUUID()
     const tab: TableTab = {
       type: 'table', id, connectionId, tableName, database,
@@ -144,19 +124,10 @@ export function useTableTabs(ctx: WorkspaceContext) {
     pane.activeTabId = id
     pane.page = 0
     pane.viewMode = 'content'
-    store.queryResult = null
-    store.tableStructure = []
-    store.tableIndexes = []
-    store.foreignKeys = []
     try {
-      await Promise.all([
-        store.fetchTableData(tableName, 0, tab.pageSize, initialFilter ?? null),
-        store.fetchTableStructure(tableName),
-        store.fetchTableIndexes(tableName),
-        store.fetchForeignKeys(tableName),
-      ])
-      saveToActiveTab(pane)
+      await _fetchAllTabData(pane, 0, tab.pageSize, initialFilter ?? null, null)
     } catch (e: any) {
+      console.error('[loadTableData]', e)
       if (String(e).includes('No active session')) store.disconnectConnection(connectionId)
     }
   }
@@ -165,15 +136,8 @@ export function useTableTabs(ctx: WorkspaceContext) {
     const pane = getPane(paneId)
     const tab = getPaneTab(pane)
     if (!tab) return
-    syncStoreForFetch(tab.connectionId, tab.database)
     try {
-      await Promise.all([
-        store.fetchTableData(tab.tableName, pane.page, pane.pageSize, tab.filters ?? null, sortPayload(tab)),
-        store.fetchTableStructure(tab.tableName),
-        store.fetchTableIndexes(tab.tableName),
-        store.fetchForeignKeys(tab.tableName),
-      ])
-      saveToActiveTab(pane)
+      await _fetchAllTabData(pane, pane.page, pane.pageSize, tab.filters ?? null, sortPayload(tab))
     } catch (e: any) {
       if (String(e).includes('No active session')) store.disconnectConnection(tab.connectionId)
     }
@@ -191,9 +155,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     if (!tab) return
     tab.selectedRowPk = null; tab.inlineEditColumn = null
     pane.page += delta; tab.page = pane.page
-    syncStoreForFetch(tab.connectionId, tab.database)
-    await store.fetchTableData(tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
-    saveToActiveTab(pane)
+    tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
   }
 
   async function changeLimit(pane: PaneState, newLimit: number) {
@@ -204,9 +166,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     pane.pageSize = newLimit; tab.pageSize = newLimit
     pane.page = Math.floor(offset / newLimit); tab.page = pane.page
     tab.selectedRowPk = null; tab.inlineEditColumn = null
-    syncStoreForFetch(tab.connectionId, tab.database)
-    await store.fetchTableData(tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
-    saveToActiveTab(pane)
+    tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
   }
 
   async function gotoOffset(pane: PaneState, newOffset: number) {
@@ -215,9 +175,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     if (!tab) return
     tab.selectedRowPk = null; tab.inlineEditColumn = null
     pane.page = Math.floor(newOffset / pane.pageSize); tab.page = pane.page
-    syncStoreForFetch(tab.connectionId, tab.database)
-    await store.fetchTableData(tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
-    saveToActiveTab(pane)
+    tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
   }
 
   async function onSortColumn(pane: PaneState, column: string) {
@@ -227,10 +185,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     else { tab.sortColumn = column; tab.sortDesc = false }
     tab.selectedRowPk = null; tab.inlineEditColumn = null
     pane.page = 0; tab.page = 0
-    syncStoreForFetch(tab.connectionId, tab.database)
-    await store.fetchTableData(tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
-    tab.queryResult = store.queryResult
-    saveToActiveTab(pane)
+    tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.tableName, 0, pane.pageSize, tab.filters, sortPayload(tab))
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -246,8 +201,6 @@ export function useTableTabs(ctx: WorkspaceContext) {
   }
 
   return {
-    syncStoreForFetch,
-    saveToActiveTab,
     openQueryTab,
     switchToTab,
     closeTab,
