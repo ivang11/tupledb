@@ -199,7 +199,7 @@ watch(
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
 
-useKeyboardShortcut('w', () => {
+useKeyboardShortcut("w", () => {
   const activePane = getPane(activePaneId.value);
   if (activePane?.activeTabId) {
     closeTab(activePane.activeTabId, activePane.id);

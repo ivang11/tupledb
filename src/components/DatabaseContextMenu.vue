@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { Trash2Icon, TerminalIcon, UploadIcon, DownloadIcon } from "lucide-vue-next";
+import {
+  Trash2Icon,
+  TerminalIcon,
+  UploadIcon,
+  DownloadIcon,
+} from "lucide-vue-next";
 
 defineProps<{
   show: boolean;

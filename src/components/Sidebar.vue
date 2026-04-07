@@ -291,7 +291,7 @@ const dbKey = (connId: string, db: string) => `${connId}:${db}`;
             <!-- Tables -->
             <div
               v-if="expandedDatabases.has(dbKey(connId as string, db))"
-              class="ml-4 space-y-0.5 mt-0.5"
+              class="ml-10 space-y-0.5 mt-0.5"
             >
               <button
                 v-for="table in filteredTables(connId as string, db)"
@@ -308,6 +308,7 @@ const dbKey = (connId: string, db: string) => `${connId}:${db}`;
                 "
                 :class="[
                   'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-all text-left group/tbl',
+                  isTableOpen(table.name, db, connId as string) ? 'ml-2' : '',
                   isTableActive(table.name, db, connId as string)
                     ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'hover:bg-primary/5 text-foreground',
