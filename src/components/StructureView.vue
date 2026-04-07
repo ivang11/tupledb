@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ArrowRightIcon, KeyRoundIcon } from 'lucide-vue-next'
+import { ArrowRightIcon, KeyRoundIcon, CodeIcon } from 'lucide-vue-next'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
 defineProps<{
   tableStructure: any[]
   tableIndexes: any[]
   fkMap: Record<string, { table: string; column: string }>
+  ddl: string | null
   paneId: string
   indexPanelHeight: number | undefined
 }>()
@@ -126,6 +127,17 @@ const emit = defineEmits<{
           </tbody>
         </table>
         <div v-else class="px-4 py-6 text-xs text-muted-foreground/40 italic">No indexes found</div>
+      </div>
+    </div>
+
+    <!-- DDL -->
+    <div v-if="ddl" class="shrink-0 flex flex-col border-t" style="height: 200px">
+      <div class="px-4 py-2 bg-muted/20 border-b flex items-center gap-2 shrink-0">
+        <CodeIcon class="size-3.5 text-muted-foreground/60" />
+        <span class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">DDL</span>
+      </div>
+      <div class="flex-1 min-h-0 overflow-auto">
+        <pre class="px-4 py-3 text-xs font-mono text-foreground/80 whitespace-pre leading-relaxed">{{ ddl }}</pre>
       </div>
     </div>
   </div>

@@ -430,6 +430,43 @@ impl DatabaseDriver for MySqlDriver {
         }).collect())
     }
 
+    async fn get_primary_key_columns(
+        &self,
+        database: &str,
+        table: &str,
+    ) -> Result<Vec<String>, String> {
+        let query = format!(
+            "SELECT column_name FROM information_schema.statistics \
+             WHERE table_schema='{}' AND table_name='{}' AND index_name='PRIMARY' \
+             ORDER BY seq_in_index ASC",
+            database.replace('\'', "\\'"),
+            table.replace('\'', "\\'")
+        );
+        let rows = sqlx::query(&query)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to fetch primary key: {}", e))?;
+        Ok(rows.iter().map(|r| get_str_lossy(r, 0)).collect())
+    }
+
+    async fn get_estimated_row_count(
+        &self,
+        database: &str,
+        table: &str,
+    ) -> Result<i64, String> {
+        let query = format!(
+            "SELECT table_rows FROM information_schema.TABLES \
+             WHERE TABLE_SCHEMA='{}' AND TABLE_NAME='{}'",
+            database.replace('\'', "\\'"),
+            table.replace('\'', "\\'")
+        );
+        let row = sqlx::query(&query)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to fetch estimated count: {}", e))?;
+        Ok(row.map(|r| get_str_lossy(&r, 0).parse().unwrap_or(0)).unwrap_or(0))
+    }
+
     // --- Data ---
 
     async fn get_table_data(
@@ -842,14 +879,69 @@ pub async fn get_table_data(
             return Err("Invalid sort column".to_string());
         }
     }
+
     let driver = state.get_driver(&connection_id)?;
+
+    // Step 1: Auto-detect primary key when no sort is specified
+    let effective_sort_column = if sort_column.is_none() {
+        let pk_sql = format!(
+            "SELECT column_name FROM information_schema.statistics WHERE table_schema='{}' AND table_name='{}' AND index_name='PRIMARY' ORDER BY seq_in_index ASC",
+            database.replace('\'', "\\'"), table.replace('\'', "\\'")
+        );
+        let t0 = std::time::Instant::now();
+        let pk_result = driver.get_primary_key_columns(&database, &table).await;
+        let ms = t0.elapsed().as_millis() as u64;
+        state.emit_query_log(&pk_sql, ms, pk_result.as_ref().err().map(|e| e.as_str()));
+        pk_result.ok().and_then(|cols| cols.into_iter().next())
+    } else {
+        sort_column
+    };
+
+    // Step 2: Estimated row count from information_schema (fast, may be stale)
+    let est_sql = format!(
+        "SELECT table_rows as count FROM information_schema.TABLES WHERE TABLE_SCHEMA='{}' AND TABLE_NAME='{}'",
+        database.replace('\'', "\\'"), table.replace('\'', "\\'")
+    );
+    let t0 = std::time::Instant::now();
+    let _ = driver.get_estimated_row_count(&database, &table).await;
+    let ms = t0.elapsed().as_millis() as u64;
+    state.emit_query_log(&est_sql, ms, None);
+
+    // Build WHERE clause string for query log (FilterSet is Clone)
+    let (where_clause, _) = if let Some(ref f) = filters {
+        crate::query_builder::build_where_clause(f)
+    } else {
+        (String::new(), vec![])
+    };
+
+    // order_sql starts with " ORDER BY" (space included), where_clause starts with " WHERE" or is empty
+    let order_sql = match &effective_sort_column {
+        Some(col) => format!(" ORDER BY `{}` {}", col, if sort_desc.unwrap_or(false) { "DESC" } else { "ASC" }),
+        None => String::new(),
+    };
+
+    // Step 3: Exact COUNT(*)
+    let count_sql = format!(
+        "SELECT COUNT(*) as total FROM `{}`.`{}`{}",
+        database, table, where_clause
+    );
+
+    // Step 4: SELECT *
+    let select_sql = format!(
+        "SELECT * FROM `{}`.`{}`{}{} LIMIT {} OFFSET {}",
+        database, table, where_clause, order_sql, page_size, page * page_size
+    );
+
+    // Run the actual query (driver does COUNT + SELECT internally)
     let t0 = std::time::Instant::now();
     let result = driver
-        .get_table_data(&database, &table, page, page_size, filters, sort_column, sort_desc)
+        .get_table_data(&database, &table, page, page_size, filters, effective_sort_column, sort_desc)
         .await;
     let ms = t0.elapsed().as_millis() as u64;
-    let sql = format!("SELECT * FROM `{}`.`{}` LIMIT {} OFFSET {}", database, table, page_size, page * page_size);
-    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+
+    state.emit_query_log(&count_sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    state.emit_query_log(&select_sql, ms, result.as_ref().err().map(|e| e.as_str()));
+
     result
 }
 

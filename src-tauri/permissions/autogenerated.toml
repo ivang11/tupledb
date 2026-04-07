@@ -107,3 +107,8 @@ commands.allow = ["cancel_query"]
 identifier = "allow-insert-row"
 description = "Permite insertar una nueva fila en una tabla"
 commands.allow = ["insert_row"]
+
+[[permission]]
+identifier = "allow-get-table-ddl"
+description = "Permite obtener el DDL (CREATE TABLE) de una tabla"
+commands.allow = ["get_table_ddl"]

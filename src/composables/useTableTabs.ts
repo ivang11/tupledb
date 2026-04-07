@@ -69,7 +69,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     const tab = getPaneTab(pane)
     if (!tab) { console.error('[fetchAllTabData] getPaneTab returned null'); return }
     const { connectionId, database, tableName } = tab
-    const [queryResult, tableStructure, tableIndexes, foreignKeys] = await Promise.all([
+    const [queryResult, tableStructure, tableIndexes, foreignKeys, ddl] = await Promise.all([
       store.fetchTableData(connectionId, database, tableName, page, pageSize, filters, sort).catch((e: any) => {
         console.error('[fetchTableData]', e);
         return { columns: [], rows: [], total_count: 0 };
@@ -77,12 +77,14 @@ export function useTableTabs(ctx: WorkspaceContext) {
       store.fetchTableStructure(connectionId, database, tableName).catch((e: any) => { console.error('[fetchTableStructure]', e); return [] }),
       store.fetchTableIndexes(connectionId, database, tableName).catch((e: any) => { console.error('[fetchTableIndexes]', e); return [] }),
       store.fetchForeignKeys(connectionId, database, tableName).catch((e: any) => { console.error('[fetchForeignKeys]', e); return [] }),
+      store.fetchTableDdl(connectionId, database, tableName).catch(() => null),
     ])
     // Write to the reactive proxy so Vue detects the changes
     tab.queryResult = queryResult
     tab.tableStructure = tableStructure
     tab.tableIndexes = tableIndexes
     tab.foreignKeys = foreignKeys
+    tab.ddl = ddl
   }
 
   async function loadTableData(
@@ -105,7 +107,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     const id = crypto.randomUUID()
     const tab: TableTab = {
       type: 'table', id, connectionId, tableName, database,
-      queryResult: null, tableStructure: [], tableIndexes: [], foreignKeys: [],
+      queryResult: null, tableStructure: [], tableIndexes: [], foreignKeys: [], ddl: null,
       page: 0, pageSize: pane.pageSize, viewMode: 'content',
       filters: initialFilter ?? null, sortColumn: null, sortDesc: false,
       pendingChanges: {}, pendingDeletions: {}, pendingTruncate: false,

@@ -36,6 +36,7 @@
     "allow-get-table-indexes",
     "allow-execute-query",
     "allow-cancel-query",
-    "allow-insert-row"
+    "allow-insert-row",
+    "allow-get-table-ddl"
   ]
 }

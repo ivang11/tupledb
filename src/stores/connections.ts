@@ -106,6 +106,14 @@ export const useConnectionStore = defineStore('connections', () => {
     }
   }
 
+  async function fetchTableDdl(connectionId: string, database: string, tableName: string) {
+    try {
+      return await invoke<string>('get_table_ddl', { connectionId, database, table: tableName })
+    } catch {
+      return null
+    }
+  }
+
   return {
     connections,
     openConnections,
@@ -121,5 +129,6 @@ export const useConnectionStore = defineStore('connections', () => {
     fetchTableStructure,
     fetchTableIndexes,
     fetchForeignKeys,
+    fetchTableDdl,
   }
 })

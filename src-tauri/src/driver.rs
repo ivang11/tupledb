@@ -118,6 +118,12 @@ pub trait DatabaseDriver: Send + Sync {
         table: &str,
     ) -> Result<Vec<TableIndex>, String>;
 
+    /// Returns the PK column names in order (from information_schema.statistics).
+    async fn get_primary_key_columns(&self, database: &str, table: &str) -> Result<Vec<String>, String>;
+
+    /// Returns the estimated row count from information_schema.TABLES (fast, may be stale).
+    async fn get_estimated_row_count(&self, database: &str, table: &str) -> Result<i64, String>;
+
     // Data
     async fn get_table_data(
         &self,

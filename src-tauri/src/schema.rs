@@ -143,7 +143,12 @@ pub async fn get_table_structure(
     table: String,
 ) -> Result<Vec<ColumnStructure>, String> {
     let driver = state.get_driver(&connection_id)?;
-    driver.get_table_structure(&database, &table).await
+    let sql = format!("SHOW COLUMNS FROM `{}`.`{}`", database, table);
+    let t0 = std::time::Instant::now();
+    let result = driver.get_table_structure(&database, &table).await;
+    let ms = t0.elapsed().as_millis() as u64;
+    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    result
 }
 
 #[tauri::command]
@@ -154,7 +159,17 @@ pub async fn get_foreign_keys(
     table: String,
 ) -> Result<Vec<ForeignKey>, String> {
     let driver = state.get_driver(&connection_id)?;
-    driver.get_foreign_keys(&database, &table).await
+    let sql = format!(
+        "SELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME \
+         FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE \
+         WHERE TABLE_SCHEMA = '{}' AND TABLE_NAME = '{}' AND REFERENCED_TABLE_NAME IS NOT NULL",
+        database, table
+    );
+    let t0 = std::time::Instant::now();
+    let result = driver.get_foreign_keys(&database, &table).await;
+    let ms = t0.elapsed().as_millis() as u64;
+    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    result
 }
 
 #[tauri::command]
@@ -165,7 +180,28 @@ pub async fn get_table_indexes(
     table: String,
 ) -> Result<Vec<TableIndex>, String> {
     let driver = state.get_driver(&connection_id)?;
-    driver.get_table_indexes(&database, &table).await
+    let sql = format!("SHOW INDEX FROM `{}`.`{}`", database, table);
+    let t0 = std::time::Instant::now();
+    let result = driver.get_table_indexes(&database, &table).await;
+    let ms = t0.elapsed().as_millis() as u64;
+    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    result
+}
+
+#[tauri::command]
+pub async fn get_table_ddl(
+    state: State<'_, AppState>,
+    connection_id: Uuid,
+    database: String,
+    table: String,
+) -> Result<String, String> {
+    let driver = state.get_driver(&connection_id)?;
+    let sql = format!("SHOW CREATE TABLE `{}`.`{}`", database, table);
+    let t0 = std::time::Instant::now();
+    let result = driver.get_table_ddl(&database, &table).await;
+    let ms = t0.elapsed().as_millis() as u64;
+    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    result
 }
 
 #[derive(Clone, Serialize, Deserialize)]

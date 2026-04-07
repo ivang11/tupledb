@@ -377,6 +377,7 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
               :table-structure="getPaneTab(pane)?.tableStructure ?? []"
               :table-indexes="getPaneTab(pane)?.tableIndexes ?? []"
               :fk-map="getFkMap(pane)"
+              :ddl="getPaneTab(pane)?.ddl ?? null"
               :pane-id="pane.id"
               :index-panel-height="structureIndexHeights[pane.id]"
               @start-index-resize="startStructureResize"

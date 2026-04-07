@@ -8,6 +8,7 @@ export interface TableTab {
   tableStructure: any[]
   tableIndexes: any[]
   foreignKeys: any[]
+  ddl: string | null
   page: number
   pageSize: number
   viewMode: 'content' | 'structure'

@@ -42,6 +42,7 @@ pub fn run() {
             crate::mysql::truncate_table,
             crate::schema::get_foreign_keys,
             crate::schema::get_table_indexes,
+            crate::schema::get_table_ddl,
             crate::mysql::execute_query,
             crate::mysql::cancel_query,
         ])
