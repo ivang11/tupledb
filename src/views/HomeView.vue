@@ -616,6 +616,24 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       :x="sidebarDatabaseContextMenu.x"
       :y="sidebarDatabaseContextMenu.y"
       :database-name="sidebarDatabaseContextMenu.databaseName"
+      @open-query="
+        openQueryTab(
+          sidebarDatabaseContextMenu.connectionId,
+          sidebarDatabaseContextMenu.databaseName,
+        )
+      "
+      @import-sql="
+        importSql(
+          sidebarDatabaseContextMenu.connectionId,
+          sidebarDatabaseContextMenu.databaseName,
+        )
+      "
+      @export-database="
+        openExportSelector(
+          sidebarDatabaseContextMenu.connectionId,
+          sidebarDatabaseContextMenu.databaseName,
+        )
+      "
       @drop="
         confirmSidebarDatabaseAction(
           sidebarDatabaseContextMenu.connectionId,

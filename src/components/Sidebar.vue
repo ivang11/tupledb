@@ -6,9 +6,6 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   TableIcon,
-  TerminalIcon,
-  UploadIcon,
-  DownloadIcon,
   PlusIcon,
   CheckIcon,
   XIcon,
@@ -50,9 +47,6 @@ const emit = defineEmits<{
   "toggle-connection": [connId: string];
   "toggle-database": [connId: string, db: string];
   "load-table": [tableName: string, connId: string, db: string];
-  "open-query": [connId: string, db: string];
-  "import-sql": [connId: string, db: string];
-  "export-database": [connId: string, db: string];
   "create-database": [connId: string];
   "context-menu-connection": [e: MouseEvent, conn: Connection];
   "context-menu-table": [
@@ -292,32 +286,6 @@ const dbKey = (connId: string, db: string) => `${connId}:${db}`;
                   db
                 }}</span>
               </button>
-              <!-- DB action icons -->
-              <div
-                class="flex items-center gap-0.5 opacity-0 group-hover/db:opacity-100 transition-opacity shrink-0 mr-1"
-              >
-                <button
-                  class="size-5 flex items-center justify-center rounded text-muted-foreground/50 hover:text-primary hover:bg-primary/10 transition-colors"
-                  title="New Query"
-                  @click.stop="emit('open-query', connId as string, db)"
-                >
-                  <TerminalIcon class="size-3" />
-                </button>
-                <button
-                  class="size-5 flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
-                  title="Import SQL"
-                  @click.stop="emit('import-sql', connId as string, db)"
-                >
-                  <UploadIcon class="size-3" />
-                </button>
-                <button
-                  class="size-5 flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
-                  title="Export database"
-                  @click.stop="emit('export-database', connId as string, db)"
-                >
-                  <DownloadIcon class="size-3" />
-                </button>
-              </div>
             </div>
 
             <!-- Tables -->
