@@ -211,6 +211,7 @@ function handleTableClick(e: MouseEvent, connId: string, db: string, tableName: 
             <Badge
               variant="outline"
               class="text-[10px] uppercase py-0.5 px-2 h-5 shrink-0"
+              :class="getEnvColor(connState.connection.environment)"
             >
               {{ connState.connection.environment }}
             </Badge>
