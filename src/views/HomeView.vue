@@ -19,8 +19,10 @@ import ProgressDialog from "@/components/dialogs/ProgressDialog.vue";
 import ImportResultDialog from "@/components/dialogs/ImportResultDialog.vue";
 import ExportResultDialog from "@/components/dialogs/ExportResultDialog.vue";
 import TableActionDialog from "@/components/dialogs/TableActionDialog.vue";
+import DatabaseActionDialog from "@/components/dialogs/DatabaseActionDialog.vue";
 import ConnectionContextMenu from "@/components/ConnectionContextMenu.vue";
 import TableContextMenu from "@/components/TableContextMenu.vue";
+import DatabaseContextMenu from "@/components/DatabaseContextMenu.vue";
 import { useWorkspace } from "@/composables/useWorkspace";
 import { usePanelResizing } from "@/composables/usePanelResizing";
 import { useTableTabs } from "@/composables/useTableTabs";
@@ -152,10 +154,19 @@ const {
   isExecutingTableAction,
   confirmSidebarTableAction,
   executeTableAction,
+  // Database actions
+  showDatabaseActionDialog,
+  databaseActionData,
+  isExecutingDatabaseAction,
+  confirmSidebarDatabaseAction,
+  executeDatabaseAction,
+  // Context menus
   sidebarContextMenu,
   sidebarTableContextMenu,
+  sidebarDatabaseContextMenu,
   openSidebarContextMenu,
   openSidebarTableContextMenu,
+  openSidebarDatabaseContextMenu,
   showNewConnDialog,
   isSavingConn,
   newConn,
@@ -252,6 +263,7 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       @create-database="createDatabase"
       @context-menu-connection="openSidebarContextMenu"
       @context-menu-table="openSidebarTableContextMenu"
+      @context-menu-database="openSidebarDatabaseContextMenu"
     />
 
     <!-- Panes container -->
@@ -529,6 +541,18 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       "
       @confirm="executeTableAction"
     />
+    <DatabaseActionDialog
+      v-if="databaseActionData"
+      :open="showDatabaseActionDialog"
+      :database-name="databaseActionData.databaseName"
+      :is-executing="isExecutingDatabaseAction"
+      @update:open="
+        (val) => {
+          if (!val) showDatabaseActionDialog = false;
+        }
+      "
+      @confirm="executeDatabaseAction"
+    />
 
     <!-- Context Menus -->
     <ConnectionContextMenu
@@ -574,6 +598,18 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
           sidebarTableContextMenu.connectionId,
           sidebarTableContextMenu.database,
           sidebarTableContextMenu.tableName,
+        )
+      "
+    />
+    <DatabaseContextMenu
+      :show="sidebarDatabaseContextMenu.show"
+      :x="sidebarDatabaseContextMenu.x"
+      :y="sidebarDatabaseContextMenu.y"
+      :database-name="sidebarDatabaseContextMenu.databaseName"
+      @drop="
+        confirmSidebarDatabaseAction(
+          sidebarDatabaseContextMenu.connectionId,
+          sidebarDatabaseContextMenu.databaseName,
         )
       "
     />

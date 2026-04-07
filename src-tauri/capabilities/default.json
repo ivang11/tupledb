@@ -28,6 +28,7 @@
     "allow-export-database",
     "allow-import-sql",
     "allow-create-database",
+    "allow-drop-database",
     "allow-apply-table-changes",
     "allow-drop-table",
     "allow-truncate-table",

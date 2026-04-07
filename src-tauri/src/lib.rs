@@ -29,6 +29,7 @@ pub fn run() {
             crate::commands::connect,
             crate::schema::get_databases,
             crate::schema::create_database,
+            crate::schema::drop_database,
             crate::schema::get_tables,
             crate::schema::get_table_structure,
             crate::schema::export_database,

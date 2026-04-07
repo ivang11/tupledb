@@ -327,6 +327,52 @@ export function useSidebarManager(ctx: SidebarContext) {
     }
   }
 
+  // ── Database actions ────────────────────────────────────────────────────────
+
+  const showDatabaseActionDialog = ref(false);
+  const databaseActionData = ref<{
+    connectionId: string;
+    databaseName: string;
+  } | null>(null);
+  const isExecutingDatabaseAction = ref(false);
+
+  function confirmSidebarDatabaseAction(
+    connectionId: string,
+    databaseName: string,
+  ) {
+    databaseActionData.value = { connectionId, databaseName };
+    showDatabaseActionDialog.value = true;
+  }
+
+  async function executeDatabaseAction() {
+    if (!databaseActionData.value) return;
+    const { connectionId, databaseName } = databaseActionData.value;
+    isExecutingDatabaseAction.value = true;
+    try {
+      await invoke("drop_database", {
+        connectionId,
+        name: databaseName,
+      });
+      // Close all tabs related to this database
+      for (const pane of panes.value) {
+        const related = pane.tabs.filter(
+          (t) =>
+            t.connectionId === connectionId &&
+            (t as TableTab).database === databaseName,
+        );
+        related.forEach((t) => closeTab(t.id, pane.id));
+      }
+      // Refresh the database list
+      await store.fetchDatabasesForConnection(connectionId);
+      showDatabaseActionDialog.value = false;
+      databaseActionData.value = null;
+    } catch (e: any) {
+      alert(`Failed to drop database: ${e}`);
+    } finally {
+      isExecutingDatabaseAction.value = false;
+    }
+  }
+
   // ── Context menus ───────────────────────────────────────────────────────────
 
   const sidebarContextMenu = ref({
@@ -342,6 +388,13 @@ export function useSidebarManager(ctx: SidebarContext) {
     connectionId: "",
     database: "",
     tableName: "",
+  });
+  const sidebarDatabaseContextMenu = ref({
+    show: false,
+    x: 0,
+    y: 0,
+    connectionId: "",
+    databaseName: "",
   });
 
   function openSidebarContextMenu(e: MouseEvent, conn: Connection) {
@@ -377,6 +430,27 @@ export function useSidebarManager(ctx: SidebarContext) {
     };
     const close = () => {
       sidebarTableContextMenu.value.show = false;
+      window.removeEventListener("click", close);
+    };
+    setTimeout(() => window.addEventListener("click", close), 0);
+  }
+
+  function openSidebarDatabaseContextMenu(
+    e: MouseEvent,
+    connectionId: string,
+    databaseName: string,
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    sidebarDatabaseContextMenu.value = {
+      show: true,
+      x: e.clientX,
+      y: e.clientY,
+      connectionId,
+      databaseName,
+    };
+    const close = () => {
+      sidebarDatabaseContextMenu.value.show = false;
       window.removeEventListener("click", close);
     };
     setTimeout(() => window.addEventListener("click", close), 0);
@@ -498,11 +572,19 @@ export function useSidebarManager(ctx: SidebarContext) {
     isExecutingTableAction,
     confirmSidebarTableAction,
     executeTableAction,
+    // Database actions
+    showDatabaseActionDialog,
+    databaseActionData,
+    isExecutingDatabaseAction,
+    confirmSidebarDatabaseAction,
+    executeDatabaseAction,
     // Context menus
     sidebarContextMenu,
     sidebarTableContextMenu,
+    sidebarDatabaseContextMenu,
     openSidebarContextMenu,
     openSidebarTableContextMenu,
+    openSidebarDatabaseContextMenu,
     // Connection dialogs
     showNewConnDialog,
     isSavingConn,

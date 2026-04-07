@@ -308,6 +308,14 @@ impl DatabaseDriver for MySqlDriver {
         Ok(())
     }
 
+    async fn drop_database(&self, name: &str) -> Result<(), String> {
+        sqlx::query(&format!("DROP DATABASE `{}`", name))
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to drop database: {}", e))?;
+        Ok(())
+    }
+
     async fn get_tables(&self, database: &str) -> Result<Vec<Table>, String> {
         let query = format!("SHOW FULL TABLES FROM `{}`", database);
         let rows = sqlx::query(&query)

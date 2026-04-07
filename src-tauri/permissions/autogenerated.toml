@@ -59,6 +59,11 @@ description = "Permite crear una nueva base de datos"
 commands.allow = ["create_database"]
 
 [[permission]]
+identifier = "allow-drop-database"
+description = "Permite borrar una base de datos físicamente"
+commands.allow = ["drop_database"]
+
+[[permission]]
 identifier = "allow-import-sql"
 description = "Permite importar un archivo SQL en una base de datos"
 commands.allow = ["import_sql"]

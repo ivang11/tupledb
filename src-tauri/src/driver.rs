@@ -96,6 +96,7 @@ pub trait DatabaseDriver: Send + Sync {
     // Schema
     async fn get_databases(&self) -> Result<Vec<String>, String>;
     async fn create_database(&self, name: &str) -> Result<(), String>;
+    async fn drop_database(&self, name: &str) -> Result<(), String>;
     async fn get_tables(&self, database: &str) -> Result<Vec<Table>, String>;
     async fn get_table_structure(
         &self,

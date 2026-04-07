@@ -105,6 +105,19 @@ pub async fn create_database(
 }
 
 #[tauri::command]
+pub async fn drop_database(
+    state: State<'_, AppState>,
+    connection_id: Uuid,
+    name: String,
+) -> Result<(), String> {
+    if name.is_empty() || name.contains('`') || name.contains(';') {
+        return Err("Invalid database name".into());
+    }
+    let driver = state.get_driver(&connection_id)?;
+    driver.drop_database(&name).await
+}
+
+#[tauri::command]
 pub async fn get_tables(
     state: State<'_, AppState>,
     connection_id: Uuid,

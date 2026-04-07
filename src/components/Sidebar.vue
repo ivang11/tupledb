@@ -61,6 +61,11 @@ const emit = defineEmits<{
     db: string,
     tableName: string,
   ];
+  "context-menu-database": [
+    e: MouseEvent,
+    connId: string,
+    databaseName: string,
+  ];
 }>();
 
 const getEnvColor = (env: Environment): string => {
@@ -268,6 +273,9 @@ const dbKey = (connId: string, db: string) => `${connId}:${db}`;
               <button
                 class="flex-1 flex items-center gap-2 px-2 py-1.5 min-w-0"
                 @click="emit('toggle-database', connId as string, db)"
+                @contextmenu="
+                  emit('context-menu-database', $event, connId as string, db)
+                "
               >
                 <ChevronDownIcon
                   v-if="expandedDatabases.has(dbKey(connId as string, db))"
