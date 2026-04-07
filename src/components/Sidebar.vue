@@ -261,18 +261,6 @@ function handleTableClick(e: MouseEvent, connId: string, db: string, tableName: 
             </div>
           </div>
 
-          <!-- Add DB button -->
-          <button
-            v-if="showNewDb !== connId"
-            class="w-full flex items-center gap-2 px-2 py-1 rounded text-[10px] text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-            @click="
-              emit('update:showNewDb', connId as string);
-              emit('update:newDbName', '');
-            "
-          >
-            <PlusIcon class="size-3" /> New database
-          </button>
-
           <!-- Databases -->
           <div v-for="db in connState.databases" :key="db">
             <div

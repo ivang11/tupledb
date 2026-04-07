@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { PencilIcon, CopyIcon, XIcon, Trash2Icon } from 'lucide-vue-next'
+import { PencilIcon, CopyIcon, XIcon, Trash2Icon, PlusIcon } from 'lucide-vue-next'
 import type { Connection } from '@/types/connection'
 
 defineProps<{
@@ -15,6 +15,7 @@ const emit = defineEmits<{
   'duplicate': [conn: Connection]
   'disconnect': [id: string]
   'delete': [id: string]
+  'new-database': [id: string]
 }>()
 </script>
 
@@ -36,13 +37,20 @@ const emit = defineEmits<{
     >
       <CopyIcon class="size-3.5 text-muted-foreground" /> Duplicate Connection
     </button>
-    <button
-      v-if="isConnected"
-      class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-destructive/10 text-destructive transition-colors text-left"
-      @click="emit('disconnect', connection.id)"
-    >
-      <XIcon class="size-3.5" /> Disconnect
-    </button>
+    <template v-if="isConnected">
+      <button
+        class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-muted transition-colors text-left"
+        @click="emit('new-database', connection.id)"
+      >
+        <PlusIcon class="size-3.5 text-muted-foreground" /> New Database
+      </button>
+      <button
+        class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-destructive/10 text-destructive transition-colors text-left"
+        @click="emit('disconnect', connection.id)"
+      >
+        <XIcon class="size-3.5" /> Disconnect
+      </button>
+    </template>
     <div class="h-px bg-border my-1"></div>
     <button
       class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md text-destructive hover:bg-destructive/10 transition-colors text-left"

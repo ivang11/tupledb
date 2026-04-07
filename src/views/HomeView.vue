@@ -624,6 +624,14 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
           sidebarContextMenu.show = false;
         }
       "
+      @new-database="
+        (id) => {
+          if (!expandedConnections.has(id)) expandedConnections.add(id);
+          showNewDb = id;
+          newDbName = '';
+          sidebarContextMenu.show = false;
+        }
+      "
       @delete="confirmDeleteConn"
     />
     <TableContextMenu
