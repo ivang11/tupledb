@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import { ref, computed } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { ArrowUpIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowRightIcon, DatabaseIcon } from 'lucide-vue-next'
-import { ScrollArea } from '@/components/ui/scroll-area'
 
 const props = defineProps<{
   columns: any[]
@@ -45,10 +46,34 @@ function cellStyle(colName: string) {
   const w = props.columnWidths[colName]
   return w ? { width: w + 'px', maxWidth: w + 'px' } : { maxWidth: '300px' }
 }
+
+const scrollContainer = ref<HTMLElement | null>(null)
+
+const virtualizer = useVirtualizer(computed(() => ({
+  count: props.rows.length,
+  getScrollElement: () => scrollContainer.value,
+  estimateSize: () => 44,
+  overscan: 8,
+})))
+
+const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const totalSize = computed(() => virtualizer.value.getTotalSize())
+
+const paddingTop = computed(() =>
+  virtualRows.value.length > 0 ? virtualRows.value[0].start : 0
+)
+const paddingBottom = computed(() =>
+  virtualRows.value.length > 0
+    ? totalSize.value - virtualRows.value[virtualRows.value.length - 1].end
+    : 0
+)
 </script>
 
 <template>
-  <ScrollArea class="flex-1 min-w-0 relative bg-muted/5">
+  <div
+    ref="scrollContainer"
+    class="flex-1 min-w-0 relative bg-muted/5 overflow-auto"
+  >
     <!-- Empty state -->
     <div
       v-if="rows && rows.length === 0"
@@ -59,7 +84,6 @@ function cellStyle(colName: string) {
       <p class="text-sm text-muted-foreground/60 max-w-62.5 mt-2">
         This table does not contain any data, or your filters didn't match any rows.
       </p>
-
     </div>
 
     <template v-else>
@@ -96,18 +120,23 @@ function cellStyle(colName: string) {
           </tr>
         </thead>
         <tbody>
+          <!-- Top spacer -->
+          <tr v-if="paddingTop > 0">
+            <td :colspan="columns.length" :style="{ height: paddingTop + 'px', padding: 0, border: 'none' }" />
+          </tr>
+
           <tr
-            v-for="(row, idx) in rows"
-            :key="idx"
+            v-for="virtualRow in virtualRows"
+            :key="virtualRow.index"
             class="hover:bg-primary/5 transition-colors group/row"
             :class="[
-              (idx as number) % 2 === 0 ? 'bg-background/30' : 'bg-transparent',
+              virtualRow.index % 2 === 0 ? 'bg-background/30' : 'bg-transparent',
               pendingTruncate ? 'bg-destructive/20 opacity-70 grayscale' : '',
-              pendingDeletions[String(row[primaryKey || ''])] ? 'bg-destructive/20 text-destructive line-through' : '',
-              primaryKey && selectedRowPk === String(row[primaryKey]) ? 'bg-primary/10! ring-1 ring-inset ring-primary/25' : '',
+              pendingDeletions[String(rows[virtualRow.index][primaryKey || ''])] ? 'bg-destructive/20 text-destructive line-through' : '',
+              primaryKey && selectedRowPk === String(rows[virtualRow.index][primaryKey]) ? 'bg-primary/10! ring-1 ring-inset ring-primary/25' : '',
               primaryKey ? 'cursor-pointer' : '',
             ]"
-            @click="emit('row-click', row, $event)"
+            @click="emit('row-click', rows[virtualRow.index], $event)"
           >
             <td
               v-for="col in columns"
@@ -115,36 +144,36 @@ function cellStyle(colName: string) {
               class="px-4 py-3 text-sm font-medium border-b border-r last:border-r-0 relative group/cell overflow-hidden"
               :style="cellStyle(col.name)"
               :class="[
-                pendingChanges[String(row[primaryKey || ''])]?.[col.name] !== undefined ? 'bg-amber-500/10 border-amber-500/30' : '',
-                pendingDeletions[String(row[primaryKey || ''])] ? 'border-destructive/20' : '',
+                pendingChanges[String(rows[virtualRow.index][primaryKey || ''])]?.[col.name] !== undefined ? 'bg-amber-500/10 border-amber-500/30' : '',
+                pendingDeletions[String(rows[virtualRow.index][primaryKey || ''])] ? 'border-destructive/20' : '',
               ]"
-              @dblclick.stop="primaryKey && !pendingDeletions[String(row[primaryKey || ''])] && emit('cell-dblclick', row, col.name)"
+              @dblclick.stop="primaryKey && !pendingDeletions[String(rows[virtualRow.index][primaryKey || ''])] && emit('cell-dblclick', rows[virtualRow.index], col.name)"
             >
               <!-- Inline edit input -->
-              <template v-if="primaryKey && inlineEditColumn === col.name && selectedRowPk === String(row[primaryKey])">
+              <template v-if="primaryKey && inlineEditColumn === col.name && selectedRowPk === String(rows[virtualRow.index][primaryKey])">
                 <input
-                  :data-grid-edit="String(row[primaryKey])"
+                  :data-grid-edit="String(rows[virtualRow.index][primaryKey])"
                   :data-col="col.name"
-                  :value="getCellValue(row, col.name)"
-                  @input="(e) => emit('cell-input', row, col.name, (e.target as HTMLInputElement).value)"
+                  :value="getCellValue(rows[virtualRow.index], col.name)"
+                  @input="(e) => emit('cell-input', rows[virtualRow.index], col.name, (e.target as HTMLInputElement).value)"
                   @blur="emit('cell-blur')"
                   class="bg-background/90 border border-primary/35 rounded px-2 py-1 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-ring w-full min-w-0"
-                  :class="pendingDeletions[String(row[primaryKey || ''])] ? 'text-destructive' : 'text-foreground'"
+                  :class="pendingDeletions[String(rows[virtualRow.index][primaryKey || ''])] ? 'text-destructive' : 'text-foreground'"
                   @click.stop
                 />
               </template>
 
               <!-- NULL cell -->
-              <template v-else-if="row[col.name] === null && pendingChanges[String(row[primaryKey || ''])]?.[col.name] === undefined">
+              <template v-else-if="rows[virtualRow.index][col.name] === null && pendingChanges[String(rows[virtualRow.index][primaryKey || ''])]?.[col.name] === undefined">
                 <div class="flex items-center gap-1.5 min-w-0 h-full">
                   <span
                     class="text-[10px] italic font-normal tracking-wide shrink-0"
-                    :class="pendingDeletions[String(row[primaryKey || ''])] ? 'text-destructive/50' : 'text-muted-foreground/30'"
+                    :class="pendingDeletions[String(rows[virtualRow.index][primaryKey || ''])] ? 'text-destructive/50' : 'text-muted-foreground/30'"
                   >NULL</span>
                   <button
-                    v-if="fkMap[col.name] && row[col.name] != null"
+                    v-if="fkMap[col.name] && rows[virtualRow.index][col.name] != null"
                     type="button"
-                    @click.stop="emit('navigate-related', fkMap[col.name].table, fkMap[col.name].column, row[col.name])"
+                    @click.stop="emit('navigate-related', fkMap[col.name].table, fkMap[col.name].column, rows[virtualRow.index][col.name])"
                     class="shrink-0 text-white/60 hover:text-white transition-colors"
                     :title="`Go to ${fkMap[col.name].table}`"
                   >
@@ -158,14 +187,14 @@ function cellStyle(colName: string) {
                 <div class="flex items-center gap-1.5 min-w-0 h-full">
                   <span
                     class="truncate text-sm font-medium select-none min-w-0"
-                    :class="pendingDeletions[String(row[primaryKey || ''])] ? 'text-destructive font-bold' : 'text-foreground/80'"
-                  >{{ getCellValue(row, col.name) }}</span>
+                    :class="pendingDeletions[String(rows[virtualRow.index][primaryKey || ''])] ? 'text-destructive font-bold' : 'text-foreground/80'"
+                  >{{ getCellValue(rows[virtualRow.index], col.name) }}</span>
                   <button
-                    v-if="fkMap[col.name] && row[col.name] != null"
+                    v-if="fkMap[col.name] && rows[virtualRow.index][col.name] != null"
                     type="button"
-                    @click.stop="emit('navigate-related', fkMap[col.name].table, fkMap[col.name].column, row[col.name])"
+                    @click.stop="emit('navigate-related', fkMap[col.name].table, fkMap[col.name].column, rows[virtualRow.index][col.name])"
                     class="shrink-0 text-white/60 hover:text-white transition-colors"
-                    :title="`Go to ${fkMap[col.name].table} where ${fkMap[col.name].column} = ${row[col.name]}`"
+                    :title="`Go to ${fkMap[col.name].table} where ${fkMap[col.name].column} = ${rows[virtualRow.index][col.name]}`"
                   >
                     <ArrowRightIcon class="size-3" />
                   </button>
@@ -174,10 +203,15 @@ function cellStyle(colName: string) {
 
               <!-- Pending change indicator dot -->
               <div
-                v-if="pendingChanges[String(row[primaryKey || ''])]?.[col.name] !== undefined"
+                v-if="pendingChanges[String(rows[virtualRow.index][primaryKey || ''])]?.[col.name] !== undefined"
                 class="absolute top-0 right-0 w-1.5 h-1.5 bg-amber-500 rounded-bl-full"
               />
             </td>
+          </tr>
+
+          <!-- Bottom spacer -->
+          <tr v-if="paddingBottom > 0">
+            <td :colspan="columns.length" :style="{ height: paddingBottom + 'px', padding: 0, border: 'none' }" />
           </tr>
 
           <!-- Insert row -->
@@ -207,5 +241,5 @@ function cellStyle(colName: string) {
         <p class="text-sm text-muted-foreground italic">Edition is disabled because this table has no Primary Key.</p>
       </div>
     </template>
-  </ScrollArea>
+  </div>
 </template>

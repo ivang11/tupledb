@@ -99,6 +99,11 @@ description = "Permite ejecutar una consulta SQL arbitraria"
 commands.allow = ["execute_query"]
 
 [[permission]]
+identifier = "allow-cancel-query"
+description = "Permite cancelar una consulta SQL en curso"
+commands.allow = ["cancel_query"]
+
+[[permission]]
 identifier = "allow-insert-row"
 description = "Permite insertar una nueva fila en una tabla"
 commands.allow = ["insert_row"]

@@ -4,6 +4,9 @@ use serde_json::{Value, Map};
 use sqlx::{Column, Row, TypeInfo, ValueRef, MySqlPool};
 use chrono::Timelike;
 use async_trait::async_trait;
+use std::collections::HashMap;
+use std::sync::Arc;
+use parking_lot::RwLock;
 use crate::state::AppState;
 use crate::driver::{
     ColumnInfo, ColumnStructure, DatabaseDriver, ForeignKey, QueryResult,
@@ -278,11 +281,15 @@ fn get_str_lossy(row: &sqlx::mysql::MySqlRow, index: usize) -> String {
 
 pub struct MySqlDriver {
     pool: MySqlPool,
+    running_queries: Arc<RwLock<HashMap<String, u64>>>,
 }
 
 impl MySqlDriver {
     pub fn new(pool: MySqlPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            running_queries: Arc::new(RwLock::new(HashMap::new())),
+        }
     }
 }
 
@@ -494,6 +501,7 @@ impl DatabaseDriver for MySqlDriver {
         &self,
         database: Option<&str>,
         sql: &str,
+        query_id: Option<&str>,
     ) -> Result<RawQueryResult, String> {
         let trimmed = sql.trim().to_uppercase();
         let is_select = trimmed.starts_with("SELECT")
@@ -507,6 +515,15 @@ impl DatabaseDriver for MySqlDriver {
 
         use sqlx::Executor;
 
+        // Register the MySQL thread id so cancel_query can KILL it.
+        if let Some(qid) = query_id {
+            let thread_id: u64 = sqlx::query_scalar("SELECT CONNECTION_ID()")
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(|e| e.to_string())?;
+            self.running_queries.write().insert(qid.to_string(), thread_id);
+        }
+
         // USE and SHOW/DESCRIBE require the simple query protocol (not prepared).
         // Passing &str (not a prepared query) uses the simple protocol.
         if let Some(db) = database {
@@ -518,7 +535,7 @@ impl DatabaseDriver for MySqlDriver {
             }
         }
 
-        if is_select {
+        let result = if is_select {
             let rows: Vec<sqlx::mysql::MySqlRow> = conn
                 .fetch_all(sql)
                 .await
@@ -542,7 +559,26 @@ impl DatabaseDriver for MySqlDriver {
                 rows_affected: result.rows_affected(),
                 is_select: false,
             })
+        };
+
+        if let Some(qid) = query_id {
+            self.running_queries.write().remove(qid);
         }
+
+        result
+    }
+
+    fn get_thread_id_for_query(&self, query_id: &str) -> Option<u64> {
+        self.running_queries.read().get(query_id).copied()
+    }
+
+    async fn kill_query(&self, thread_id: u64) -> Result<(), String> {
+        let kill_sql = format!("KILL QUERY {}", thread_id);
+        sqlx::query(&kill_sql)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     // --- Mutations ---
@@ -817,13 +853,16 @@ pub async fn get_table_data(
     result
 }
 
+/// Fire-and-forget: returns immediately and emits `query-result:{query_id}` when done.
+/// This keeps the frontend UI responsive during long-running queries.
 #[tauri::command]
-pub async fn execute_query(
+pub fn execute_query(
     state: State<'_, AppState>,
     connection_id: Uuid,
     database: Option<String>,
     sql: String,
-) -> Result<RawQueryResult, String> {
+    query_id: String,
+) -> Result<(), String> {
     let env = {
         let configs = state.connections_config.read();
         configs
@@ -833,11 +872,47 @@ pub async fn execute_query(
     };
     crate::security::is_query_safe(&sql, env)?;
     let driver = state.get_driver(&connection_id)?;
-    let t0 = std::time::Instant::now();
-    let result = driver.execute_query(database.as_deref(), &sql).await;
-    let ms = t0.elapsed().as_millis() as u64;
-    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
-    result
+    let app_handle = state.app_handle.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let t0 = std::time::Instant::now();
+        let result = driver.execute_query(database.as_deref(), &sql, Some(&query_id)).await;
+        let ms = t0.elapsed().as_millis() as u64;
+
+        use tauri::Emitter;
+
+        // Send result to the waiting frontend listener
+        let payload = match &result {
+            Ok(r) => serde_json::json!({ "ok": r, "duration_ms": ms }),
+            Err(e) => serde_json::json!({ "error": e, "duration_ms": ms }),
+        };
+        let _ = app_handle.emit(&format!("query-result:{}", query_id), payload);
+
+        // Query log
+        let now = chrono::Local::now();
+        let err_msg = result.err();
+        let _ = app_handle.emit("query-log", serde_json::json!({
+            "sql": sql,
+            "timestamp": now.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
+            "duration_ms": ms,
+            "error": err_msg,
+        }));
+    });
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cancel_query(
+    state: State<'_, AppState>,
+    connection_id: Uuid,
+    query_id: String,
+) -> Result<(), String> {
+    let driver = state.get_driver(&connection_id)?;
+    if let Some(thread_id) = driver.get_thread_id_for_query(&query_id) {
+        driver.kill_query(thread_id).await?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

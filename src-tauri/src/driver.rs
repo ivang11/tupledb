@@ -141,7 +141,18 @@ pub trait DatabaseDriver: Send + Sync {
         &self,
         database: Option<&str>,
         sql: &str,
+        query_id: Option<&str>,
     ) -> Result<RawQueryResult, String>;
+
+    /// Returns the MySQL thread id of a currently-running query, if tracked.
+    fn get_thread_id_for_query(&self, _query_id: &str) -> Option<u64> {
+        None
+    }
+
+    /// Sends KILL QUERY to the server for the given thread id.
+    async fn kill_query(&self, _thread_id: u64) -> Result<(), String> {
+        Err("Query cancellation not supported for this driver".to_string())
+    }
 
     // Mutations
     async fn apply_table_changes(

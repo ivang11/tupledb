@@ -28,6 +28,7 @@ import { usePanelResizing } from "@/composables/usePanelResizing";
 import { useTableTabs } from "@/composables/useTableTabs";
 import { useRowEditing } from "@/composables/useRowEditing";
 import { useSidebarManager } from "@/composables/useSidebarManager";
+import { useKeyboardShortcut } from "@/composables/useKeyboardShortcut";
 
 const store = useConnectionStore();
 
@@ -195,6 +196,15 @@ watch(
   () => panes.value.map((p) => getPaneTab(p)?.selectedRowPk).join(","),
   () => resizeAllPanelTextareas(),
 );
+
+// ── Keyboard shortcuts ────────────────────────────────────────────────────────
+
+useKeyboardShortcut('w', () => {
+  const activePane = getPane(activePaneId.value);
+  if (activePane?.activeTabId) {
+    closeTab(activePane.activeTabId, activePane.id);
+  }
+});
 
 // ── FilterBar handlers (need store + tab context) ─────────────────────────────
 

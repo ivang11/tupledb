@@ -72,13 +72,14 @@ const getEnvDotColor = (env: Environment): string => {
 <template>
   <div
     v-if="tabs.length > 0 || hasOpenConnections"
-    class="flex items-end border-b bg-muted/5 overflow-x-auto shrink-0 h-10"
+    class="flex items-end border-b bg-muted/5 overflow-x-auto shrink-0 h-12"
   >
     <!-- Tabs -->
     <button
       v-for="tab in tabs"
       :key="tab.id"
       @click="emit('switch-tab', tab.id)"
+      @mouseup="(e) => { if (e.button === 1) { e.preventDefault(); e.stopPropagation(); emit('close-tab', tab.id, e); } }"
       :class="[
         'relative flex items-center gap-2 px-3 h-full border-r transition-colors min-w-0 max-w-55 group/tab shrink-0',
         tab.id === activeTabId

@@ -43,6 +43,7 @@ pub fn run() {
             crate::schema::get_foreign_keys,
             crate::schema::get_table_indexes,
             crate::mysql::execute_query,
+            crate::mysql::cancel_query,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, shallowRef, computed, markRaw, nextTick, onMounted, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { format as formatSql } from 'sql-formatter'
 import {
   PlayIcon,
@@ -12,6 +14,7 @@ import {
   AlertCircleIcon,
   TrashIcon,
   WandSparklesIcon,
+  Square,
 } from 'lucide-vue-next'
 import { ScrollArea } from '@/components/ui/scroll-area'
 
@@ -49,12 +52,34 @@ const MAX_HISTORY = 100
 
 const sql = ref('')
 const selectedDb = ref<string | null>(props.database)
-const result = ref<RawQueryResult | null>(null)
+// shallowRef + markRaw: Vue tracks the reference but never wraps row objects in Proxies
+const result = shallowRef<RawQueryResult | null>(null)
 const queryError = ref<string | null>(null)
 const isRunning = ref(false)
+const isCancelling = ref(false)
 const executionTime = ref<number | null>(null)
 const showHistory = ref(false)
 const history = ref<HistoryEntry[]>([])
+const activeQueryId = ref<string | null>(null)
+
+// ---- Result table virtualizer ----
+const resultScrollEl = ref<HTMLElement | null>(null)
+
+const resultVirtualizer = useVirtualizer(computed(() => ({
+  count: result.value?.rows.length ?? 0,
+  getScrollElement: () => resultScrollEl.value,
+  estimateSize: () => 40,
+  overscan: 8,
+})))
+
+const virtualResultRows = computed(() => resultVirtualizer.value.getVirtualItems())
+const resultTotalSize = computed(() => resultVirtualizer.value.getTotalSize())
+const resultPaddingTop = computed(() => virtualResultRows.value[0]?.start ?? 0)
+const resultPaddingBottom = computed(() =>
+  virtualResultRows.value.length > 0
+    ? resultTotalSize.value - virtualResultRows.value[virtualResultRows.value.length - 1].end
+    : 0
+)
 
 watch(() => props.database, (val) => {
   if (val && !selectedDb.value) selectedDb.value = val
@@ -93,43 +118,91 @@ async function runQuery() {
   const q = sql.value.trim()
   if (!q || isRunning.value) return
 
+  const queryId = crypto.randomUUID()
+  activeQueryId.value = queryId
   isRunning.value = true
+  isCancelling.value = false
   queryError.value = null
   result.value = null
   const start = Date.now()
 
+  let unlisten: (() => void) | null = null
+
   try {
-    const res = await invoke<RawQueryResult>('execute_query', {
+    // Register result listener BEFORE invoking to avoid any race condition
+    let resolvePayload!: (p: any) => void
+    const payloadPromise = new Promise<any>(r => { resolvePayload = r })
+
+    unlisten = await listen<any>(`query-result:${queryId}`, event => {
+      resolvePayload(event.payload)
+    })
+
+    // This returns immediately — the query runs in a background task on the backend
+    await invoke('execute_query', {
       connectionId: props.connectionId,
       database: selectedDb.value || null,
       sql: q,
+      queryId,
     })
-    result.value = res
-    executionTime.value = Date.now() - start
-    addToHistory({
-      id: crypto.randomUUID(),
-      sql: q,
-      database: selectedDb.value,
-      executedAt: new Date().toISOString(),
-      durationMs: executionTime.value,
-      rowCount: res.rows_affected,
-      isSelect: res.is_select,
-    })
+
+    // Now wait for the backend to emit the result event
+    const payload = await payloadPromise
+    // Use backend-measured time (pure MySQL execution, no IPC overhead)
+    executionTime.value = payload.duration_ms as number
+
+    if (payload.error) {
+      if (!isCancelling.value) {
+        throw new Error(payload.error)
+      }
+    } else {
+      // markRaw prevents Vue from making every row object reactive (major perf win)
+      result.value = markRaw(payload.ok as RawQueryResult)
+      nextTick(() => resultScrollEl.value?.scrollTo(0, 0))
+      addToHistory({
+        id: crypto.randomUUID(),
+        sql: q,
+        database: selectedDb.value,
+        executedAt: new Date().toISOString(),
+        durationMs: payload.duration_ms as number,
+        rowCount: (payload.ok as RawQueryResult).rows_affected,
+        isSelect: (payload.ok as RawQueryResult).is_select,
+      })
+    }
   } catch (e: any) {
-    queryError.value = String(e)
-    executionTime.value = Date.now() - start
-    addToHistory({
-      id: crypto.randomUUID(),
-      sql: q,
-      database: selectedDb.value,
-      executedAt: new Date().toISOString(),
-      durationMs: executionTime.value,
-      rowCount: 0,
-      isSelect: false,
-      error: String(e),
-    })
+    if (!isCancelling.value) {
+      queryError.value = String(e)
+      executionTime.value = executionTime.value ?? Date.now() - start
+      addToHistory({
+        id: crypto.randomUUID(),
+        sql: q,
+        database: selectedDb.value,
+        executedAt: new Date().toISOString(),
+        durationMs: executionTime.value,
+        rowCount: 0,
+        isSelect: false,
+        error: String(e),
+      })
+    }
   } finally {
+    unlisten?.()
     isRunning.value = false
+    isCancelling.value = false
+    activeQueryId.value = null
+  }
+}
+
+async function cancelQuery() {
+  if (!isRunning.value || !activeQueryId.value) return
+  isCancelling.value = true
+  try {
+    await invoke('cancel_query', {
+      connectionId: props.connectionId,
+      queryId: activeQueryId.value,
+    })
+  } catch {
+    // If the cancel invoke itself failed, undo the flag so the
+    // query result/error is shown normally when it eventually finishes.
+    isCancelling.value = false
   }
 }
 
@@ -231,14 +304,27 @@ onMounted(() => {
         <span v-if="history.length > 0" class="text-[9px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-black">{{ history.length }}</span>
       </button>
 
+      <!-- Cancel button (only while running) -->
+      <button
+        v-if="isRunning"
+        @click="cancelQuery"
+        :disabled="isCancelling"
+        class="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-bold bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-destructive/20"
+        title="Cancel query"
+      >
+        <Square class="size-3" />
+        {{ isCancelling ? 'Cancelling…' : 'Cancel' }}
+      </button>
+
       <!-- Run button -->
       <button
+        v-else
         @click="runQuery"
-        :disabled="isRunning || !sql.trim()"
+        :disabled="!sql.trim()"
         class="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
       >
         <PlayIcon class="size-3.5" />
-        {{ isRunning ? 'Running...' : 'Run' }}
+        Run
         <span class="text-[9px] opacity-60 hidden sm:inline">⌘↵</span>
       </button>
     </div>
@@ -258,87 +344,89 @@ onMounted(() => {
           />
         </div>
 
-        <!-- Results: contenedor flex + ScrollArea absoluto (altura estable en columna flex) -->
-        <div class="flex-1 min-h-0 min-w-0 relative bg-muted/5">
-          <ScrollArea class="absolute inset-0">
+        <!-- Results -->
+        <div ref="resultScrollEl" class="flex-1 min-h-0 min-w-0 overflow-auto bg-muted/5">
 
-            <!-- Error state -->
-            <div v-if="queryError" class="m-4 p-4 rounded-lg bg-destructive/10 border border-destructive/20 flex items-start gap-3">
-              <AlertCircleIcon class="size-4 text-destructive shrink-0 mt-0.5" />
-              <div>
-                <p class="text-xs font-bold text-destructive mb-1 uppercase tracking-widest">Query Error</p>
-                <p class="text-xs font-mono text-destructive/80 whitespace-pre-wrap break-all">{{ queryError }}</p>
-              </div>
+          <!-- Error state -->
+          <div v-if="queryError" class="m-4 p-4 rounded-lg bg-destructive/10 border border-destructive/20 flex items-start gap-3">
+            <AlertCircleIcon class="size-4 text-destructive shrink-0 mt-0.5" />
+            <div>
+              <p class="text-xs font-bold text-destructive mb-1 uppercase tracking-widest">Query Error</p>
+              <p class="text-xs font-mono text-destructive/80 whitespace-pre-wrap break-all">{{ queryError }}</p>
             </div>
+          </div>
 
-            <!-- DML result -->
-            <div v-else-if="result && !result.is_select" class="flex flex-col items-center justify-center min-h-full gap-3 text-center p-8">
-              <div class="size-12 rounded-full bg-green-500/10 flex items-center justify-center">
-                <CheckCircleIcon class="size-6 text-green-500" />
-              </div>
-              <p class="text-sm font-bold text-foreground">Query executed successfully</p>
-              <p class="text-xs text-muted-foreground">
-                <span class="font-black text-primary">{{ result.rows_affected }}</span>
-                {{ result.rows_affected === 1 ? 'row' : 'rows' }} affected
-                <span v-if="executionTime !== null" class="ml-2 opacity-60">· {{ formatDuration(executionTime) }}</span>
-              </p>
+          <!-- DML result -->
+          <div v-else-if="result && !result.is_select" class="flex flex-col items-center justify-center min-h-full gap-3 text-center p-8">
+            <div class="size-12 rounded-full bg-green-500/10 flex items-center justify-center">
+              <CheckCircleIcon class="size-6 text-green-500" />
             </div>
+            <p class="text-sm font-bold text-foreground">Query executed successfully</p>
+            <p class="text-xs text-muted-foreground">
+              <span class="font-black text-primary">{{ result.rows_affected }}</span>
+              {{ result.rows_affected === 1 ? 'row' : 'rows' }} affected
+              <span v-if="executionTime !== null" class="ml-2 opacity-60">· {{ formatDuration(executionTime) }}</span>
+            </p>
+          </div>
 
-            <!-- SELECT results table -->
-            <template v-else-if="result && result.is_select">
-              <div v-if="result.rows.length === 0" class="flex flex-col items-center justify-center min-h-full gap-2 text-center p-8">
-                <p class="text-sm font-bold text-muted-foreground">No rows returned</p>
-                <p class="text-xs text-muted-foreground/50">
-                  Query completed in {{ formatDuration(executionTime!) }}
-                </p>
-              </div>
-              <table v-else class="border-collapse" style="min-width: 100%;">
-                <thead>
-                  <tr>
-                    <th
-                      v-for="col in result.columns"
-                      :key="col.name"
-                      class="sticky top-0 z-20 bg-background/95 backdrop-blur-md px-4 py-3 border-b border-r last:border-r-0 text-left whitespace-nowrap"
-                      style="min-width: 140px;"
-                    >
-                      <div class="text-xs font-semibold font-mono tracking-normal text-foreground">{{ col.name }}</div>
-                      <div class="text-[9px] font-medium font-mono tracking-normal text-muted-foreground opacity-70">{{ col.type_name }}</div>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr
-                    v-for="(row, idx) in result.rows"
-                    :key="idx"
-                    class="hover:bg-primary/5 transition-colors"
-                    :class="idx % 2 === 0 ? 'bg-background/30' : 'bg-transparent'"
+          <!-- SELECT results table (virtualized) -->
+          <template v-else-if="result && result.is_select">
+            <div v-if="result.rows.length === 0" class="flex flex-col items-center justify-center min-h-full gap-2 text-center p-8">
+              <p class="text-sm font-bold text-muted-foreground">No rows returned</p>
+              <p class="text-xs text-muted-foreground/50">Query completed in {{ formatDuration(executionTime!) }}</p>
+            </div>
+            <table v-else class="border-collapse" style="min-width: 100%;">
+              <thead>
+                <tr>
+                  <th
+                    v-for="col in result.columns"
+                    :key="col.name"
+                    class="sticky top-0 z-20 bg-background/95 backdrop-blur-md px-4 py-3 border-b border-r last:border-r-0 text-left whitespace-nowrap"
+                    style="min-width: 140px;"
                   >
-                    <td
-                      v-for="col in result.columns"
-                      :key="col.name"
-                      class="px-4 py-2.5 text-sm border-b border-r last:border-r-0"
-                      style="max-width: 320px;"
-                    >
-                      <span v-if="row[col.name] === null" class="text-[10px] italic font-normal uppercase tracking-widest text-muted-foreground/30">NULL</span>
-                      <span v-else class="font-medium text-foreground/80 truncate block">{{ row[col.name] }}</span>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </template>
+                    <div class="text-xs font-semibold font-mono tracking-normal text-foreground">{{ col.name }}</div>
+                    <div class="text-[9px] font-medium font-mono tracking-normal text-muted-foreground opacity-70">{{ col.type_name }}</div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="resultPaddingTop > 0">
+                  <td :colspan="result.columns.length" :style="{ height: resultPaddingTop + 'px', padding: 0, border: 'none' }" />
+                </tr>
+                <tr
+                  v-for="vRow in virtualResultRows"
+                  :key="vRow.index"
+                  class="hover:bg-primary/5 transition-colors"
+                  :class="vRow.index % 2 === 0 ? 'bg-background/30' : 'bg-transparent'"
+                >
+                  <td
+                    v-for="col in result.columns"
+                    :key="col.name"
+                    class="px-4 py-2.5 text-sm border-b border-r last:border-r-0"
+                    style="max-width: 320px;"
+                  >
+                    <span v-if="result.rows[vRow.index][col.name] === null" class="text-[10px] italic font-normal uppercase tracking-widest text-muted-foreground/30">NULL</span>
+                    <span v-else class="font-medium text-foreground/80 truncate block">{{ result.rows[vRow.index][col.name] }}</span>
+                  </td>
+                </tr>
+                <tr v-if="resultPaddingBottom > 0">
+                  <td :colspan="result.columns.length" :style="{ height: resultPaddingBottom + 'px', padding: 0, border: 'none' }" />
+                </tr>
+              </tbody>
+            </table>
+          </template>
 
-            <!-- Empty state (no query run yet) -->
-            <div v-else class="flex flex-col items-center justify-center min-h-full gap-3 text-center p-8 text-muted-foreground/40">
-              <p class="text-xs font-bold uppercase tracking-widest">Results will appear here</p>
-            </div>
+          <!-- Empty state -->
+          <div v-else class="flex flex-col items-center justify-center h-full gap-3 text-center p-8 text-muted-foreground/40">
+            <p class="text-xs font-bold uppercase tracking-widest">Results will appear here</p>
+          </div>
 
-          </ScrollArea>
         </div>
 
         <!-- Result count footer -->
-        <div v-if="result && result.is_select && result.rows.length > 0" class="h-9 border-t flex items-center justify-between px-4 bg-background shrink-0">
+        <div v-if="result && result.is_select && result.rows_affected > 0" class="h-9 border-t flex items-center justify-between px-4 bg-background shrink-0">
           <span class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-            {{ result.rows.length }} {{ result.rows.length === 1 ? 'row' : 'rows' }}
+            {{ result.rows_affected }} {{ result.rows_affected === 1 ? 'row' : 'rows' }}
           </span>
           <span v-if="executionTime !== null" class="text-[11px] font-bold text-muted-foreground">
             {{ formatDuration(executionTime) }}
