@@ -27,6 +27,7 @@ export interface QueryTab {
   id: string
   connectionId: string
   database: string | null
+  sql: string
 }
 
 export type AnyTab = TableTab | QueryTab

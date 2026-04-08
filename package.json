@@ -11,6 +11,7 @@
     "build:app": "NO_STRIP=true tauri build"
   },
   "dependencies": {
+    "@codemirror/lang-sql": "^6.10.0",
     "@tanstack/vue-table": "^8.21.3",
     "@tanstack/vue-virtual": "^3.13.23",
     "@tauri-apps/api": "^2.1.1",
@@ -21,6 +22,7 @@
     "@vueuse/core": "^12.5.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "codemirror": "^6.0.2",
     "lucide-vue-next": "^0.474.0",
     "pinia": "^2.3.1",
     "reka-ui": "^2.1.2",

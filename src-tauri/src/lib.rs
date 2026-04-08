@@ -3,6 +3,7 @@ pub mod connections;
 pub mod driver;
 pub mod ssh;
 pub mod mysql;
+pub mod saved_queries;
 pub mod schema;
 pub mod filters;
 pub mod query_builder;
@@ -45,6 +46,9 @@ pub fn run() {
             crate::schema::get_table_ddl,
             crate::mysql::execute_query,
             crate::mysql::cancel_query,
+            crate::saved_queries::get_saved_queries,
+            crate::saved_queries::upsert_saved_query,
+            crate::saved_queries::delete_saved_query,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

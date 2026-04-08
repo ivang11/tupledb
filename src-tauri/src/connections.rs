@@ -8,6 +8,10 @@ pub struct Connection {
     pub environment: Environment,
     pub mysql: MySqlSettings,
     pub ssh: Option<SshSettings>,
+    #[serde(default)]
+    pub timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub allow_writes: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]

@@ -4,6 +4,7 @@ import {
   TerminalIcon,
   UploadIcon,
   DownloadIcon,
+  TableIcon,
 } from "lucide-vue-next";
 
 defineProps<{
@@ -17,6 +18,7 @@ const emit = defineEmits<{
   "open-query": [];
   "import-sql": [];
   "export-database": [];
+  "delete-tables": [];
   drop: [];
 }>();
 </script>
@@ -49,6 +51,12 @@ const emit = defineEmits<{
       <DownloadIcon class="size-3.5" /> Export
     </button>
     <div class="border-t my-1" />
+    <button
+      class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-destructive/10 text-destructive transition-colors text-left"
+      @click="emit('delete-tables')"
+    >
+      <TableIcon class="size-3.5" /> Delete Tables…
+    </button>
     <button
       class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-destructive/10 text-destructive transition-colors text-left"
       @click="emit('drop')"

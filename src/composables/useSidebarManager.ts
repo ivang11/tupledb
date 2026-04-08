@@ -179,6 +179,7 @@ export function useSidebarManager(ctx: SidebarContext) {
   }
 
   const showTableSelector = ref(false);
+  const isLoadingExportTables = ref(false);
   const selectedExportTables = ref<string[]>([]);
   const currentExportMode = ref("full");
   const exportContext = ref<{ connectionId: string; database: string } | null>(
@@ -197,13 +198,25 @@ export function useSidebarManager(ctx: SidebarContext) {
     );
   });
 
-  function openExportSelector(connectionId: string, database: string) {
+  async function openExportSelector(connectionId: string, database: string) {
     exportContext.value = { connectionId, database };
     currentExportMode.value = "full";
+    selectedExportTables.value = [];
+    showTableSelector.value = true;
+
+    // Fetch tables if not yet loaded (e.g. database was never opened in the UI)
+    if (!store.openConnections[connectionId]?.tables[database]?.length) {
+      isLoadingExportTables.value = true;
+      try {
+        await store.fetchTablesForConnection(connectionId, database);
+      } finally {
+        isLoadingExportTables.value = false;
+      }
+    }
+
     selectedExportTables.value = (
       store.openConnections[connectionId]?.tables[database] ?? []
     ).map((t: any) => t.name);
-    showTableSelector.value = true;
   }
 
   async function startExport() {
@@ -357,6 +370,16 @@ export function useSidebarManager(ctx: SidebarContext) {
     tableName: string,
   ) {
     const key = tableSelectionKey(connectionId, database, tableName);
+
+    // If there's an existing selection from a different db/connection, clear it first
+    const firstKey = [...selectedTables.value][0];
+    if (firstKey) {
+      const [existingConn, existingDb] = firstKey.split(':');
+      if (existingConn !== connectionId || existingDb !== database) {
+        selectedTables.value.clear();
+      }
+    }
+
     if (selectedTables.value.has(key)) {
       selectedTables.value.delete(key);
     } else {
@@ -366,6 +389,16 @@ export function useSidebarManager(ctx: SidebarContext) {
 
   function clearTableSelection() {
     selectedTables.value.clear();
+  }
+
+  function selectTableRange(
+    connectionId: string,
+    database: string,
+    tableNames: string[],
+  ) {
+    for (const name of tableNames) {
+      selectedTables.value.add(tableSelectionKey(connectionId, database, name));
+    }
   }
 
   async function executeBulkTableDeletion(disableFk: boolean) {
@@ -472,8 +505,6 @@ export function useSidebarManager(ctx: SidebarContext) {
       }
 
       selectedTables.value.clear();
-      showBulkTruncateDialog.value = false;
-      // Note: showBulkTruncateDialog is handled in HomeView.vue
     } catch (e: any) {
       alert(`Failed to truncate tables: ${e}`);
     } finally {
@@ -524,6 +555,111 @@ export function useSidebarManager(ctx: SidebarContext) {
       alert(`Failed to drop database: ${e}`);
     } finally {
       isExecutingDatabaseAction.value = false;
+    }
+  }
+
+  // ── Delete tables dialog ────────────────────────────────────────────────────
+
+  const showDeleteTablesDialog = ref(false);
+  const isLoadingDeleteTables = ref(false);
+  const isExecutingDeleteTables = ref(false);
+  const deleteTablesError = ref<string | null>(null);
+  const deleteTablesContext = ref<{
+    connectionId: string;
+    database: string;
+  } | null>(null);
+
+  const deleteTablesDialogTables = computed(() => {
+    if (!deleteTablesContext.value) return [];
+    return (
+      store.openConnections[deleteTablesContext.value.connectionId]?.tables[
+        deleteTablesContext.value.database
+      ] ?? []
+    );
+  });
+
+  async function openDeleteTablesDialog(
+    connectionId: string,
+    database: string,
+  ) {
+    deleteTablesContext.value = { connectionId, database };
+    deleteTablesError.value = null;
+    showDeleteTablesDialog.value = true;
+
+    if (!store.openConnections[connectionId]?.tables[database]?.length) {
+      isLoadingDeleteTables.value = true;
+      try {
+        await store.fetchTablesForConnection(connectionId, database);
+      } finally {
+        isLoadingDeleteTables.value = false;
+      }
+    }
+  }
+
+  async function executeDeleteTablesFromDialog(
+    tableNames: string[],
+    disableFk: boolean,
+  ) {
+    if (!deleteTablesContext.value || tableNames.length === 0) return;
+    const { connectionId, database } = deleteTablesContext.value;
+    deleteTablesError.value = null;
+    isExecutingDeleteTables.value = true;
+    try {
+      for (const table of tableNames) {
+        await invoke("drop_table", {
+          connectionId,
+          database,
+          table,
+          disableFkChecks: disableFk,
+        });
+        for (const pane of panes.value) {
+          const related = pane.tabs.filter(
+            (t) =>
+              t.type === "table" &&
+              (t as TableTab).tableName === table &&
+              (t as TableTab).database === database &&
+              t.connectionId === connectionId,
+          );
+          related.forEach((t) => closeTab(t.id, pane.id));
+        }
+      }
+      await store.fetchTablesForConnection(connectionId, database);
+      showDeleteTablesDialog.value = false;
+      deleteTablesContext.value = null;
+    } catch (e: any) {
+      const msg = String(e);
+      const isFkError = msg.includes("3730") || msg.toLowerCase().includes("foreign key constraint");
+      if (isFkError && !disableFk) {
+        deleteTablesError.value = `Cannot delete table: it is referenced by a foreign key.\nEnable "Disable Foreign Key Checks" and try again.`;
+      } else {
+        deleteTablesError.value = `Failed to delete tables: ${e}`;
+      }
+    } finally {
+      isExecutingDeleteTables.value = false;
+    }
+  }
+
+  async function executeDropDatabaseFromDeleteDialog() {
+    if (!deleteTablesContext.value) return;
+    const { connectionId, database } = deleteTablesContext.value;
+    isExecutingDeleteTables.value = true;
+    try {
+      await invoke("drop_database", { connectionId, name: database });
+      for (const pane of panes.value) {
+        const related = pane.tabs.filter(
+          (t) =>
+            t.connectionId === connectionId &&
+            (t as TableTab).database === database,
+        );
+        related.forEach((t) => closeTab(t.id, pane.id));
+      }
+      await store.fetchDatabasesForConnection(connectionId);
+      showDeleteTablesDialog.value = false;
+      deleteTablesContext.value = null;
+    } catch (e: any) {
+      alert(`Failed to drop database: ${e}`);
+    } finally {
+      isExecutingDeleteTables.value = false;
     }
   }
 
@@ -712,6 +848,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     importResult,
     importProgress,
     showTableSelector,
+    isLoadingExportTables,
     selectedExportTables,
     currentExportMode,
     exportContext,
@@ -734,6 +871,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     isExecutingBulkTableAction,
     isTableSelected,
     toggleTableSelection,
+    selectTableRange,
     clearTableSelection,
     executeBulkTableDeletion,
     executeBulkTableTruncation,
@@ -743,6 +881,16 @@ export function useSidebarManager(ctx: SidebarContext) {
     isExecutingDatabaseAction,
     confirmSidebarDatabaseAction,
     executeDatabaseAction,
+    // Delete tables dialog
+    showDeleteTablesDialog,
+    isLoadingDeleteTables,
+    isExecutingDeleteTables,
+    deleteTablesError,
+    deleteTablesContext,
+    deleteTablesDialogTables,
+    openDeleteTablesDialog,
+    executeDeleteTablesFromDialog,
+    executeDropDatabaseFromDeleteDialog,
     // Context menus
     sidebarContextMenu,
     sidebarTableContextMenu,

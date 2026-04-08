@@ -83,6 +83,18 @@ pub async fn get_databases(
     state: State<'_, AppState>,
     connection_id: Uuid,
 ) -> Result<Vec<String>, String> {
+    // If the connection is configured with a specific database, return only that one
+    let configured_db = {
+        let configs = state.connections_config.read();
+        configs.get(&connection_id).and_then(|c| {
+            c.mysql.database.clone().filter(|d| !d.is_empty())
+        })
+    };
+
+    if let Some(db) = configured_db {
+        return Ok(vec![db]);
+    }
+
     let driver = state.get_driver(&connection_id)?;
     let t0 = std::time::Instant::now();
     let result = driver.get_databases().await;
@@ -320,16 +332,16 @@ pub async fn import_sql(
 ) -> Result<ImportResult, String> {
     use tauri::Emitter;
 
-    let env = {
+    let (env, allow_writes) = {
         let configs = state.connections_config.read();
         configs
             .get(&connection_id)
-            .map(|c| c.environment)
-            .unwrap_or(crate::connections::Environment::Local)
+            .map(|c| (c.environment, c.allow_writes))
+            .unwrap_or((crate::connections::Environment::Local, true))
     };
 
-    if env == crate::connections::Environment::Production {
-        return Err("Import blocked: Production environment is READ-ONLY.".into());
+    if env == crate::connections::Environment::Production && !allow_writes {
+        return Err("Import blocked: Production environment is READ-ONLY. Enable write access in connection settings.".into());
     }
 
     let content = std::fs::read_to_string(&path)
@@ -344,10 +356,29 @@ pub async fn import_sql(
     });
 
     let driver = state.get_driver(&connection_id)?;
-    let results = driver.execute_statements(&database, &statements).await;
 
-    let executed = results.iter().filter(|r| r.is_ok()).count();
-    let errors: Vec<String> = results
+    // Large batches reduce connection-pool overhead and let MySQL commit DML
+    // in bulk (autocommit=0 inside execute_statements), which is far faster
+    // than the default per-statement fsync.
+    const BATCH_SIZE: usize = 5_000;
+    let mut all_results: Vec<Result<(), String>> = Vec::with_capacity(total);
+
+    for (batch_idx, batch) in statements.chunks(BATCH_SIZE).enumerate() {
+        let batch_results = driver.execute_statements(&database, batch).await;
+        all_results.extend(batch_results);
+
+        let current = ((batch_idx + 1) * BATCH_SIZE).min(total);
+        let errors_so_far = all_results.iter().filter(|r| r.is_err()).count();
+        let status = if errors_so_far > 0 {
+            format!("Executing… ({} errors so far)", errors_so_far)
+        } else {
+            "Executing…".to_string()
+        };
+        let _ = window.emit("import-progress", Progress { current, total, status });
+    }
+
+    let executed = all_results.iter().filter(|r| r.is_ok()).count();
+    let errors: Vec<String> = all_results
         .into_iter()
         .zip(statements.iter())
         .filter_map(|(r, stmt)| {

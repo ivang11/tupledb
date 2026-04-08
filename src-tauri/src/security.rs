@@ -43,15 +43,15 @@ pub fn is_safe_sort_column(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$' || c == '-')
 }
 
-pub fn is_query_safe(query: &str, environment: Environment) -> Result<(), String> {
-    if environment == Environment::Production {
+pub fn is_query_safe(query: &str, environment: Environment, allow_writes: bool) -> Result<(), String> {
+    if environment == Environment::Production && !allow_writes {
         let q = query.trim().to_uppercase();
         let allowed_keywords = ["SELECT", "SHOW", "DESCRIBE", "EXPLAIN"];
-        
+
         let is_allowed = allowed_keywords.iter().any(|&keyword| q.starts_with(keyword));
-        
+
         if !is_allowed {
-            return Err("Operation blocked: Production environment is READ-ONLY by default.".into());
+            return Err("Operation blocked: Production environment is READ-ONLY. Enable write access in connection settings.".into());
         }
     }
     Ok(())

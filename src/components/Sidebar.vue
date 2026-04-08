@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from "vue";
 import {
   SearchIcon,
   DatabaseIcon,
@@ -50,6 +51,8 @@ const emit = defineEmits<{
   "load-table": [tableName: string, connId: string, db: string];
   "create-database": [connId: string];
   "toggle-table-selection": [connId: string, db: string, tableName: string];
+  "select-table-range": [connId: string, db: string, tableNames: string[]];
+  "clear-table-selection": [];
   "delete-selected-tables": [];
   "context-menu-connection": [e: MouseEvent, conn: Connection];
   "context-menu-table": [
@@ -91,22 +94,81 @@ const getEnvBorderColor = (env: Environment): string => {
   }
 };
 
+const searchContainerRef = ref<HTMLElement | null>(null);
+const sidebarEl = ref<HTMLElement | null>(null);
+
+function focusSearch() {
+  searchContainerRef.value?.querySelector("input")?.focus();
+}
+
+function scrollToTable(tableName: string, db: string, connId: string) {
+  const key = `${connId}:${db}:${tableName}`;
+  const el = sidebarEl.value?.querySelector(
+    `[data-table-key="${key}"]`,
+  ) as HTMLElement | null;
+  if (!el) return;
+
+  // Find the nearest scrollable ancestor within the sidebar
+  const scroller = el.closest(".overflow-auto") as HTMLElement | null;
+  if (!scroller) {
+    el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return;
+  }
+
+  const padding = 64;
+  const elTop = el.offsetTop - scroller.offsetTop;
+  const elBottom = elTop + el.offsetHeight;
+  const scrollTop = scroller.scrollTop;
+  const viewBottom = scrollTop + scroller.clientHeight;
+
+  if (elTop - padding < scrollTop) {
+    scroller.scrollTo({ top: elTop - padding, behavior: "smooth" });
+  } else if (elBottom + padding > viewBottom) {
+    scroller.scrollTo({ top: elBottom + padding - scroller.clientHeight, behavior: "smooth" });
+  }
+}
+
+defineExpose({ focusSearch, scrollToTable });
+
 const dbKey = (connId: string, db: string) => `${connId}:${db}`;
+
+interface TableAnchor { connId: string; db: string; tableName: string }
+const selectionAnchor = ref<TableAnchor | null>(null);
 
 function handleTableClick(e: MouseEvent, connId: string, db: string, tableName: string) {
   if (e.ctrlKey || e.metaKey) {
-    // Ctrl+click para seleccionar/deseleccionar
+    // Ctrl+click: toggle selection, update anchor
     e.preventDefault();
     emit('toggle-table-selection', connId, db, tableName);
+    selectionAnchor.value = { connId, db, tableName };
+  } else if (e.shiftKey) {
+    // Shift+click: range from anchor to here
+    e.preventDefault();
+    const anchor = selectionAnchor.value;
+    if (anchor && anchor.connId === connId && anchor.db === db) {
+      const tables = props.filteredTables(connId, db).map((t: any) => t.name);
+      const fromIdx = tables.indexOf(anchor.tableName);
+      const toIdx = tables.indexOf(tableName);
+      if (fromIdx !== -1 && toIdx !== -1) {
+        const [start, end] = fromIdx <= toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+        emit('select-table-range', connId, db, tables.slice(start, end + 1));
+        return;
+      }
+    }
+    // No anchor yet or different db — start selection from this table
+    emit('toggle-table-selection', connId, db, tableName);
+    selectionAnchor.value = { connId, db, tableName };
   } else {
-    // Click normal para abrir tabla
+    // Normal click: clear selection, set anchor, open table
+    emit('clear-table-selection');
+    selectionAnchor.value = { connId, db, tableName };
     emit('load-table', tableName, connId, db);
   }
 }
 </script>
 
 <template>
-  <aside class="w-72 flex flex-col border-r bg-muted/10">
+  <aside ref="sidebarEl" class="w-72 flex flex-col border-r bg-muted/10">
     <!-- Header -->
     <div class="p-4 border-b bg-background/50 backdrop-blur-sm">
       <div class="flex items-center justify-between mb-3">
@@ -133,7 +195,7 @@ function handleTableClick(e: MouseEvent, connId: string, db: string, tableName: 
           <PlusIcon class="size-4" />
         </button>
       </div>
-      <div v-if="Object.keys(openConnections).length > 0" class="relative">
+      <div v-if="Object.keys(openConnections).length > 0" ref="searchContainerRef" class="relative">
         <SearchIcon
           class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground"
         />
@@ -294,11 +356,12 @@ function handleTableClick(e: MouseEvent, connId: string, db: string, tableName: 
             <!-- Tables -->
             <div
               v-if="expandedDatabases.has(dbKey(connId as string, db))"
-              class="ml-10 space-y-0.5 mt-0.5"
+              class="ml-10 space-y-0.5 mt-0.5 select-none"
             >
               <button
                 v-for="table in filteredTables(connId as string, db)"
                 :key="table.name"
+                :data-table-key="`${connId}:${db}:${table.name}`"
                 @click="handleTableClick($event, connId as string, db, table.name)"
                 @contextmenu="
                   emit(
@@ -311,8 +374,10 @@ function handleTableClick(e: MouseEvent, connId: string, db: string, tableName: 
                 "
                 :class="[
                   'w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs transition-all text-left group/tbl',
-                  isTableOpen(table.name, db, connId as string) ? 'ml-2' : '',
-                  isTableSelected(connId as string, db, table.name) ? 'bg-primary/20 border border-primary/30' : '',
+                  isTableActive(table.name, db, connId as string) ? 'ml-2' : '',
+                  isTableSelected(connId as string, db, table.name)
+                    ? 'bg-primary/30 border border-primary/60 text-primary ring-1 ring-primary/30'
+                    : '',
                   isTableActive(table.name, db, connId as string)
                     ? 'bg-primary text-primary-foreground shadow-sm'
                     : 'hover:bg-primary/5 text-foreground',
@@ -323,7 +388,9 @@ function handleTableClick(e: MouseEvent, connId: string, db: string, tableName: 
                     'size-3 shrink-0',
                     isTableActive(table.name, db, connId as string)
                       ? 'text-primary-foreground/70'
-                      : 'text-muted-foreground group-hover/tbl:text-primary',
+                      : isTableSelected(connId as string, db, table.name)
+                        ? 'text-primary'
+                        : 'text-muted-foreground group-hover/tbl:text-primary',
                   ]"
                 />
                 <span class="flex-1 truncate">{{ table.name }}</span>
@@ -333,7 +400,7 @@ function handleTableClick(e: MouseEvent, connId: string, db: string, tableName: 
                   :class="
                     isTableActive(table.name, db, connId as string)
                       ? 'bg-primary-foreground/60'
-                      : 'bg-primary/40'
+                      : 'bg-primary/25'
                   "
                 />
               </button>

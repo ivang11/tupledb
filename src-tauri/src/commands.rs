@@ -38,10 +38,22 @@ pub async fn add_connection(state: State<'_, AppState>, mut connection: Connecti
             }
             if let (Some(new_ssh), Some(old_ssh)) = (&mut connection.ssh, &existing_conn.ssh) {
                 match (&mut new_ssh.auth, &old_ssh.auth) {
-                    (crate::connections::SshAuth::Password { password: new_pw }, crate::connections::SshAuth::Password { password: old_pw }) => {
+                    (
+                        crate::connections::SshAuth::Password { password: new_pw },
+                        crate::connections::SshAuth::Password { password: old_pw },
+                    ) => {
                         if new_pw.is_empty() && !old_pw.is_empty() {
                             *new_pw = old_pw.clone();
                             println!("  -> Preserving existing SSH password");
+                        }
+                    }
+                    (
+                        crate::connections::SshAuth::Key { passphrase: new_pp, .. },
+                        crate::connections::SshAuth::Key { passphrase: old_pp, .. },
+                    ) => {
+                        if new_pp.as_deref().unwrap_or("").is_empty() && old_pp.as_deref().map_or(false, |p| !p.is_empty()) {
+                            *new_pp = old_pp.clone();
+                            println!("  -> Preserving existing SSH key passphrase");
                         }
                     }
                     _ => {}
@@ -109,7 +121,7 @@ pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Resu
 
     println!("  -> Establishing MySQL connection pool...");
     let pool = sqlx::mysql::MySqlPoolOptions::new()
-        .acquire_timeout(std::time::Duration::from_secs(30))
+        .acquire_timeout(std::time::Duration::from_secs(connection.timeout_secs.unwrap_or(30)))
         .test_before_acquire(true)
         .connect_with(opts)
         .await
@@ -134,7 +146,17 @@ pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Resu
 }
 
 #[tauri::command]
-pub async fn test_connection(connection: Connection) -> Result<String, String> {
+pub async fn test_connection(state: State<'_, AppState>, mut connection: Connection) -> Result<String, String> {
+    // If editing an existing connection with empty password, use the stored one
+    {
+        let configs = state.connections_config.read();
+        if let Some(stored) = configs.get(&connection.id) {
+            if connection.mysql.password.as_deref().unwrap_or("").is_empty() {
+                connection.mysql.password = stored.mysql.password.clone();
+            }
+        }
+    }
+
     let (host, port, _tunnel) = if let Some(ssh_settings) = &connection.ssh {
         let tunnel = SshTunnel::new(ssh_settings, &connection.mysql.host, connection.mysql.port)?;
         ("127.0.0.1".to_string(), tunnel.local_port, Some(tunnel))
@@ -157,7 +179,7 @@ pub async fn test_connection(connection: Connection) -> Result<String, String> {
     }
 
     let pool = sqlx::mysql::MySqlPoolOptions::new()
-        .acquire_timeout(std::time::Duration::from_secs(30))
+        .acquire_timeout(std::time::Duration::from_secs(connection.timeout_secs.unwrap_or(30)))
         .connect_with(opts)
         .await
         .map_err(|e| format!("MySQL Connection failed: {}", e))?;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { TableIcon } from 'lucide-vue-next'
+import { ref } from 'vue'
+import { CheckIcon, TableIcon } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -14,6 +15,7 @@ const props = defineProps<{
   open: boolean
   database: string
   tables: { name: string }[]
+  loadingTables?: boolean
   selectedTables: string[]
   currentMode: string
 }>()
@@ -31,6 +33,8 @@ const exportOptions = [
   { mode: 'data', label: 'Data', desc: 'Data only' },
 ]
 
+const lastClickedIndex = ref(-1)
+
 function toggleAll() {
   if (props.selectedTables.length === props.tables.length) {
     emit('update:selectedTables', [])
@@ -39,11 +43,25 @@ function toggleAll() {
   }
 }
 
-function toggleTable(name: string) {
-  if (props.selectedTables.includes(name)) {
-    emit('update:selectedTables', props.selectedTables.filter(t => t !== name))
+function handleTableClick(idx: number, event: MouseEvent) {
+  const name = props.tables[idx].name
+  if (event.shiftKey && lastClickedIndex.value >= 0) {
+    const start = Math.min(lastClickedIndex.value, idx)
+    const end = Math.max(lastClickedIndex.value, idx)
+    const rangeNames = props.tables.slice(start, end + 1).map(t => t.name)
+    const isSelecting = !props.selectedTables.includes(name)
+    if (isSelecting) {
+      emit('update:selectedTables', [...new Set([...props.selectedTables, ...rangeNames])])
+    } else {
+      emit('update:selectedTables', props.selectedTables.filter(n => !rangeNames.includes(n)))
+    }
   } else {
-    emit('update:selectedTables', [...props.selectedTables, name])
+    lastClickedIndex.value = idx
+    if (props.selectedTables.includes(name)) {
+      emit('update:selectedTables', props.selectedTables.filter(t => t !== name))
+    } else {
+      emit('update:selectedTables', [...props.selectedTables, name])
+    }
   }
 }
 </script>
@@ -79,27 +97,44 @@ function toggleTable(name: string) {
             <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Tables Selection</h3>
             <div class="flex items-center gap-3">
               <span class="text-[10px] font-bold text-muted-foreground">{{ selectedTables.length }} selected</span>
-              <button @click="toggleAll" class="text-[10px] font-black text-primary uppercase hover:underline">
+              <button v-if="!loadingTables" @click="toggleAll" class="text-[10px] font-black text-primary uppercase hover:underline">
                 {{ selectedTables.length === tables.length ? 'None' : 'All' }}
               </button>
             </div>
           </div>
-          <div class="grid grid-cols-1 gap-1">
-            <label
-              v-for="table in tables"
+
+          <!-- Loading skeleton -->
+          <div v-if="loadingTables" class="grid grid-cols-1 gap-1">
+            <div v-for="i in 6" :key="i" class="flex items-center gap-3 p-2">
+              <div class="size-4 rounded bg-muted animate-pulse" />
+              <div class="size-3.5 rounded bg-muted animate-pulse" />
+              <div class="h-3.5 rounded bg-muted animate-pulse" :style="`width: ${50 + (i * 17) % 40}%`" />
+            </div>
+          </div>
+
+          <div v-else class="grid grid-cols-1 gap-0.5">
+            <div
+              v-for="(table, idx) in tables"
               :key="table.name"
-              class="flex items-center gap-3 p-2 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors group border border-transparent"
+              @click="handleTableClick(idx, $event)"
+              :class="['flex items-center gap-3 px-2.5 py-2 rounded-lg cursor-pointer select-none transition-all border',
+                selectedTables.includes(table.name)
+                  ? 'bg-primary/12 border-primary/35 shadow-sm'
+                  : 'border-transparent hover:bg-muted/50']"
             >
-              <input
-                type="checkbox"
-                :value="table.name"
-                :checked="selectedTables.includes(table.name)"
-                @change="toggleTable(table.name)"
-                class="size-4 rounded border-muted accent-primary cursor-pointer"
-              />
-              <TableIcon class="size-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
-              <span class="text-sm font-medium truncate">{{ table.name }}</span>
-            </label>
+              <div :class="['size-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all',
+                selectedTables.includes(table.name)
+                  ? 'bg-primary border-primary shadow-sm shadow-primary/30'
+                  : 'border-muted-foreground/25']">
+                <CheckIcon v-if="selectedTables.includes(table.name)" class="size-2.5 text-primary-foreground stroke-[3]" />
+              </div>
+              <TableIcon :class="['size-3.5 transition-colors flex-shrink-0',
+                selectedTables.includes(table.name) ? 'text-primary' : 'text-muted-foreground']" />
+              <span :class="['text-sm font-medium truncate transition-colors',
+                selectedTables.includes(table.name) ? 'text-primary font-semibold' : '']">
+                {{ table.name }}
+              </span>
+            </div>
           </div>
         </div>
       </ScrollArea>
@@ -108,7 +143,7 @@ function toggleTable(name: string) {
         <Button variant="ghost" class="text-xs font-bold uppercase tracking-wider h-9" @click="emit('update:open', false)">Cancel</Button>
         <Button
           class="font-bold px-8 shadow-lg shadow-primary/30 h-10"
-          :disabled="selectedTables.length === 0"
+          :disabled="loadingTables || selectedTables.length === 0"
           @click="emit('start')"
         >
           Start {{ currentMode.toUpperCase() }} Export

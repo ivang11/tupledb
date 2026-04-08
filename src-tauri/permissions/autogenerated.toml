@@ -112,3 +112,18 @@ commands.allow = ["insert_row"]
 identifier = "allow-get-table-ddl"
 description = "Permite obtener el DDL (CREATE TABLE) de una tabla"
 commands.allow = ["get_table_ddl"]
+
+[[permission]]
+identifier = "allow-get-saved-queries"
+description = "Permite obtener la lista de consultas guardadas"
+commands.allow = ["get_saved_queries"]
+
+[[permission]]
+identifier = "allow-upsert-saved-query"
+description = "Permite crear o actualizar una consulta guardada"
+commands.allow = ["upsert_saved_query"]
+
+[[permission]]
+identifier = "allow-delete-saved-query"
+description = "Permite eliminar una consulta guardada"
+commands.allow = ["delete_saved_query"]

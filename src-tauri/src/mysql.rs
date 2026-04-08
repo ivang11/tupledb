@@ -4,6 +4,7 @@ use serde_json::{Value, Map};
 use sqlx::{Column, Row, TypeInfo, ValueRef, MySqlPool};
 use chrono::Timelike;
 use async_trait::async_trait;
+use futures::StreamExt;
 use std::collections::HashMap;
 use std::sync::Arc;
 use parking_lot::RwLock;
@@ -99,10 +100,156 @@ pub fn escape_csv(s: &str) -> String {
 // Row parser: MySqlRow → (Vec<ColumnInfo>, Vec<Value>)
 // --------------------------------------------------------------------------
 
+fn parse_mysql_row(row: &sqlx::mysql::MySqlRow) -> Value {
+    let mut map = Map::new();
+    for col in row.columns() {
+        let col_name = col.name();
+        let type_name = col.type_info().name().to_uppercase();
+        let value: Value = match row.try_get_raw(col_name) {
+            Ok(raw) if raw.is_null() => Value::Null,
+            _ => {
+                match type_name.as_str() {
+                    "TINYINT(1)" | "BOOLEAN" | "BOOL" => {
+                        row.try_get::<i8, _>(col_name)
+                            .map(|v| Value::Bool(v != 0))
+                            .unwrap_or(Value::Null)
+                    }
+                    t if t == "BIT" || t.starts_with("BIT(") => {
+                        let width: u32 = t.trim_start_matches("BIT(")
+                            .trim_end_matches(')')
+                            .parse()
+                            .unwrap_or(1);
+                        let to_bin = |n: u64| Value::String(format!("{:0>width$b}", n, width = width as usize));
+                        row.try_get::<u64, _>(col_name)
+                            .map(|v| to_bin(v))
+                            .or_else(|_| row.try_get::<Vec<u8>, _>(col_name)
+                                .map(|b| {
+                                    let n = b.iter().fold(0u64, |acc, &x| (acc << 8) | x as u64);
+                                    to_bin(n)
+                                }))
+                            .unwrap_or(Value::Null)
+                    }
+                    t if t.contains("INT") => {
+                        row.try_get::<i64, _>(col_name)
+                            .map(|v| Value::Number(v.into()))
+                            .or_else(|_| row.try_get::<u64, _>(col_name).map(|v| Value::Number(v.into())))
+                            .unwrap_or(Value::Null)
+                    }
+                    t if t == "DOUBLE" || t == "FLOAT" || t.starts_with("DOUBLE") || t.starts_with("FLOAT") => {
+                        row.try_get::<f64, _>(col_name)
+                            .ok()
+                            .and_then(|v| serde_json::Number::from_f64(v))
+                            .map(Value::Number)
+                            .unwrap_or(Value::Null)
+                    }
+                    t if t.starts_with("DECIMAL") || t.starts_with("NUMERIC") || t == "NEWDECIMAL" => {
+                        row.try_get::<rust_decimal::Decimal, _>(col_name)
+                            .map(|d| Value::String(d.to_string()))
+                            .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
+                            .unwrap_or(Value::Null)
+                    }
+                    "YEAR" => {
+                        row.try_get::<u16, _>(col_name)
+                            .map(|v| Value::Number(v.into()))
+                            .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
+                            .unwrap_or(Value::Null)
+                    }
+                    "DATE" => {
+                        row.try_get::<chrono::NaiveDate, _>(col_name)
+                            .map(|d| Value::String(d.to_string()))
+                            .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
+                            .unwrap_or(Value::Null)
+                    }
+                    t if t == "TIME" || t.starts_with("TIME(") => {
+                        row.try_get::<chrono::NaiveTime, _>(col_name)
+                            .map(|t| {
+                                let base = t.format("%H:%M:%S").to_string();
+                                if t.nanosecond() == 0 {
+                                    base
+                                } else {
+                                    let frac = format!("{:.6}", t.nanosecond() as f64 / 1_000_000_000.0);
+                                    format!("{}{}", base, frac.trim_start_matches('0').trim_end_matches('0'))
+                                }
+                            })
+                            .map(Value::String)
+                            .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
+                            .unwrap_or(Value::Null)
+                    }
+                    t if t == "DATETIME" || t.starts_with("DATETIME(") => {
+                        row.try_get::<chrono::NaiveDateTime, _>(col_name)
+                            .map(|dt| {
+                                let base = dt.format("%Y-%m-%d %H:%M:%S").to_string();
+                                if dt.nanosecond() == 0 { base }
+                                else {
+                                    let frac = format!("{:.6}", dt.nanosecond() as f64 / 1_000_000_000.0);
+                                    format!("{}{}", base, frac.trim_start_matches('0').trim_end_matches('0'))
+                                }
+                            })
+                            .map(Value::String)
+                            .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
+                            .unwrap_or(Value::Null)
+                    }
+                    t if t == "TIMESTAMP" || t.starts_with("TIMESTAMP(") => {
+                        let s = row.try_get::<chrono::NaiveDateTime, _>(col_name)
+                            .map(|dt| {
+                                let base = dt.format("%Y-%m-%d %H:%M:%S").to_string();
+                                if dt.nanosecond() == 0 { base }
+                                else {
+                                    let frac = format!("{:.6}", dt.nanosecond() as f64 / 1_000_000_000.0);
+                                    format!("{}{}", base, frac.trim_start_matches('0').trim_end_matches('0'))
+                                }
+                            })
+                            .or_else(|_| row.try_get::<chrono::DateTime<chrono::Utc>, _>(col_name)
+                                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string()))
+                            .or_else(|_| row.try_get::<String, _>(col_name));
+                        s.map(Value::String).unwrap_or(Value::Null)
+                    }
+                    t if t.contains("BLOB") || t == "BINARY" || t.starts_with("VARBINARY") => {
+                        row.try_get::<Vec<u8>, _>(col_name)
+                            .map(|b| {
+                                let trimmed: Vec<u8> = b.iter().copied()
+                                    .rev().skip_while(|&x| x == 0).collect::<Vec<_>>()
+                                    .into_iter().rev().collect();
+                                match String::from_utf8(trimmed) {
+                                    Ok(s) => Value::String(s),
+                                    Err(_) => {
+                                        let hex: String = b.iter().map(|byte| format!("{:02x}", byte)).collect();
+                                        Value::String(format!("0x{}", hex))
+                                    }
+                                }
+                            })
+                            .unwrap_or(Value::Null)
+                    }
+                    t if t == "GEOMETRY" || t == "POINT" || t == "LINESTRING" || t == "POLYGON"
+                      || t.starts_with("MULTI") || t == "GEOMETRYCOLLECTION" => {
+                        row.try_get_unchecked::<Vec<u8>, _>(col_name)
+                            .map(|b| Value::String(mysql_wkb_to_wkt(&b)))
+                            .or_else(|_| row.try_get_unchecked::<String, _>(col_name).map(Value::String))
+                            .unwrap_or_else(|_| Value::String(format!("<{}>", type_name)))
+                    }
+                    t if t == "JSON" || t.contains("JSON") => {
+                        row.try_get_unchecked::<String, _>(col_name)
+                            .or_else(|_| row.try_get_unchecked::<Vec<u8>, _>(col_name)
+                                .map(|b| String::from_utf8_lossy(&b).to_string()))
+                            .map(Value::String)
+                            .unwrap_or_else(|_| Value::String(format!("<{}>", type_name)))
+                    }
+                    _ => {
+                        row.try_get::<String, _>(col_name).map(Value::String)
+                            .or_else(|_| row.try_get::<Vec<u8>, _>(col_name)
+                                .map(|b| Value::String(String::from_utf8_lossy(&b).to_string())))
+                            .unwrap_or_else(|_| Value::String(format!("<{}>", type_name)))
+                    }
+                }
+            }
+        };
+        map.insert(col_name.to_string(), value);
+    }
+    Value::Object(map)
+}
+
 fn rows_to_parsed(rows: Vec<sqlx::mysql::MySqlRow>) -> (Vec<ColumnInfo>, Vec<Value>) {
     let mut columns = Vec::new();
-    let mut result_rows = Vec::new();
-
     if let Some(first_row) = rows.first() {
         for col in first_row.columns() {
             columns.push(ColumnInfo {
@@ -111,155 +258,7 @@ fn rows_to_parsed(rows: Vec<sqlx::mysql::MySqlRow>) -> (Vec<ColumnInfo>, Vec<Val
             });
         }
     }
-
-    for row in rows {
-        let mut map = Map::new();
-        for col in row.columns() {
-            let col_name = col.name();
-            let type_name = col.type_info().name().to_uppercase();
-            let value: Value = match row.try_get_raw(col_name) {
-                Ok(raw) if raw.is_null() => Value::Null,
-                _ => {
-                    match type_name.as_str() {
-                        "TINYINT(1)" | "BOOLEAN" | "BOOL" => {
-                            row.try_get::<i8, _>(col_name)
-                                .map(|v| Value::Bool(v != 0))
-                                .unwrap_or(Value::Null)
-                        }
-                        t if t == "BIT" || t.starts_with("BIT(") => {
-                            let width: u32 = t.trim_start_matches("BIT(")
-                                .trim_end_matches(')')
-                                .parse()
-                                .unwrap_or(1);
-                            let to_bin = |n: u64| Value::String(format!("{:0>width$b}", n, width = width as usize));
-                            row.try_get::<u64, _>(col_name)
-                                .map(|v| to_bin(v))
-                                .or_else(|_| row.try_get::<Vec<u8>, _>(col_name)
-                                    .map(|b| {
-                                        let n = b.iter().fold(0u64, |acc, &x| (acc << 8) | x as u64);
-                                        to_bin(n)
-                                    }))
-                                .unwrap_or(Value::Null)
-                        }
-                        t if t.contains("INT") => {
-                            row.try_get::<i64, _>(col_name)
-                                .map(|v| Value::Number(v.into()))
-                                .or_else(|_| row.try_get::<u64, _>(col_name).map(|v| Value::Number(v.into())))
-                                .unwrap_or(Value::Null)
-                        }
-                        t if t == "DOUBLE" || t == "FLOAT" || t.starts_with("DOUBLE") || t.starts_with("FLOAT") => {
-                            row.try_get::<f64, _>(col_name)
-                                .ok()
-                                .and_then(|v| serde_json::Number::from_f64(v))
-                                .map(Value::Number)
-                                .unwrap_or(Value::Null)
-                        }
-                        t if t.starts_with("DECIMAL") || t.starts_with("NUMERIC") || t == "NEWDECIMAL" => {
-                            row.try_get::<rust_decimal::Decimal, _>(col_name)
-                                .map(|d| Value::String(d.to_string()))
-                                .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
-                                .unwrap_or(Value::Null)
-                        }
-                        "YEAR" => {
-                            row.try_get::<u16, _>(col_name)
-                                .map(|v| Value::Number(v.into()))
-                                .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
-                                .unwrap_or(Value::Null)
-                        }
-                        "DATE" => {
-                            row.try_get::<chrono::NaiveDate, _>(col_name)
-                                .map(|d| Value::String(d.to_string()))
-                                .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
-                                .unwrap_or(Value::Null)
-                        }
-                        t if t == "TIME" || t.starts_with("TIME(") => {
-                            row.try_get::<chrono::NaiveTime, _>(col_name)
-                                .map(|t| {
-                                    let base = t.format("%H:%M:%S").to_string();
-                                    if t.nanosecond() == 0 {
-                                        base
-                                    } else {
-                                        let frac = format!("{:.6}", t.nanosecond() as f64 / 1_000_000_000.0);
-                                        format!("{}{}", base, frac.trim_start_matches('0').trim_end_matches('0'))
-                                    }
-                                })
-                                .map(Value::String)
-                                .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
-                                .unwrap_or(Value::Null)
-                        }
-                        t if t == "DATETIME" || t.starts_with("DATETIME(") => {
-                            row.try_get::<chrono::NaiveDateTime, _>(col_name)
-                                .map(|dt| {
-                                    let base = dt.format("%Y-%m-%d %H:%M:%S").to_string();
-                                    if dt.nanosecond() == 0 { base }
-                                    else {
-                                        let frac = format!("{:.6}", dt.nanosecond() as f64 / 1_000_000_000.0);
-                                        format!("{}{}", base, frac.trim_start_matches('0').trim_end_matches('0'))
-                                    }
-                                })
-                                .map(Value::String)
-                                .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
-                                .unwrap_or(Value::Null)
-                        }
-                        t if t == "TIMESTAMP" || t.starts_with("TIMESTAMP(") => {
-                            let s = row.try_get::<chrono::NaiveDateTime, _>(col_name)
-                                .map(|dt| {
-                                    let base = dt.format("%Y-%m-%d %H:%M:%S").to_string();
-                                    if dt.nanosecond() == 0 { base }
-                                    else {
-                                        let frac = format!("{:.6}", dt.nanosecond() as f64 / 1_000_000_000.0);
-                                        format!("{}{}", base, frac.trim_start_matches('0').trim_end_matches('0'))
-                                    }
-                                })
-                                .or_else(|_| row.try_get::<chrono::DateTime<chrono::Utc>, _>(col_name)
-                                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string()))
-                                .or_else(|_| row.try_get::<String, _>(col_name));
-                            s.map(Value::String).unwrap_or(Value::Null)
-                        }
-                        t if t.contains("BLOB") || t == "BINARY" || t.starts_with("VARBINARY") => {
-                            row.try_get::<Vec<u8>, _>(col_name)
-                                .map(|b| {
-                                    let trimmed: Vec<u8> = b.iter().copied()
-                                        .rev().skip_while(|&x| x == 0).collect::<Vec<_>>()
-                                        .into_iter().rev().collect();
-                                    match String::from_utf8(trimmed) {
-                                        Ok(s) => Value::String(s),
-                                        Err(_) => {
-                                            let hex: String = b.iter().map(|byte| format!("{:02x}", byte)).collect();
-                                            Value::String(format!("0x{}", hex))
-                                        }
-                                    }
-                                })
-                                .unwrap_or(Value::Null)
-                        }
-                        t if t == "GEOMETRY" || t == "POINT" || t == "LINESTRING" || t == "POLYGON"
-                          || t.starts_with("MULTI") || t == "GEOMETRYCOLLECTION" => {
-                            row.try_get_unchecked::<Vec<u8>, _>(col_name)
-                                .map(|b| Value::String(mysql_wkb_to_wkt(&b)))
-                                .or_else(|_| row.try_get_unchecked::<String, _>(col_name).map(Value::String))
-                                .unwrap_or_else(|_| Value::String(format!("<{}>", type_name)))
-                        }
-                        t if t == "JSON" || t.contains("JSON") => {
-                            row.try_get_unchecked::<String, _>(col_name)
-                                .or_else(|_| row.try_get_unchecked::<Vec<u8>, _>(col_name)
-                                    .map(|b| String::from_utf8_lossy(&b).to_string()))
-                                .map(Value::String)
-                                .unwrap_or_else(|_| Value::String(format!("<{}>", type_name)))
-                        }
-                        _ => {
-                            row.try_get::<String, _>(col_name).map(Value::String)
-                                .or_else(|_| row.try_get::<Vec<u8>, _>(col_name)
-                                    .map(|b| Value::String(String::from_utf8_lossy(&b).to_string())))
-                                .unwrap_or_else(|_| Value::String(format!("<{}>", type_name)))
-                        }
-                    }
-                }
-            };
-            map.insert(col_name.to_string(), value);
-        }
-        result_rows.push(Value::Object(map));
-    }
-
+    let result_rows = rows.iter().map(parse_mysql_row).collect();
     (columns, result_rows)
 }
 
@@ -527,11 +526,53 @@ impl DatabaseDriver for MySqlDriver {
         table: &str,
     ) -> Result<(Vec<ColumnInfo>, Vec<Value>), String> {
         let query = format!("SELECT * FROM `{}`.`{}`", database, table);
-        let rows = sqlx::query(&query)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| format!("Failed to fetch data: {}", e))?;
-        Ok(rows_to_parsed(rows))
+        let mut conn = self.pool.acquire().await.map_err(|e| e.to_string())?;
+        let mut stream = sqlx::query(&query).fetch(&mut *conn);
+        let mut columns: Vec<ColumnInfo> = Vec::new();
+        let mut result_rows: Vec<Value> = Vec::new();
+        while let Some(row_result) = stream.next().await {
+            let row = row_result.map_err(|e| format!("Failed to fetch data: {}", e))?;
+            if columns.is_empty() {
+                for col in row.columns() {
+                    columns.push(ColumnInfo {
+                        name: col.name().to_string(),
+                        type_name: col.type_info().name().to_string(),
+                    });
+                }
+            }
+            result_rows.push(parse_mysql_row(&row));
+        }
+        Ok((columns, result_rows))
+    }
+
+    async fn stream_all_rows(
+        &self,
+        database: &str,
+        table: &str,
+        tx: tokio::sync::mpsc::Sender<(Option<Vec<ColumnInfo>>, Value)>,
+    ) -> Result<(), String> {
+        let query = format!("SELECT * FROM `{}`.`{}`", database, table);
+        let mut conn = self.pool.acquire().await.map_err(|e| e.to_string())?;
+        let mut stream = sqlx::query(&query).fetch(&mut *conn);
+        let mut columns: Vec<ColumnInfo> = Vec::new();
+        while let Some(row_result) = stream.next().await {
+            let row = row_result.map_err(|e| format!("Failed to stream data: {}", e))?;
+            let col_opt = if columns.is_empty() {
+                for col in row.columns() {
+                    columns.push(ColumnInfo {
+                        name: col.name().to_string(),
+                        type_name: col.type_info().name().to_string(),
+                    });
+                }
+                Some(columns.clone())
+            } else {
+                None
+            };
+            if tx.send((col_opt, parse_mysql_row(&row))).await.is_err() {
+                break; // receiver dropped (export cancelled)
+            }
+        }
+        Ok(())
     }
 
     async fn execute_query(
@@ -539,7 +580,11 @@ impl DatabaseDriver for MySqlDriver {
         database: Option<&str>,
         sql: &str,
         query_id: Option<&str>,
+        on_progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
+        on_chunk: Option<Arc<dyn Fn(Option<Vec<ColumnInfo>>, Vec<serde_json::Value>) + Send + Sync>>,
     ) -> Result<RawQueryResult, String> {
+        const CHUNK_SIZE: usize = 500;
+
         let trimmed = sql.trim().to_uppercase();
         let is_select = trimmed.starts_with("SELECT")
             || trimmed.starts_with("SHOW")
@@ -573,18 +618,83 @@ impl DatabaseDriver for MySqlDriver {
         }
 
         let result = if is_select {
-            let rows: Vec<sqlx::mysql::MySqlRow> = conn
-                .fetch_all(sql)
-                .await
-                .map_err(|e| format!("Query error: {}", e))?;
-            let row_count = rows.len() as u64;
-            let (columns, result_rows) = rows_to_parsed(rows);
-            Ok(RawQueryResult {
-                columns,
-                rows: result_rows,
-                rows_affected: row_count,
-                is_select: true,
-            })
+            let mut stream = conn.fetch(sql);
+            let mut columns: Vec<ColumnInfo> = Vec::new();
+            let mut row_count: u64 = 0;
+
+            if on_chunk.is_some() {
+                // ── Streaming mode: flush rows in chunks ──────────────────────
+                let mut chunk_buf: Vec<Value> = Vec::with_capacity(CHUNK_SIZE);
+                let mut first_chunk = true;
+
+                while let Some(row_result) = stream.next().await {
+                    let row = row_result.map_err(|e| format!("Query error: {}", e))?;
+                    if columns.is_empty() {
+                        for col in row.columns() {
+                            columns.push(ColumnInfo {
+                                name: col.name().to_string(),
+                                type_name: col.type_info().name().to_string(),
+                            });
+                        }
+                    }
+                    chunk_buf.push(parse_mysql_row(&row));
+                    row_count += 1;
+
+                    if chunk_buf.len() >= CHUNK_SIZE {
+                        if let Some(ref cb) = on_chunk {
+                            let cols = if first_chunk { Some(columns.clone()) } else { None };
+                            cb(cols, std::mem::replace(&mut chunk_buf, Vec::with_capacity(CHUNK_SIZE)));
+                            first_chunk = false;
+                        }
+                        if let Some(ref cb) = on_progress {
+                            cb(row_count);
+                        }
+                    }
+                }
+                // Flush remaining rows
+                if !chunk_buf.is_empty() {
+                    if let Some(ref cb) = on_chunk {
+                        let cols = if first_chunk { Some(columns.clone()) } else { None };
+                        cb(cols, chunk_buf);
+                    }
+                }
+                if let Some(ref cb) = on_progress {
+                    cb(row_count);
+                }
+                Ok(RawQueryResult {
+                    columns,
+                    rows: vec![], // rows were streamed via on_chunk
+                    rows_affected: row_count,
+                    is_select: true,
+                })
+            } else {
+                // ── Buffered mode (legacy): accumulate all rows ───────────────
+                let mut result_rows: Vec<Value> = Vec::new();
+                while let Some(row_result) = stream.next().await {
+                    let row = row_result.map_err(|e| format!("Query error: {}", e))?;
+                    if columns.is_empty() {
+                        for col in row.columns() {
+                            columns.push(ColumnInfo {
+                                name: col.name().to_string(),
+                                type_name: col.type_info().name().to_string(),
+                            });
+                        }
+                    }
+                    result_rows.push(parse_mysql_row(&row));
+                    row_count += 1;
+                    if let Some(ref cb) = on_progress {
+                        if row_count % 1000 == 0 {
+                            cb(row_count);
+                        }
+                    }
+                }
+                Ok(RawQueryResult {
+                    columns,
+                    rows: result_rows,
+                    rows_affected: row_count,
+                    is_select: true,
+                })
+            }
         } else {
             let result: sqlx::mysql::MySqlQueryResult = conn
                 .execute(sql)
@@ -842,6 +952,9 @@ impl DatabaseDriver for MySqlDriver {
             return vec![Err(format!("Failed to select database: {}", e))];
         }
         let _ = conn.execute("SET FOREIGN_KEY_CHECKS=0").await;
+        // Disable autocommit so all DML in this batch is committed in one shot,
+        // avoiding a costly fsync per statement. DDL still triggers implicit commits.
+        let _ = conn.execute("SET autocommit=0").await;
 
         let mut results = Vec::with_capacity(statements.len());
         for stmt in statements {
@@ -853,6 +966,8 @@ impl DatabaseDriver for MySqlDriver {
             );
         }
 
+        let _ = conn.execute("COMMIT").await;
+        let _ = conn.execute("SET autocommit=1").await;
         let _ = conn.execute("SET FOREIGN_KEY_CHECKS=1").await;
         results
     }
@@ -955,27 +1070,59 @@ pub fn execute_query(
     sql: String,
     query_id: String,
 ) -> Result<(), String> {
-    let env = {
+    let (env, allow_writes) = {
         let configs = state.connections_config.read();
         configs
             .get(&connection_id)
-            .map(|c| c.environment)
-            .unwrap_or(crate::connections::Environment::Local)
+            .map(|c| (c.environment, c.allow_writes))
+            .unwrap_or((crate::connections::Environment::Local, true))
     };
-    crate::security::is_query_safe(&sql, env)?;
+    crate::security::is_query_safe(&sql, env, allow_writes)?;
     let driver = state.get_driver(&connection_id)?;
     let app_handle = state.app_handle.clone();
 
     tauri::async_runtime::spawn(async move {
         let t0 = std::time::Instant::now();
-        let result = driver.execute_query(database.as_deref(), &sql, Some(&query_id)).await;
+
+        let progress_handle = app_handle.clone();
+        let progress_qid = query_id.clone();
+        let on_progress: Option<Arc<dyn Fn(u64) + Send + Sync>> = Some(Arc::new(move |rows: u64| {
+            use tauri::Emitter;
+            let _ = progress_handle.emit(
+                &format!("query-progress:{}", progress_qid),
+                serde_json::json!({ "rows_fetched": rows }),
+            );
+        }));
+
+        let chunk_handle = app_handle.clone();
+        let chunk_qid = query_id.clone();
+        let on_chunk: Option<Arc<dyn Fn(Option<Vec<crate::driver::ColumnInfo>>, Vec<serde_json::Value>) + Send + Sync>> =
+            Some(Arc::new(move |columns: Option<Vec<crate::driver::ColumnInfo>>, rows: Vec<serde_json::Value>| {
+                use tauri::Emitter;
+                let _ = chunk_handle.emit(
+                    &format!("query-chunk:{}", chunk_qid),
+                    serde_json::json!({ "columns": columns, "rows": rows }),
+                );
+            }));
+
+        let result = driver.execute_query(database.as_deref(), &sql, Some(&query_id), on_progress, on_chunk).await;
         let ms = t0.elapsed().as_millis() as u64;
 
         use tauri::Emitter;
 
-        // Send result to the waiting frontend listener
+        // Send result to the waiting frontend listener.
+        // For SELECT queries rows already arrived via query-chunk events, so we omit them.
         let payload = match &result {
-            Ok(r) => serde_json::json!({ "ok": r, "duration_ms": ms }),
+            Ok(r) => serde_json::json!({
+                "ok": {
+                    "columns": r.columns,
+                    "rows": serde_json::Value::Array(vec![]),
+                    "rows_affected": r.rows_affected,
+                    "is_select": r.is_select,
+                },
+                "duration_ms": ms,
+                "streamed": r.is_select,
+            }),
             Err(e) => serde_json::json!({ "error": e, "duration_ms": ms }),
         };
         let _ = app_handle.emit(&format!("query-result:{}", query_id), payload);
@@ -1025,38 +1172,62 @@ pub async fn export_table(
     path: String,
 ) -> Result<usize, String> {
     use tauri::Emitter;
+    use std::io::{BufWriter, Write};
+    use tokio::sync::mpsc;
+
+    if format != "csv" && format != "json" && format != "sql" {
+        return Err(format!("Unknown format: {}", format));
+    }
 
     let _ = window.emit("export-progress", ExportProgress {
         current: 0,
         total: 100,
-        status: format!("Fetching data from {}...", table),
+        status: format!("Streaming data from {}...", table),
     });
 
     let driver = state.get_driver(&connection_id)?;
-    let (columns, result_rows) = driver.get_all_rows(&database, &table).await?;
-    let row_count = result_rows.len();
 
-    let _ = window.emit("export-progress", ExportProgress {
-        current: 60,
-        total: 100,
-        status: format!("Formatting as {}...", format),
+    // Channel: producer streams rows, consumer writes to disk
+    let (tx, mut rx) = mpsc::channel::<(Option<Vec<ColumnInfo>>, Value)>(512);
+
+    let db_clone = database.clone();
+    let table_clone = table.clone();
+    let driver_clone = driver.clone();
+    let stream_handle = tokio::spawn(async move {
+        driver_clone.stream_all_rows(&db_clone, &table_clone, tx).await
     });
 
-    let content = match format.as_str() {
-        "csv" => {
-            let mut out = String::new();
-            let header: Vec<String> = columns.iter().map(|c| escape_csv(&c.name)).collect();
-            out.push_str(&header.join(","));
-            out.push('\n');
-            for (i, row) in result_rows.iter().enumerate() {
-                if i % 1000 == 0 && row_count > 0 {
-                    let _ = window.emit("export-progress", ExportProgress {
-                        current: 60 + ((i as f32 / row_count as f32) * 30.0) as usize,
-                        total: 100,
-                        status: format!("Formatting row {} of {}...", i, row_count),
-                    });
+    let file = std::fs::File::create(&path)
+        .map_err(|e| format!("Failed to create file: {}", e))?;
+    let mut writer = BufWriter::new(file);
+    let mut columns: Vec<ColumnInfo> = Vec::new();
+    let mut row_count: usize = 0;
+    let mut header_written = false;
+
+    while let Some((col_opt, row)) = rx.recv().await {
+        if let Some(cols) = col_opt {
+            columns = cols;
+        }
+
+        row_count += 1;
+
+        if row_count % 5000 == 0 {
+            let _ = window.emit("export-progress", ExportProgress {
+                current: 50,
+                total: 100,
+                status: format!("Writing row {}...", row_count),
+            });
+        }
+
+        match format.as_str() {
+            "csv" => {
+                if !header_written {
+                    let header: Vec<String> = columns.iter().map(|c| escape_csv(&c.name)).collect();
+                    writeln!(writer, "{}", header.join(","))
+                        .map_err(|e| format!("Write error: {}", e))?;
+                    header_written = true;
                 }
-                if let Value::Object(map) = row {
+                if let Value::Object(ref map) = row {
                     let values: Vec<String> = columns.iter().map(|c| {
                         match map.get(&c.name) {
                             Some(Value::Null) | None => String::new(),
@@ -1065,28 +1236,35 @@ pub async fn export_table(
                             Some(v) => v.to_string(),
                         }
                     }).collect();
-                    out.push_str(&values.join(","));
-                    out.push('\n');
+                    writeln!(writer, "{}", values.join(","))
+                        .map_err(|e| format!("Write error: {}", e))?;
                 }
             }
-            out
-        }
-        "json" => serde_json::to_string_pretty(&result_rows).map_err(|e| e.to_string())?,
-        "sql" => {
-            let col_names = columns.iter()
-                .map(|c| format!("`{}`", c.name))
-                .collect::<Vec<_>>()
-                .join(", ");
-            let mut out = format!("-- Export of `{}`.`{}`\n\n", database, table);
-            for (i, row) in result_rows.iter().enumerate() {
-                if i % 1000 == 0 && row_count > 0 {
-                    let _ = window.emit("export-progress", ExportProgress {
-                        current: 60 + ((i as f32 / row_count as f32) * 30.0) as usize,
-                        total: 100,
-                        status: format!("Formatting row {} of {}...", i, row_count),
-                    });
+            "json" => {
+                if !header_written {
+                    writer.write_all(b"[\n")
+                        .map_err(|e| format!("Write error: {}", e))?;
+                    header_written = true;
+                } else {
+                    writer.write_all(b",\n")
+                        .map_err(|e| format!("Write error: {}", e))?;
                 }
-                if let Value::Object(map) = row {
+                let row_str = serde_json::to_string(&row)
+                    .map_err(|e| format!("Serialization error: {}", e))?;
+                writer.write_all(row_str.as_bytes())
+                    .map_err(|e| format!("Write error: {}", e))?;
+            }
+            "sql" => {
+                if !header_written {
+                    writeln!(writer, "-- Export of `{}`.`{}`\n", database, table)
+                        .map_err(|e| format!("Write error: {}", e))?;
+                    header_written = true;
+                }
+                if let Value::Object(ref map) = row {
+                    let col_names = columns.iter()
+                        .map(|c| format!("`{}`", c.name))
+                        .collect::<Vec<_>>()
+                        .join(", ");
                     let values: Vec<String> = columns.iter().map(|c| {
                         match map.get(&c.name) {
                             Some(Value::Null) | None => "NULL".to_string(),
@@ -1095,24 +1273,28 @@ pub async fn export_table(
                             Some(v) => v.to_string(),
                         }
                     }).collect();
-                    out.push_str(&format!(
-                        "INSERT INTO `{}` ({}) VALUES ({});\n",
-                        table, col_names, values.join(", ")
-                    ));
+                    writeln!(writer, "INSERT INTO `{}` ({}) VALUES ({});", table, col_names, values.join(", "))
+                        .map_err(|e| format!("Write error: {}", e))?;
                 }
             }
-            out
+            _ => unreachable!(),
         }
-        _ => return Err(format!("Unknown format: {}", format)),
-    };
+    }
 
-    let _ = window.emit("export-progress", ExportProgress {
-        current: 90,
-        total: 100,
-        status: "Saving file...".to_string(),
-    });
+    // Close JSON array
+    if format == "json" {
+        if header_written {
+            writer.write_all(b"\n]").map_err(|e| format!("Write error: {}", e))?;
+        } else {
+            writer.write_all(b"[]").map_err(|e| format!("Write error: {}", e))?;
+        }
+    }
 
-    std::fs::write(&path, content).map_err(|e| format!("Failed to write file: {}", e))?;
+    writer.flush().map_err(|e| format!("Write error: {}", e))?;
+
+    // Propagate any streaming error
+    stream_handle.await
+        .map_err(|e| format!("Stream task error: {}", e))??;
 
     let _ = window.emit("export-progress", ExportProgress {
         current: 100,

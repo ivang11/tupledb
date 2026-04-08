@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, shallowRef, computed, markRaw, nextTick, onMounted, watch } from 'vue'
+import { ref, shallowRef, triggerRef, computed, markRaw, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -15,14 +15,34 @@ import {
   TrashIcon,
   WandSparklesIcon,
   Square,
+  BookmarkIcon,
+  BookmarkPlusIcon,
+  PencilIcon,
 } from 'lucide-vue-next'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { useConnectionStore } from '@/stores/connections'
+import { useSavedQueriesStore } from '@/stores/savedQueries'
+import SaveQueryDialog from '@/components/dialogs/SaveQueryDialog.vue'
+import type { SavedQuery } from '@/types/savedQuery'
+import { EditorView, basicSetup } from 'codemirror'
+import { placeholder, keymap } from '@codemirror/view'
+import { MySQL } from '@codemirror/lang-sql'
+import { EditorState, Compartment } from '@codemirror/state'
+import { useKeybindings } from '@/composables/useKeybindings'
+import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
+import { type CompletionContext, type CompletionResult, type Completion } from '@codemirror/autocomplete'
+import { tags } from '@lezer/highlight'
 
 const props = defineProps<{
   connectionId: string
   database: string | null
   availableDatabases: string[]
+  initialSql?: string
+  // columns per table for databases already loaded in open tabs
+  openTabsSchema?: Record<string, string[]>
 }>()
+
+const emit = defineEmits<{ 'update:sql': [string] }>()
 
 interface ColumnInfo {
   name: string
@@ -50,17 +70,145 @@ interface HistoryEntry {
 const HISTORY_KEY = 'db-viewer:query-history'
 const MAX_HISTORY = 100
 
-const sql = ref('')
+const connStore = useConnectionStore()
+const savedStore = useSavedQueriesStore()
+
+// Cache of fetched column names keyed by table name
+const columnCache = ref<Record<string, string[]>>({})
+
+const sql = ref(props.initialSql ?? '')
 const selectedDb = ref<string | null>(props.database)
-// shallowRef + markRaw: Vue tracks the reference but never wraps row objects in Proxies
+const dbSearch = ref('')
+const showDbDropdown = ref(false)
+const dbSelectorEl = ref<HTMLElement | null>(null)
+const focusedDbIndex = ref(-1)
+
+const filteredDbs = computed(() => {
+  const q = dbSearch.value.trim().toLowerCase()
+  if (!q) return props.availableDatabases
+  return props.availableDatabases.filter(db => db.toLowerCase().includes(q))
+})
+
+watch(filteredDbs, () => {
+  focusedDbIndex.value = -1
+})
+
+function openDbDropdown() {
+  dbSearch.value = ''
+  showDbDropdown.value = true
+  focusedDbIndex.value = -1
+  nextTick(() => {
+    dbSelectorEl.value?.querySelector('input')?.focus()
+  })
+}
+
+function selectDb(db: string | null) {
+  selectedDb.value = db
+  showDbDropdown.value = false
+  dbSearch.value = ''
+}
+
+function handleDbClickOutside(e: MouseEvent) {
+  if (!dbSelectorEl.value?.contains(e.target as Node)) {
+    showDbDropdown.value = false
+    dbSearch.value = ''
+  }
+}
+
+function navigateDb(dir: number) {
+  const total = filteredDbs.value.length + 1
+  if (total === 0) return
+  
+  if (focusedDbIndex.value === -1) {
+    focusedDbIndex.value = dir > 0 ? 0 : total - 1
+  } else {
+    focusedDbIndex.value = (focusedDbIndex.value + dir + total) % total
+  }
+  
+  nextTick(() => {
+    if (!dbSelectorEl.value) return
+    const container = dbSelectorEl.value.querySelector('.overflow-y-auto')
+    if (!container) return
+    const items = container.querySelectorAll('button')
+    const activeItem = items[focusedDbIndex.value] as HTMLElement | undefined
+    if (activeItem) {
+      activeItem.scrollIntoView({ block: 'nearest' })
+    }
+  })
+}
+
+function selectFocusedDb() {
+  if (focusedDbIndex.value === -1) return
+  if (focusedDbIndex.value === 0) {
+    selectDb(null)
+  } else {
+    selectDb(filteredDbs.value[focusedDbIndex.value - 1])
+  }
+}
+
+function handleDbKeydown(e: KeyboardEvent) {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    navigateDb(1)
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    navigateDb(-1)
+  } else if (e.key === 'Enter') {
+    e.preventDefault()
+    selectFocusedDb()
+  } else if (e.key === 'Escape') {
+    showDbDropdown.value = false
+  }
+}
+// shallowRef + markRaw: Vue tracks the reference but never wraps row objects in Proxies.
+// triggerRef() forces the virtualizer to re-read count after chunk appends.
 const result = shallowRef<RawQueryResult | null>(null)
 const queryError = ref<string | null>(null)
 const isRunning = ref(false)
 const isCancelling = ref(false)
 const executionTime = ref<number | null>(null)
+const rowsFetched = ref<number | null>(null)
 const showHistory = ref(false)
+const showSaved = ref(false)
 const history = ref<HistoryEntry[]>([])
 const activeQueryId = ref<string | null>(null)
+
+// Saved queries
+const saveDialogOpen = ref(false)
+const editingQuery = ref<SavedQuery | null>(null)
+const savedSearch = ref('')
+
+const filteredSaved = computed(() => {
+  const q = savedSearch.value.trim().toLowerCase()
+  if (!q) return savedStore.queries
+  return savedStore.queries.filter(
+    sq => sq.name.toLowerCase().includes(q) || sq.sql.toLowerCase().includes(q),
+  )
+})
+
+function openSaveDialog(editing: SavedQuery | null = null) {
+  editingQuery.value = editing
+  saveDialogOpen.value = true
+}
+
+function toggleSaved() {
+  showSaved.value = !showSaved.value
+  if (showSaved.value) showHistory.value = false
+}
+
+function toggleHistory() {
+  showHistory.value = !showHistory.value
+  if (showHistory.value) showSaved.value = false
+}
+
+function loadFromSaved(sq: SavedQuery) {
+  sql.value = sq.sql
+  if (sq.database) selectedDb.value = sq.database
+}
+
+async function deleteSaved(id: string) {
+  await savedStore.remove(id)
+}
 
 // ---- Result table virtualizer ----
 const resultScrollEl = ref<HTMLElement | null>(null)
@@ -83,6 +231,10 @@ const resultPaddingBottom = computed(() =>
 
 watch(() => props.database, (val) => {
   if (val && !selectedDb.value) selectedDb.value = val
+})
+
+watch(selectedDb, () => {
+  columnCache.value = {}
 })
 
 function loadHistory() {
@@ -124,18 +276,49 @@ async function runQuery() {
   isCancelling.value = false
   queryError.value = null
   result.value = null
+  rowsFetched.value = null
   const start = Date.now()
 
   let unlisten: (() => void) | null = null
+  let unlistenProgress: (() => void) | null = null
+  let unlistenChunk: (() => void) | null = null
 
   try {
-    // Register result listener BEFORE invoking to avoid any race condition
+    // Register ALL listeners BEFORE invoking to avoid race conditions
     let resolvePayload!: (p: any) => void
     const payloadPromise = new Promise<any>(r => { resolvePayload = r })
 
     unlisten = await listen<any>(`query-result:${queryId}`, event => {
       resolvePayload(event.payload)
     })
+
+    unlistenProgress = await listen<{ rows_fetched: number }>(`query-progress:${queryId}`, event => {
+      rowsFetched.value = event.payload.rows_fetched
+    })
+
+    // Chunk listener: builds result incrementally as rows arrive
+    unlistenChunk = await listen<{ columns?: ColumnInfo[]; rows: Record<string, any>[] }>(
+      `query-chunk:${queryId}`,
+      event => {
+        const { columns, rows } = event.payload
+        if (!result.value) {
+          // First chunk — create the result object and scroll to top
+          result.value = markRaw({
+            columns: columns ?? [],
+            rows,
+            rows_affected: rows.length,
+            is_select: true,
+          })
+          nextTick(() => resultScrollEl.value?.scrollTo(0, 0))
+        } else {
+          // Subsequent chunks — append rows and force virtualizer to re-count
+          result.value.rows.push(...rows)
+          result.value.rows_affected = result.value.rows.length
+          triggerRef(result)
+        }
+        rowsFetched.value = result.value.rows.length
+      },
+    )
 
     // This returns immediately — the query runs in a background task on the backend
     await invoke('execute_query', {
@@ -145,27 +328,37 @@ async function runQuery() {
       queryId,
     })
 
-    // Now wait for the backend to emit the result event
+    // Wait for the backend to signal completion
     const payload = await payloadPromise
-    // Use backend-measured time (pure MySQL execution, no IPC overhead)
     executionTime.value = payload.duration_ms as number
 
     if (payload.error) {
       if (!isCancelling.value) {
+        // Clear any partial streamed result on error
+        result.value = null
         throw new Error(payload.error)
       }
     } else {
-      // markRaw prevents Vue from making every row object reactive (major perf win)
-      result.value = markRaw(payload.ok as RawQueryResult)
-      nextTick(() => resultScrollEl.value?.scrollTo(0, 0))
+      const meta = payload.ok as RawQueryResult
+      if (payload.streamed) {
+        // Rows already arrived via chunks — just update final metadata
+        if (result.value) {
+          (result.value as RawQueryResult).rows_affected = meta.rows_affected
+          triggerRef(result)
+        }
+      } else {
+        // Non-SELECT or legacy buffered result
+        result.value = markRaw(meta)
+        nextTick(() => resultScrollEl.value?.scrollTo(0, 0))
+      }
       addToHistory({
         id: crypto.randomUUID(),
         sql: q,
         database: selectedDb.value,
         executedAt: new Date().toISOString(),
         durationMs: payload.duration_ms as number,
-        rowCount: (payload.ok as RawQueryResult).rows_affected,
-        isSelect: (payload.ok as RawQueryResult).is_select,
+        rowCount: meta.rows_affected,
+        isSelect: meta.is_select,
       })
     }
   } catch (e: any) {
@@ -185,6 +378,8 @@ async function runQuery() {
     }
   } finally {
     unlisten?.()
+    unlistenProgress?.()
+    unlistenChunk?.()
     isRunning.value = false
     isCancelling.value = false
     activeQueryId.value = null
@@ -206,16 +401,6 @@ async function cancelQuery() {
   }
 }
 
-function handleKeydown(e: KeyboardEvent) {
-  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-    e.preventDefault()
-    runQuery()
-  }
-  if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
-    e.preventDefault()
-    beautify()
-  }
-}
 
 function beautify() {
   if (!sql.value.trim()) return
@@ -248,25 +433,277 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(2)}s`
 }
 
+// ── CodeMirror editor ────────────────────────────────────────────────────────
+
+const editorEl = ref<HTMLElement | null>(null)
+let editorView: EditorView | null = null
+let suppressSync = false
+const keymapCompartment = new Compartment()
+const kb = useKeybindings()
+
+const darkTheme = EditorView.theme({
+  '&': { backgroundColor: '#0d1117', height: '100%' },
+  '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '13px', lineHeight: '1.65' },
+  '.cm-content': { color: '#e6edf3', padding: '12px 0', caretColor: '#e6edf3' },
+  '.cm-line': { padding: '0 16px' },
+  '.cm-cursor': { borderLeftColor: '#e6edf3', borderLeftWidth: '2px' },
+  '.cm-activeLine': { backgroundColor: 'rgba(255,255,255,0.03)' },
+  '.cm-gutters': { backgroundColor: '#0d1117', borderRight: '1px solid #21262d', color: '#484f58', minWidth: '40px' },
+  '.cm-activeLineGutter': { backgroundColor: 'rgba(255,255,255,0.03)' },
+  '.cm-gutterElement': { padding: '0 8px 0 4px', fontSize: '11px' },
+  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': { backgroundColor: 'rgba(56,139,253,0.18) !important' },
+  '&.cm-focused': { outline: 'none' },
+  '.cm-tooltip': { backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)', color: '#e6edf3', overflow: 'hidden' },
+  '.cm-tooltip-autocomplete > ul': { maxHeight: '200px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '12px' },
+  '.cm-tooltip-autocomplete > ul > li': { padding: '4px 12px', display: 'flex', gap: '8px', alignItems: 'center' },
+  '.cm-tooltip-autocomplete > ul > li[aria-selected]': { backgroundColor: '#1f6feb', color: '#ffffff' },
+  '.cm-completionIcon': { opacity: '0.6', fontSize: '10px', width: '14px' },
+  '.cm-completionLabel': { flex: '1' },
+  '.cm-completionDetail': { opacity: '0.5', fontSize: '11px', fontStyle: 'normal' },
+  '.cm-matchingBracket': { backgroundColor: 'rgba(56,139,253,0.15)', color: 'inherit !important' },
+}, { dark: true })
+
+const sqlHighlight = HighlightStyle.define([
+  { tag: tags.keyword, color: '#ff7b72', fontWeight: 'bold' },
+  { tag: tags.string, color: '#a5d6ff' },
+  { tag: tags.number, color: '#79c0ff' },
+  { tag: tags.comment, color: '#8b949e', fontStyle: 'italic' },
+  { tag: tags.operator, color: '#ff7b72' },
+  { tag: tags.punctuation, color: '#e6edf3' },
+  { tag: tags.name, color: '#e6edf3' },
+  { tag: tags.typeName, color: '#ffa657' },
+  { tag: tags.function(tags.name), color: '#d2a8ff' },
+  { tag: tags.special(tags.name), color: '#ffa657' },
+])
+
+function buildCurrentSchema(): Record<string, string[]> {
+  const db = selectedDb.value
+  if (!db) return {}
+  const tables = connStore.openConnections[props.connectionId]?.tables[db] ?? []
+  const schema: Record<string, string[]> = {}
+  for (const t of tables) schema[t.name] = []
+  // Merge column info from tabs that have loaded this table's structure
+  if (props.openTabsSchema) {
+    for (const [table, cols] of Object.entries(props.openTabsSchema)) {
+      if (table in schema && cols.length > 0) schema[table] = cols
+    }
+  }
+  // Merge from local fetch cache
+  for (const [table, cols] of Object.entries(columnCache.value)) {
+    if (table in schema && cols.length > 0) schema[table] = cols
+  }
+  return schema
+}
+
+async function ensureColumnsForTables(tableNames: string[]) {
+  const db = selectedDb.value
+  if (!db) return
+  const schema = buildCurrentSchema()
+  const toFetch = tableNames.filter(
+    t => t in schema && schema[t].length === 0 && !(t in columnCache.value)
+  )
+  if (toFetch.length === 0) return
+  await Promise.all(toFetch.map(async (t) => {
+    try {
+      const structure = await invoke<any[]>('get_table_structure', {
+        connectionId: props.connectionId,
+        database: db,
+        table: t,
+      })
+      columnCache.value[t] = structure.map((c: any) => c.field)
+    } catch {
+      columnCache.value[t] = []
+    }
+  }))
+}
+
+// Common SQL keywords for completion
+const SQL_KEYWORDS: Completion[] = [
+  'SELECT', 'FROM', 'WHERE', 'ORDER BY', 'GROUP BY', 'HAVING', 'LIMIT', 'OFFSET',
+  'JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 'CROSS JOIN', 'FULL JOIN',
+  'ON', 'AS', 'DISTINCT', 'AND', 'OR', 'NOT', 'IN', 'NOT IN', 'LIKE', 'ILIKE',
+  'IS NULL', 'IS NOT NULL', 'BETWEEN', 'EXISTS', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END',
+  'INSERT INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE FROM',
+  'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'COALESCE', 'IFNULL', 'IF', 'NOW',
+  'UNION', 'UNION ALL', 'WITH', 'EXPLAIN',
+].map(k => ({ label: k, type: 'keyword' as const }))
+
+// Returns the last FROM/JOIN/SELECT/WHERE/... keyword found before the cursor
+function lastSqlKeyword(text: string): string {
+  const re = /\b(SELECT|FROM|WHERE|JOIN|LEFT\s+JOIN|RIGHT\s+JOIN|INNER\s+JOIN|CROSS\s+JOIN|UPDATE|INTO|SET|ON|HAVING|GROUP\s+BY|ORDER\s+BY|AND|OR)\b/gi
+  let m: RegExpExecArray | null
+  let last = ''
+  while ((m = re.exec(text)) !== null) last = m[0].replace(/\s+/g, ' ').toUpperCase()
+  return last
+}
+
+function makeSqlCompletion() {
+  return async (context: CompletionContext): Promise<CompletionResult | null> => {
+    const word = context.matchBefore(/\w+/)
+    if (!word || (word.from === word.to && !context.explicit)) return null
+
+    // Detect tables referenced in FROM/JOIN and fetch their columns if needed
+    const fullQuery = context.state.doc.toString()
+    const tableRe = /\b(?:FROM|JOIN)\s+(\w+)/gi
+    const referencedTables: string[] = []
+    let rm: RegExpExecArray | null
+    while ((rm = tableRe.exec(fullQuery)) !== null) referencedTables.push(rm[1])
+    if (referencedTables.length > 0) await ensureColumnsForTables(referencedTables)
+
+    const textBefore = context.state.doc.sliceString(0, word.from)
+    const kw = lastSqlKeyword(textBefore)
+    const schema = buildCurrentSchema()
+    const tableNames = Object.keys(schema)
+
+    let options: Completion[]
+
+    const cols = new Set<string>()
+    for (const c of Object.values(schema)) for (const col of c) cols.add(col)
+    const colOptions = Array.from(cols).map(c => ({ label: c, type: 'property' as const, detail: 'column' }))
+    const tableOptions = tableNames.map(t => ({ label: t, type: 'class' as const, detail: 'table' }))
+
+    // Always include keywords so e.g. WHERE/ORDER are available after a table name.
+    // Context controls the ordering (most relevant first).
+    if (['FROM', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 'CROSS JOIN', 'UPDATE', 'INTO'].includes(kw)) {
+      options = [...tableOptions, ...SQL_KEYWORDS]
+    } else if (['SELECT', 'WHERE', 'ON', 'SET', 'HAVING', 'AND', 'OR'].includes(kw)) {
+      options = [...colOptions, ...tableOptions, ...SQL_KEYWORDS]
+    } else {
+      options = [...SQL_KEYWORDS, ...tableOptions]
+    }
+
+    const prefix = word.text.toLowerCase()
+    return {
+      from: word.from,
+      options: options.filter(o => o.label.toLowerCase().startsWith(prefix)),
+      validFor: /^\w*$/,
+    }
+  }
+}
+
 onMounted(() => {
   loadHistory()
+  savedStore.fetch()
+
+  if (!editorEl.value) return
+
+  editorView = new EditorView({
+    state: EditorState.create({
+      doc: sql.value,
+      extensions: [
+        keymapCompartment.of(keymap.of([
+          { key: kb.getCodeMirrorKey('runQuery'), run: () => { runQuery(); return true } },
+          { key: kb.getCodeMirrorKey('formatQuery'), run: () => { beautify(); return true } },
+        ])),
+        basicSetup,
+        MySQL.language,
+        MySQL.language.data.of({ autocomplete: makeSqlCompletion() }),
+        syntaxHighlighting(sqlHighlight, { fallback: true }),
+        darkTheme,
+        placeholder(`SELECT * FROM table WHERE ...  (${kb.getBinding('runQuery')} to run)`),
+        EditorView.updateListener.of((update) => {
+          if (update.docChanged) {
+            suppressSync = true
+            sql.value = update.state.doc.toString()
+            suppressSync = false
+            emit('update:sql', sql.value)
+          }
+        }),
+      ],
+    }),
+    parent: editorEl.value,
+  })
+})
+
+// Sync external sql changes into editor (beautify, load from history)
+watch(sql, (newVal) => {
+  if (suppressSync || !editorView) return
+  const current = editorView.state.doc.toString()
+  if (newVal !== current) {
+    editorView.dispatch({
+      changes: { from: 0, to: current.length, insert: newVal },
+    })
+  }
+})
+
+// Reconfigure CodeMirror keymap when keybindings change
+watch(
+  () => [kb.getCodeMirrorKey('runQuery'), kb.getCodeMirrorKey('formatQuery')] as const,
+  () => {
+    if (!editorView) return
+    editorView.dispatch({
+      effects: keymapCompartment.reconfigure(keymap.of([
+        { key: kb.getCodeMirrorKey('runQuery'), run: () => { runQuery(); return true } },
+        { key: kb.getCodeMirrorKey('formatQuery'), run: () => { beautify(); return true } },
+      ])),
+    })
+  },
+)
+
+onBeforeUnmount(() => {
+  editorView?.destroy()
+  editorView = null
+})
+
+watch(showDbDropdown, (val) => {
+  if (val) window.addEventListener('mousedown', handleDbClickOutside)
+  else window.removeEventListener('mousedown', handleDbClickOutside)
 })
 </script>
 
 <template>
   <div class="flex flex-col min-h-0 overflow-hidden">
     <!-- Toolbar -->
-    <div class="h-12 border-b flex items-center gap-3 px-4 bg-background/50 backdrop-blur-sm shrink-0">
+    <div class="h-12 border-b flex items-center gap-3 px-4 bg-background/50 backdrop-blur-sm shrink-0 relative z-10">
       <!-- Database selector -->
-      <div class="flex items-center gap-1.5">
+      <div ref="dbSelectorEl" class="flex items-center gap-1.5 relative">
         <DatabaseIcon class="size-3.5 text-muted-foreground shrink-0" />
-        <select
-          v-model="selectedDb"
-          class="h-7 text-xs bg-muted/40 border border-input rounded-md px-2 pr-6 focus:outline-none focus:ring-1 focus:ring-ring text-foreground appearance-none cursor-pointer min-w-[140px]"
+        <button
+          @click="openDbDropdown"
+          class="h-7 text-xs bg-muted/40 border border-input rounded-md px-2 pr-2 focus:outline-none focus:ring-1 focus:ring-ring text-foreground cursor-pointer min-w-35 text-left truncate"
+          :class="showDbDropdown ? 'ring-1 ring-ring border-ring' : ''"
         >
-          <option :value="null">— no database —</option>
-          <option v-for="db in availableDatabases" :key="db" :value="db">{{ db }}</option>
-        </select>
+          {{ selectedDb ?? '— no database —' }}
+        </button>
+
+        <!-- Dropdown -->
+        <div
+          v-if="showDbDropdown"
+          class="absolute top-8 left-6 z-50 min-w-45 bg-popover text-popover-foreground border border-border rounded-lg shadow-xl overflow-hidden"
+        >
+          <div class="p-1.5 border-b">
+            <input
+              v-model="dbSearch"
+              type="text"
+              placeholder="Filter..."
+              class="w-full h-7 text-xs bg-muted/40 rounded-md px-2 focus:outline-none focus:ring-1 focus:ring-ring"
+              @keydown="handleDbKeydown"
+            />
+          </div>
+          <div class="max-h-52 overflow-y-auto py-1">
+            <button
+              class="w-full text-left px-3 py-1.5 text-xs text-muted-foreground transition-colors"
+              :class="[
+                selectedDb === null ? 'font-bold text-foreground' : '',
+                focusedDbIndex === 0 ? 'bg-primary/20 text-foreground ring-inset ring-1 ring-primary/30' : 'hover:bg-muted/50'
+              ]"
+              @click="selectDb(null)"
+              @mousemove="focusedDbIndex = 0"
+            >— no database —</button>
+            <button
+              v-for="(db, index) in filteredDbs"
+              :key="db"
+              class="w-full text-left px-3 py-1.5 text-xs transition-colors"
+              :class="[
+                selectedDb === db ? 'font-bold text-primary' : 'text-foreground',
+                focusedDbIndex === index + 1 ? 'bg-primary/20 text-primary ring-inset ring-1 ring-primary/30' : 'hover:bg-muted/50'
+              ]"
+              @click="selectDb(db)"
+              @mousemove="focusedDbIndex = index + 1"
+            >{{ db }}</button>
+            <div v-if="filteredDbs.length === 0" class="px-3 py-2 text-xs text-muted-foreground/50">No results</div>
+          </div>
+        </div>
       </div>
 
       <div class="flex-1" />
@@ -288,9 +725,36 @@ onMounted(() => {
         <span class="hidden sm:inline">Format</span>
       </button>
 
+      <!-- Save query button -->
+      <button
+        @click="openSaveDialog(null)"
+        :disabled="!sql.trim()"
+        class="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        title="Guardar query"
+      >
+        <BookmarkPlusIcon class="size-3.5" />
+        <span class="hidden sm:inline">Guardar</span>
+      </button>
+
+      <!-- Saved queries toggle -->
+      <button
+        @click="toggleSaved"
+        :class="[
+          'flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold transition-colors',
+          showSaved
+            ? 'bg-primary/10 text-primary'
+            : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+        ]"
+        title="Queries guardadas"
+      >
+        <BookmarkIcon class="size-3.5" />
+        <span class="hidden sm:inline">Guardadas</span>
+        <span v-if="savedStore.queries.length > 0" class="text-[9px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-black">{{ savedStore.queries.length }}</span>
+      </button>
+
       <!-- History toggle -->
       <button
-        @click="showHistory = !showHistory"
+        @click="toggleHistory"
         :class="[
           'flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold transition-colors',
           showHistory
@@ -303,6 +767,12 @@ onMounted(() => {
         <span class="hidden sm:inline">History</span>
         <span v-if="history.length > 0" class="text-[9px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-black">{{ history.length }}</span>
       </button>
+
+      <!-- Live row counter (while running and rows are coming in) -->
+      <span
+        v-if="isRunning && rowsFetched !== null"
+        class="text-[10px] font-bold text-muted-foreground tabular-nums"
+      >{{ rowsFetched.toLocaleString() }} rows…</span>
 
       <!-- Cancel button (only while running) -->
       <button
@@ -325,7 +795,7 @@ onMounted(() => {
       >
         <PlayIcon class="size-3.5" />
         Run
-        <span class="text-[9px] opacity-60 hidden sm:inline">⌘↵</span>
+        <span class="text-[9px] opacity-60 hidden sm:inline">Ctrl/⌘ ↵</span>
       </button>
     </div>
 
@@ -333,15 +803,9 @@ onMounted(() => {
     <div class="flex-1 flex min-h-0 overflow-hidden">
       <!-- Left: SQL editor + results -->
       <div class="flex-1 flex flex-col min-w-0 min-h-0">
-        <!-- SQL editor: fixed height so results get stable space -->
-        <div class="h-44 shrink-0 border-b bg-[#0d1117]">
-          <textarea
-            v-model="sql"
-            @keydown="handleKeydown"
-            placeholder="SELECT * FROM table WHERE ...  (⌘+Enter to run)"
-            class="w-full h-full resize-none bg-transparent text-[13px] font-mono text-[#e6edf3] placeholder:text-[#484f58] p-4 focus:outline-none leading-relaxed"
-            spellcheck="false"
-          />
+        <!-- SQL editor (CodeMirror) -->
+        <div class="h-44 shrink-0 border-b bg-[#0d1117] overflow-hidden">
+          <div ref="editorEl" class="h-full overflow-auto" />
         </div>
 
         <!-- Results -->
@@ -381,7 +845,7 @@ onMounted(() => {
                   <th
                     v-for="col in result.columns"
                     :key="col.name"
-                    class="sticky top-0 z-20 bg-background/95 backdrop-blur-md px-4 py-3 border-b border-r last:border-r-0 text-left whitespace-nowrap"
+                    class="sticky top-0 z-20 bg-background backdrop-blur-md px-4 py-3 border-b border-r last:border-r-0 text-left whitespace-nowrap"
                     style="min-width: 140px;"
                   >
                     <div class="text-xs font-semibold font-mono tracking-normal text-foreground">{{ col.name }}</div>
@@ -434,6 +898,69 @@ onMounted(() => {
         </div>
       </div>
 
+      <!-- Saved queries panel -->
+      <div
+        v-if="showSaved"
+        class="w-72 border-l flex flex-col bg-muted/5 shrink-0"
+      >
+        <div class="h-10 border-b flex items-center justify-between px-3 shrink-0">
+          <span class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Queries Guardadas</span>
+          <button
+            @click="showSaved = false"
+            class="size-6 flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
+          >
+            <XIcon class="size-3.5" />
+          </button>
+        </div>
+        <div class="px-2 pt-2 pb-1 shrink-0">
+          <input
+            v-model="savedSearch"
+            type="text"
+            placeholder="Buscar..."
+            class="w-full h-7 text-xs bg-muted/40 rounded-md px-2 border border-border/50 focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <ScrollArea class="flex-1">
+          <div v-if="filteredSaved.length === 0" class="flex items-center justify-center p-4 text-muted-foreground/30 text-xs text-center">
+            {{ savedStore.queries.length === 0 ? 'Aún no hay queries guardadas' : 'Sin resultados' }}
+          </div>
+          <div
+            v-for="sq in filteredSaved"
+            :key="sq.id"
+            class="group border-b border-muted/40 last:border-0 hover:bg-muted/30 transition-colors"
+          >
+            <button @click="loadFromSaved(sq)" class="w-full text-left p-3 pr-2">
+              <div class="flex items-center gap-1.5 mb-1">
+                <BookmarkIcon class="size-3 text-primary/70 shrink-0" />
+                <span class="text-[11px] font-semibold text-foreground truncate flex-1">{{ sq.name }}</span>
+                <button
+                  @click.stop="openSaveDialog(sq)"
+                  class="size-5 flex items-center justify-center rounded text-muted-foreground/30 hover:text-foreground hover:bg-muted/60 opacity-0 group-hover:opacity-100 transition-all"
+                  title="Editar"
+                >
+                  <PencilIcon class="size-3" />
+                </button>
+                <button
+                  @click.stop="deleteSaved(sq.id)"
+                  class="size-5 flex items-center justify-center rounded text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-all"
+                  title="Eliminar"
+                >
+                  <XIcon class="size-3" />
+                </button>
+              </div>
+              <p v-if="sq.description" class="text-[10px] text-muted-foreground/60 mb-1 truncate">{{ sq.description }}</p>
+              <p class="text-[11px] font-mono text-foreground/50 truncate">{{ sq.sql }}</p>
+              <div class="flex items-center gap-2 mt-1.5">
+                <span v-if="sq.database" class="text-[9px] text-muted-foreground/40 font-mono truncate">{{ sq.database }}</span>
+                <span v-if="sq.connection_id" class="text-[9px] text-muted-foreground/40 truncate ml-auto">
+                  {{ connStore.connections.find(c => c.id === sq.connection_id)?.name ?? sq.connection_id }}
+                </span>
+              </div>
+            </button>
+          </div>
+        </ScrollArea>
+      </div>
+
       <!-- History panel -->
       <div
         v-if="showHistory"
@@ -483,6 +1010,13 @@ onMounted(() => {
                 </span>
                 <span class="text-[9px] text-muted-foreground/50 ml-auto">{{ formatTimeAgo(entry.executedAt) }}</span>
                 <button
+                  @click.stop="() => { sql = entry.sql; if (entry.database) selectedDb = entry.database; openSaveDialog(null) }"
+                  class="size-4 flex items-center justify-center rounded text-muted-foreground/30 hover:text-primary opacity-0 group-hover:opacity-100 transition-all"
+                  title="Guardar como favorita"
+                >
+                  <BookmarkPlusIcon class="size-3" />
+                </button>
+                <button
                   @click.stop="removeHistoryEntry(entry.id)"
                   class="size-4 flex items-center justify-center rounded text-muted-foreground/30 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
                 >
@@ -501,4 +1035,14 @@ onMounted(() => {
       </div>
     </div>
   </div>
+
+  <!-- Save Query Dialog -->
+  <SaveQueryDialog
+    v-model:open="saveDialogOpen"
+    :sql="sql"
+    :database="selectedDb"
+    :connection-id="connectionId"
+    :editing="editingQuery"
+    @saved="savedStore.fetch()"
+  />
 </template>

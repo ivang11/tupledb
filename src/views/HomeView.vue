@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { ref, watch, computed, nextTick } from "vue";
+import type { TableTab } from "@/types/workspace";
 import { useConnectionStore } from "@/stores/connections";
 import QueryEditor from "@/components/QueryEditor.vue";
 import FilterBar from "@/components/FilterBar.vue";
@@ -21,6 +22,7 @@ import ExportResultDialog from "@/components/dialogs/ExportResultDialog.vue";
 import TableActionDialog from "@/components/dialogs/TableActionDialog.vue";
 import BulkTableActionDialog from "@/components/dialogs/BulkTableActionDialog.vue";
 import DatabaseActionDialog from "@/components/dialogs/DatabaseActionDialog.vue";
+import DeleteTablesDialog from "@/components/dialogs/DeleteTablesDialog.vue";
 import ConnectionContextMenu from "@/components/ConnectionContextMenu.vue";
 import TableContextMenu from "@/components/TableContextMenu.vue";
 import DatabaseContextMenu from "@/components/DatabaseContextMenu.vue";
@@ -29,7 +31,7 @@ import { usePanelResizing } from "@/composables/usePanelResizing";
 import { useTableTabs } from "@/composables/useTableTabs";
 import { useRowEditing } from "@/composables/useRowEditing";
 import { useSidebarManager } from "@/composables/useSidebarManager";
-import { useKeyboardShortcut } from "@/composables/useKeyboardShortcut";
+import { useActionShortcut } from "@/composables/useKeyboardShortcut";
 
 const store = useConnectionStore();
 
@@ -144,6 +146,7 @@ const {
   importProgress,
   importSql,
   showTableSelector,
+  isLoadingExportTables,
   selectedExportTables,
   currentExportMode,
   exportContext,
@@ -164,6 +167,8 @@ const {
   isExecutingBulkTableAction,
   isTableSelected,
   toggleTableSelection,
+  selectTableRange,
+  clearTableSelection,
   executeBulkTableDeletion,
   executeBulkTableTruncation,
   // Database actions
@@ -172,6 +177,16 @@ const {
   isExecutingDatabaseAction,
   confirmSidebarDatabaseAction,
   executeDatabaseAction,
+  // Delete tables dialog
+  showDeleteTablesDialog,
+  isLoadingDeleteTables,
+  isExecutingDeleteTables,
+  deleteTablesError,
+  deleteTablesContext,
+  deleteTablesDialogTables,
+  openDeleteTablesDialog,
+  executeDeleteTablesFromDialog,
+  executeDropDatabaseFromDeleteDialog,
   // Context menus
   sidebarContextMenu,
   sidebarTableContextMenu,
@@ -210,12 +225,36 @@ watch(
 
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
 
-useKeyboardShortcut("w", () => {
+const sidebarRef = ref<InstanceType<typeof Sidebar> | null>(null);
+
+useActionShortcut("closeTab", () => {
   const activePane = getPane(activePaneId.value);
   if (activePane?.activeTabId) {
     closeTab(activePane.activeTabId, activePane.id);
   }
 });
+
+useActionShortcut("sidebarSearch", () => {
+  sidebarRef.value?.focusSearch();
+});
+
+useActionShortcut("refreshTable", () => {
+  refreshActiveTab(activePaneId.value);
+});
+
+// Scroll sidebar to active table when the active tab changes
+watch(
+  () => {
+    const pane = getPane(activePaneId.value);
+    const tab = getPaneTab(pane);
+    return tab ? `${tab.connectionId}:${tab.database}:${tab.tableName}` : null;
+  },
+  (key) => {
+    if (!key) return;
+    const [connId, db, tableName] = key.split(":");
+    nextTick(() => sidebarRef.value?.scrollToTable(tableName, db, connId));
+  },
+);
 
 // ── FilterBar handlers (need store + tab context) ─────────────────────────────
 
@@ -252,12 +291,36 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
     sortPayload(t),
   );
 }
+
+// ── Query editor schema (tables + columns already in memory) ─────────────────
+
+function getSchema(connectionId: string, database: string | null): Record<string, string[]> {
+  if (!database) return {}
+  const tables = store.openConnections[connectionId]?.tables[database] ?? []
+  const schema: Record<string, string[]> = {}
+  for (const t of tables) {
+    schema[t.name] = []
+  }
+  // Fill columns from any open table tabs for this connection + database
+  for (const pane of panes.value) {
+    for (const tab of pane.tabs) {
+      if (tab.type === 'table' && tab.connectionId === connectionId && (tab as TableTab).database === database) {
+        const tt = tab as TableTab
+        if (tt.tableStructure?.length) {
+          schema[tt.tableName] = tt.tableStructure.map((c: any) => c.field)
+        }
+      }
+    }
+  }
+  return schema
+}
 </script>
 
 <template>
   <div class="h-full flex overflow-hidden bg-background">
     <!-- Sidebar -->
     <Sidebar
+      ref="sidebarRef"
       :search="search"
       :open-connections="store.openConnections"
       :closed-connections="closedConnections"
@@ -280,6 +343,8 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       @toggle-database="toggleDatabase"
       @load-table="loadTableData"
       @toggle-table-selection="toggleTableSelection"
+      @select-table-range="selectTableRange"
+      @clear-table-selection="clearTableSelection"
       @open-query="openQueryTab"
       @import-sql="importSql"
       @export-database="openExportSelector"
@@ -356,8 +421,11 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
               :connection-id="qTab.connectionId"
               :database="qTab.database"
               :available-databases="getAvailableDatabases(qTab.connectionId)"
+              :initial-sql="qTab.sql"
+              :open-tabs-schema="getSchema(qTab.connectionId, qTab.database)"
               class="flex-1 min-h-0"
               style="display: flex"
+              @update:sql="qTab.sql = $event"
             />
           </div>
 
@@ -504,6 +572,7 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
       :open="showTableSelector"
       :database="exportContext?.database ?? ''"
       :tables="exportContextTables"
+      :loading-tables="isLoadingExportTables"
       :selected-tables="selectedExportTables"
       :current-mode="currentExportMode"
       @update:open="
@@ -683,12 +752,29 @@ async function clearFilters(pane: ReturnType<typeof getPane>) {
           sidebarDatabaseContextMenu.databaseName,
         )
       "
+      @delete-tables="
+        openDeleteTablesDialog(
+          sidebarDatabaseContextMenu.connectionId,
+          sidebarDatabaseContextMenu.databaseName,
+        )
+      "
       @drop="
         confirmSidebarDatabaseAction(
           sidebarDatabaseContextMenu.connectionId,
           sidebarDatabaseContextMenu.databaseName,
         )
       "
+    />
+    <DeleteTablesDialog
+      :open="showDeleteTablesDialog"
+      :database="deleteTablesContext?.database ?? ''"
+      :tables="deleteTablesDialogTables"
+      :loading-tables="isLoadingDeleteTables"
+      :is-executing="isExecutingDeleteTables"
+      :error="deleteTablesError"
+      @update:open="(val) => { if (!val) showDeleteTablesDialog = false }"
+      @delete-tables="(tables, disableFk) => executeDeleteTablesFromDialog(tables, disableFk)"
+      @drop-database="executeDropDatabaseFromDeleteDialog"
     />
   </div>
 </template>

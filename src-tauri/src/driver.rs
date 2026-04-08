@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use async_trait::async_trait;
+use std::sync::Arc;
 use crate::filters::FilterSet;
 
 // --------------------------------------------------------------------------
@@ -143,11 +144,29 @@ pub trait DatabaseDriver: Send + Sync {
         table: &str,
     ) -> Result<(Vec<ColumnInfo>, Vec<Value>), String>;
 
+    /// Streams all rows from a table, sending `(Some(columns), row)` for the first row
+    /// and `(None, row)` for subsequent ones. Used for streaming exports to disk.
+    async fn stream_all_rows(
+        &self,
+        database: &str,
+        table: &str,
+        tx: tokio::sync::mpsc::Sender<(Option<Vec<ColumnInfo>>, Value)>,
+    ) -> Result<(), String> {
+        let (columns, rows) = self.get_all_rows(database, table).await?;
+        for (i, row) in rows.into_iter().enumerate() {
+            let col = if i == 0 { Some(columns.clone()) } else { None };
+            if tx.send((col, row)).await.is_err() { break; }
+        }
+        Ok(())
+    }
+
     async fn execute_query(
         &self,
         database: Option<&str>,
         sql: &str,
         query_id: Option<&str>,
+        on_progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
+        on_chunk: Option<Arc<dyn Fn(Option<Vec<ColumnInfo>>, Vec<serde_json::Value>) + Send + Sync>>,
     ) -> Result<RawQueryResult, String>;
 
     /// Returns the MySQL thread id of a currently-running query, if tracked.

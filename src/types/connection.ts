@@ -25,4 +25,6 @@ export interface Connection {
   environment: Environment
   mysql: MySqlSettings
   ssh?: SshSettings
+  timeout_secs?: number
+  allow_writes?: boolean
 }

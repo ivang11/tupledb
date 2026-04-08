@@ -20,7 +20,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
   function openQueryTab(connectionId: string, database: string | null = null, paneId?: string) {
     const pane = getPane(paneId)
     const id = crypto.randomUUID()
-    const tab: QueryTab = { type: 'query', id, connectionId, database }
+    const tab: QueryTab = { type: 'query', id, connectionId, database, sql: '' }
     let insertIndex = pane.tabs.length
     for (let i = pane.tabs.length - 1; i >= 0; i--) {
       const t = pane.tabs[i]

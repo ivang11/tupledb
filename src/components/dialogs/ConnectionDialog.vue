@@ -144,6 +144,21 @@ async function pickSshKey() {
           </div>
         </div>
 
+        <div v-if="connection.environment === 'PRODUCTION'" class="flex items-center justify-between rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2.5">
+          <div class="space-y-0.5">
+            <p class="text-xs font-semibold text-red-500">Allow write operations</p>
+            <p class="text-xs text-muted-foreground">By default, production is read-only</p>
+          </div>
+          <div
+            @click="connection.allow_writes = !connection.allow_writes"
+            :class="['relative w-9 h-5 rounded-full transition-colors cursor-pointer shrink-0', connection.allow_writes ? 'bg-red-500' : 'bg-muted']"
+          >
+            <div :class="['absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform', connection.allow_writes ? 'translate-x-4' : 'translate-x-0']" />
+          </div>
+        </div>
+
+
+
         <Separator />
 
         <div class="space-y-4">
@@ -167,12 +182,18 @@ async function pickSshKey() {
             </div>
             <div class="space-y-2">
               <Label>Password</Label>
-              <Input v-model="connection.mysql.password" type="password" placeholder="••••••••" />
+              <Input v-model="connection.mysql.password" type="password" :placeholder="isEdit ? 'Leave blank to keep existing' : '••••••••'" />
             </div>
           </div>
-          <div class="space-y-2">
-            <Label>Database <span class="text-muted-foreground font-normal">(optional)</span></Label>
-            <Input v-model="connection.mysql.database" placeholder="Leave blank to pick after connecting" />
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-2">
+              <Label>Database <span class="text-muted-foreground font-normal">(optional)</span></Label>
+              <Input v-model="connection.mysql.database" placeholder="Leave blank to pick after connecting" />
+            </div>
+            <div class="space-y-2">
+              <Label>Timeout <span class="text-muted-foreground font-normal">(seconds)</span></Label>
+              <Input v-model.number="connection.timeout_secs" type="number" min="1" placeholder="30" />
+            </div>
           </div>
         </div>
 

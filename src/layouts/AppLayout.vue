@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import TitleBar from '@/components/TitleBar.vue'
 import QueryLogPanel from '@/components/QueryLogPanel.vue'
+import KeybindingsDialog from '@/components/dialogs/KeybindingsDialog.vue'
+
+const showKeybindings = ref(false)
 </script>
 
 <template>
   <div class="flex flex-col h-screen bg-background text-foreground overflow-hidden">
     <!-- El TitleBar global -->
-    <TitleBar />
+    <TitleBar @open-keybindings="showKeybindings = true" />
 
     <!-- El contenido de la ruta -->
     <main class="flex-1 overflow-hidden relative bg-background min-h-0">
@@ -15,6 +19,9 @@ import QueryLogPanel from '@/components/QueryLogPanel.vue'
 
     <!-- Query Log Panel -->
     <QueryLogPanel />
+
+    <!-- Keybindings dialog -->
+    <KeybindingsDialog v-model:open="showKeybindings" />
   </div>
 </template>
 

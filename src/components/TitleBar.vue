@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { MinusIcon, SquareIcon, XIcon } from 'lucide-vue-next'
+import { MinusIcon, SquareIcon, XIcon, KeyboardIcon } from 'lucide-vue-next'
+
+const emit = defineEmits<{ 'open-keybindings': [] }>()
 
 const win = getCurrentWindow()
 </script>
@@ -17,8 +19,15 @@ const win = getCurrentWindow()
       </div>
       <span class="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">DB Viewer</span>
     </div>
-    
+
     <div class="flex items-center gap-1">
+      <button
+        class="flex size-6 items-center justify-center rounded-md hover:bg-muted transition-colors text-muted-foreground"
+        title="Keyboard shortcuts"
+        @click="emit('open-keybindings')"
+      >
+        <KeyboardIcon class="size-3" />
+      </button>
       <button
         class="flex size-6 items-center justify-center rounded-md hover:bg-muted transition-colors text-muted-foreground"
         @click="win.minimize()"

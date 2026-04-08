@@ -7,6 +7,7 @@ use uuid::Uuid;
 use tauri::Manager;
 use crate::connections::Connection;
 use crate::driver::DatabaseDriver;
+use crate::saved_queries::SavedQuery;
 use crate::ssh::SshTunnel;
 
 pub struct ActiveConnection {
@@ -17,6 +18,7 @@ pub struct ActiveConnection {
 pub struct AppState {
     pub connections_config: RwLock<HashMap<Uuid, Connection>>,
     pub active_sessions: RwLock<HashMap<Uuid, ActiveConnection>>,
+    pub saved_queries: RwLock<HashMap<Uuid, SavedQuery>>,
     pub app_handle: tauri::AppHandle,
     config_dir: PathBuf,
 }
@@ -51,9 +53,21 @@ impl AppState {
             }
         }
 
+        let mut saved_queries = HashMap::new();
+        let sq_file = config_dir.join("saved_queries.json");
+
+        if sq_file.exists() {
+            if let Ok(content) = fs::read_to_string(&sq_file) {
+                if let Ok(loaded) = serde_json::from_str::<HashMap<Uuid, SavedQuery>>(&content) {
+                    saved_queries = loaded;
+                }
+            }
+        }
+
         Self {
             connections_config: RwLock::new(connections),
             active_sessions: RwLock::new(HashMap::new()),
+            saved_queries: RwLock::new(saved_queries),
             app_handle: app_handle.clone(),
             config_dir,
         }
@@ -67,6 +81,18 @@ impl AppState {
 
         fs::write(config_file, content)
             .map_err(|e| format!("Failed to write connections to disk: {}", e))?;
+
+        Ok(())
+    }
+
+    pub fn save_queries(&self) -> Result<(), String> {
+        let config_file = self.config_dir.join("saved_queries.json");
+        let queries = self.saved_queries.read();
+        let content = serde_json::to_string_pretty(&*queries)
+            .map_err(|e| format!("Failed to serialize saved queries: {}", e))?;
+
+        fs::write(config_file, content)
+            .map_err(|e| format!("Failed to write saved queries to disk: {}", e))?;
 
         Ok(())
     }

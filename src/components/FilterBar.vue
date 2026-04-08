@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { FilterSet, FilterRow, Operator } from '@/types/filters'
-import { useKeyboardShortcut } from '@/composables/useKeyboardShortcut'
+import { useActionShortcut } from '@/composables/useKeyboardShortcut'
 
 const props = defineProps<{
   columns: { name: string, type_name: string }[]
@@ -17,7 +17,7 @@ const emit = defineEmits<{
   (e: 'clear'): void
 }>()
 
-useKeyboardShortcut('enter', () => {
+useActionShortcut('applyFilters', () => {
   applyFilters()
 })
 
