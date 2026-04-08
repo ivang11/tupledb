@@ -16,7 +16,7 @@ import PaneResizer from "@/components/PaneResizer.vue";
 import ConnectionDialog from "@/components/dialogs/ConnectionDialog.vue";
 import DeleteConfirmDialog from "@/components/dialogs/DeleteConfirmDialog.vue";
 import ExportDialog from "@/components/dialogs/ExportDialog.vue";
-import ProgressDialog from "@/components/dialogs/ProgressDialog.vue";
+import FloatingProgress from "@/components/dialogs/FloatingProgress.vue";
 import ImportResultDialog from "@/components/dialogs/ImportResultDialog.vue";
 import ExportResultDialog from "@/components/dialogs/ExportResultDialog.vue";
 import TableActionDialog from "@/components/dialogs/TableActionDialog.vue";
@@ -584,18 +584,18 @@ function getSchema(connectionId: string, database: string | null): Record<string
       @update:current-mode="currentExportMode = $event"
       @start="startExport"
     />
-    <ProgressDialog
+    <FloatingProgress
       :open="isImporting"
       title="Importing SQL"
-      description="Please wait while the SQL file is being imported."
       :progress="importProgress"
+      :stack-index="0"
     />
     <ImportResultDialog :result="importResult" @close="importResult = null" />
-    <ProgressDialog
+    <FloatingProgress
       :open="isExportingDb"
       title="Exporting Data"
-      description="Please wait while the data is being exported."
       :progress="exportProgress"
+      :stack-index="isImporting ? 1 : 0"
     />
     <ExportResultDialog :result="exportResult" @close="exportResult = null" />
     <ConnectionDialog
