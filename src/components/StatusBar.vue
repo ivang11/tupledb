@@ -166,11 +166,13 @@ const hasActivity = computed(() => progress.isImporting || progress.isExporting)
 
     <!-- Query Log expanded panel -->
     <div v-if="queryLog.isOpen" class="flex flex-col border-b border-border bg-[#0d1117]" :style="{ height: logHeight + 'px' }">
-      <!-- Drag handle -->
+      <!-- Drag handle (wider grab area with visible indicator) -->
       <div
-        class="h-1 shrink-0 cursor-row-resize hover:bg-primary/40 transition-colors"
+        class="h-2 shrink-0 cursor-row-resize flex items-center justify-center group"
         @mousedown="startLogResize"
-      />
+      >
+        <div class="w-8 h-0.5 rounded-full bg-border/60 group-hover:bg-primary/50 transition-colors" />
+      </div>
       <div
         ref="scrollEl"
         class="flex-1 overflow-y-auto font-mono text-xs leading-relaxed px-3 py-1.5 space-y-2 min-h-0"

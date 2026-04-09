@@ -5,6 +5,7 @@ import { save, open } from "@tauri-apps/plugin-dialog";
 import { v4 as uuidv4 } from "uuid";
 import { useConnectionStore } from "@/stores/connections";
 import { useProgressStore } from "@/stores/progress";
+import { useToast } from "@/composables/useToast";
 import type { Connection } from "@/types/connection";
 import type { PaneState, TableTab } from "@/types/workspace";
 
@@ -141,8 +142,6 @@ export function useSidebarManager(ctx: SidebarContext) {
 
   // ── Import / Export ─────────────────────────────────────────────────────────
 
-  const importResult = ref<{ executed: number; errors: string[] } | null>(null);
-
   async function importSql(connectionId: string, database: string) {
     const path = await open({
       filters: [{ name: "SQL", extensions: ["sql"] }],
@@ -151,7 +150,6 @@ export function useSidebarManager(ctx: SidebarContext) {
     if (!path) return;
     progressStore.isImporting = true;
     progressStore.importExpanded = true;
-    importResult.value = null;
     progressStore.importProgress = { current: 0, total: 0, status: "Reading file..." };
     let unlisten: UnlistenFn | null = null;
     try {
@@ -166,13 +164,23 @@ export function useSidebarManager(ctx: SidebarContext) {
         "import_sql",
         { connectionId, database, path },
       );
-      importResult.value = result;
       await store.fetchTablesForConnection(connectionId, database);
       const tab = getPaneTab(getPane());
       if (tab && tab.connectionId === connectionId && tab.database === database)
         await loadTableData(tab.tableName, connectionId, database);
+      if (result.errors.length > 0) {
+        toastError(
+          `Import finished with ${result.errors.length} error${result.errors.length !== 1 ? 's' : ''}`,
+          `${result.executed.toLocaleString()} statements executed. Last error: ${result.errors[result.errors.length - 1]}`,
+        );
+      } else {
+        toastSuccess(
+          'Import complete',
+          `${result.executed.toLocaleString()} statements executed successfully.`,
+        );
+      }
     } catch (e: any) {
-      importResult.value = { executed: 0, errors: [String(e)] };
+      toastError('Import failed', String(e));
     } finally {
       progressStore.isImporting = false;
       if (unlisten) unlisten();
@@ -186,7 +194,7 @@ export function useSidebarManager(ctx: SidebarContext) {
   const exportContext = ref<{ connectionId: string; database: string } | null>(
     null,
   );
-  const exportResult = ref<{ success: boolean; message: string } | null>(null);
+  const { success: toastSuccess, error: toastError } = useToast();
 
   const exportContextTables = computed(() => {
     if (!exportContext.value) return [];
@@ -230,7 +238,6 @@ export function useSidebarManager(ctx: SidebarContext) {
     if (!path) return;
     progressStore.isExporting = true;
     progressStore.exportExpanded = true;
-    exportResult.value = null;
     progressStore.exportProgress = {
       current: 0,
       total: 0,
@@ -252,12 +259,12 @@ export function useSidebarManager(ctx: SidebarContext) {
         path,
         tables: selectedExportTables.value,
       });
-      exportResult.value = {
-        success: true,
-        message: `Database exported successfully. ${rows} rows from ${selectedExportTables.value.length} tables included.`,
-      };
+      toastSuccess(
+        'Export complete',
+        `${rows.toLocaleString()} rows from ${selectedExportTables.value.length} table${selectedExportTables.value.length !== 1 ? 's' : ''} exported.`,
+      );
     } catch (e: any) {
-      exportResult.value = { success: false, message: String(e) };
+      toastError('Export failed', String(e));
     } finally {
       progressStore.isExporting = false;
       if (unlisten) unlisten();
@@ -844,13 +851,11 @@ export function useSidebarManager(ctx: SidebarContext) {
     disconnectConn,
     createDatabase,
     // Import/Export
-    importResult,
     showTableSelector,
     isLoadingExportTables,
     selectedExportTables,
     currentExportMode,
     exportContext,
-    exportResult,
     exportContextTables,
     importSql,
     openExportSelector,

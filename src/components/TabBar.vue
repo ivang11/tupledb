@@ -42,29 +42,21 @@ const emit = defineEmits<{
   "remove-pane": [];
 }>();
 
-const getEnvBorderColor = (env: Environment): string => {
+const getEnvTopColor = (env: Environment): string => {
   switch (env) {
-    case "PRODUCTION":
-      return "border-red-500";
-    case "STAGING":
-      return "border-orange-500";
-    case "DEV":
-      return "border-blue-500";
-    default:
-      return "border-green-500";
+    case "PRODUCTION": return "bg-red-500";
+    case "STAGING":    return "bg-orange-500";
+    case "DEV":        return "bg-blue-500";
+    default:           return "bg-green-500";
   }
 };
 
 const getEnvDotColor = (env: Environment): string => {
   switch (env) {
-    case "PRODUCTION":
-      return "bg-red-500";
-    case "STAGING":
-      return "bg-orange-500";
-    case "DEV":
-      return "bg-blue-500";
-    default:
-      return "bg-green-500";
+    case "PRODUCTION": return "bg-red-400";
+    case "STAGING":    return "bg-orange-400";
+    case "DEV":        return "bg-blue-400";
+    default:           return "bg-green-400";
   }
 };
 </script>
@@ -72,7 +64,8 @@ const getEnvDotColor = (env: Environment): string => {
 <template>
   <div
     v-if="tabs.length > 0 || hasOpenConnections"
-    class="flex items-end border-b bg-muted/5 overflow-x-auto shrink-0 h-12"
+    class="flex items-stretch border-b border-border bg-muted/5 overflow-x-auto shrink-0"
+    style="height: 36px"
   >
     <!-- Tabs -->
     <button
@@ -81,10 +74,10 @@ const getEnvDotColor = (env: Environment): string => {
       @click="emit('switch-tab', tab.id)"
       @mousedown="(e) => { if (e.button === 1) { e.preventDefault(); e.stopPropagation(); emit('close-tab', tab.id, e); } }"
       :class="[
-        'relative flex items-center gap-2 px-3 h-full border-r transition-colors min-w-0 max-w-55 group/tab shrink-0',
+        'relative flex items-center gap-1.5 px-3 border-r border-border transition-colors min-w-0 max-w-48 shrink-0 group/tab',
         tab.id === activeTabId
-          ? 'bg-background text-foreground shadow-[inset_0_2px_0_0] shadow-primary'
-          : 'bg-transparent text-muted-foreground hover:bg-muted/30 hover:text-foreground',
+          ? 'bg-background text-foreground'
+          : 'text-muted-foreground hover:bg-muted/20 hover:text-foreground',
       ]"
       :title="
         tab.type === 'query'
@@ -92,54 +85,49 @@ const getEnvDotColor = (env: Environment): string => {
           : `${tab.tableName} · ${connectionNames[tab.connectionId] ?? ''} · ${tab.database}`
       "
     >
+      <!-- Env top indicator (active tab only) -->
       <span
         v-if="tab.id === activeTabId"
-        :class="[
-          'absolute inset-x-0 top-0 h-2',
-          getEnvBorderColor(connectionEnvironments[tab.connectionId]),
-        ]"
+        :class="['absolute inset-x-0 top-0 h-0.5', getEnvTopColor(connectionEnvironments[tab.connectionId])]"
       />
-      <TerminalIcon
-        v-if="tab.type === 'query'"
-        class="size-3 shrink-0 opacity-60 mt-0.5"
-      />
-      <TableIcon v-else class="size-3 shrink-0 opacity-60 mt-0.5" />
-      <div class="flex flex-col items-start min-w-0 flex-1">
-        <div class="flex items-center gap-2">
-          <span
-            :class="[
-              'size-2 rounded-full shrink-0',
-              getEnvDotColor(connectionEnvironments[tab.connectionId]),
-            ]"
-          ></span>
-          <span class="text-sm font-semibold truncate leading-tight">
-            {{ tab.type === "query" ? "Query" : tab.tableName }}
-          </span>
-        </div>
-        <span class="text-[9px] font-medium truncate leading-tight opacity-50">
-          {{ connectionNames[tab.connectionId] ?? ""
-          }}<template v-if="tab.database"> · {{ tab.database }}</template>
+
+      <!-- Icon -->
+      <TerminalIcon v-if="tab.type === 'query'" class="size-3 shrink-0 opacity-50" />
+      <TableIcon v-else class="size-3 shrink-0 opacity-50" />
+
+      <!-- Label -->
+      <div class="flex items-center gap-1.5 min-w-0 flex-1">
+        <span
+          :class="['size-1.5 rounded-full shrink-0', getEnvDotColor(connectionEnvironments[tab.connectionId])]"
+        />
+        <span class="text-[11px] font-semibold truncate">
+          {{ tab.type === "query" ? "Query" : tab.tableName }}
+        </span>
+        <span class="text-[9px] opacity-40 truncate hidden">
+          {{ connectionNames[tab.connectionId] ?? "" }}
         </span>
       </div>
+
+      <!-- Close -->
       <span
         @click.stop="emit('close-tab', tab.id, $event)"
         :class="[
-          'shrink-0 size-3.5 flex items-center justify-center rounded transition-all hover:text-destructive',
+          'shrink-0 size-4 flex items-center justify-center rounded transition-all hover:text-destructive hover:bg-destructive/10',
           tab.id === activeTabId
-            ? 'opacity-40 hover:opacity-100'
-            : 'opacity-0 group-hover/tab:opacity-40 group-hover/tab:hover:opacity-100',
+            ? 'opacity-30 hover:opacity-100'
+            : 'opacity-0 group-hover/tab:opacity-30 group-hover/tab:hover:opacity-100',
         ]"
       >
-        <XIcon class="size-3" />
+        <XIcon class="size-2.5" />
       </span>
     </button>
 
-    <!-- New Query button -->
+    <!-- New Query -->
     <button
       v-if="hasOpenConnections && firstConnectionId"
       @click="emit('new-query', firstConnectionId)"
-      class="flex items-center gap-1 px-3 h-full text-[11px] text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/20 transition-colors shrink-0 border-r"
-      title="New Query"
+      class="flex items-center gap-1 px-2.5 text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/20 transition-colors shrink-0 border-r border-border"
+      title="New Query (SQL)"
     >
       <TerminalIcon class="size-3" />
       <PlusIcon class="size-2.5" />
@@ -149,15 +137,15 @@ const getEnvDotColor = (env: Environment): string => {
 
     <!-- Table controls -->
     <template v-if="hasActiveTableTab">
-      <div class="flex items-center gap-1 px-2 border-r h-full">
+      <div class="flex items-center gap-0.5 px-1.5 border-l border-border">
         <button
           type="button"
-          class="size-6 flex items-center justify-center rounded border transition-colors"
-          :class="
+          :class="[
+            'size-6 flex items-center justify-center rounded transition-colors',
             showFilters
-              ? 'bg-primary/10 text-primary border-primary/20'
-              : 'text-muted-foreground border-transparent hover:border-border hover:bg-muted/30'
-          "
+              ? 'bg-primary/15 text-primary'
+              : 'text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/30',
+          ]"
           title="Toggle Filters"
           @click="emit('toggle-filters')"
         >
@@ -165,7 +153,7 @@ const getEnvDotColor = (env: Environment): string => {
         </button>
         <button
           type="button"
-          class="size-6 flex items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted/30 transition-colors"
+          class="size-6 flex items-center justify-center rounded text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/30 transition-colors"
           title="Refresh"
           @click="emit('refresh')"
         >
@@ -178,20 +166,20 @@ const getEnvDotColor = (env: Environment): string => {
     <button
       v-if="isLastPane"
       @click="emit('add-pane')"
-      class="flex items-center gap-1 px-3 h-full text-[11px] text-muted-foreground/40 hover:text-muted-foreground hover:bg-muted/20 transition-colors shrink-0"
+      class="flex items-center gap-1 px-2.5 text-muted-foreground/30 hover:text-muted-foreground hover:bg-muted/20 transition-colors shrink-0 border-l border-border"
       title="Split pane"
     >
-      <PanelRightOpenIcon class="size-3.5" />
+      <PanelRightOpenIcon class="size-3" />
     </button>
 
     <!-- Close pane -->
     <button
       v-if="showClosePaneButton"
       @click="emit('remove-pane')"
-      class="flex items-center gap-1 px-3 h-full text-[11px] text-muted-foreground/40 hover:text-destructive hover:bg-muted/20 transition-colors shrink-0 border-l"
+      class="flex items-center gap-1 px-2.5 text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0 border-l border-border"
       title="Close pane"
     >
-      <XIcon class="size-3.5" />
+      <XIcon class="size-3" />
     </button>
   </div>
 </template>

@@ -16,8 +16,6 @@ import PaneResizer from "@/components/PaneResizer.vue";
 import ConnectionDialog from "@/components/dialogs/ConnectionDialog.vue";
 import DeleteConfirmDialog from "@/components/dialogs/DeleteConfirmDialog.vue";
 import ExportDialog from "@/components/dialogs/ExportDialog.vue";
-import ImportResultDialog from "@/components/dialogs/ImportResultDialog.vue";
-import ExportResultDialog from "@/components/dialogs/ExportResultDialog.vue";
 import TableActionDialog from "@/components/dialogs/TableActionDialog.vue";
 import BulkTableActionDialog from "@/components/dialogs/BulkTableActionDialog.vue";
 import DatabaseActionDialog from "@/components/dialogs/DatabaseActionDialog.vue";
@@ -142,14 +140,12 @@ const {
   toggleDatabase,
   disconnectConn,
   createDatabase,
-  importResult,
   importSql,
   showTableSelector,
   isLoadingExportTables,
   selectedExportTables,
   currentExportMode,
   exportContext,
-  exportResult,
   exportContextTables,
   openExportSelector,
   startExport,
@@ -433,7 +429,9 @@ function getSchema(connectionId: string, database: string | null): Record<string
             <!-- Filters -->
             <FilterBar
               v-show="pane.viewMode === 'content' && pane.showFilters"
+              :key="pane.activeTabId"
               :columns="getPaneTab(pane)?.queryResult?.columns ?? []"
+              :initial-filter="getPaneTab(pane)?.filters"
               @apply="(filters) => applyFilters(pane, filters)"
               @clear="() => clearFilters(pane)"
             />
@@ -583,8 +581,6 @@ function getSchema(connectionId: string, database: string | null): Record<string
       @update:current-mode="currentExportMode = $event"
       @start="startExport"
     />
-    <ImportResultDialog :result="importResult" @close="importResult = null" />
-    <ExportResultDialog :result="exportResult" @close="exportResult = null" />
     <ConnectionDialog
       :open="showNewConnDialog"
       :connection="newConn"

@@ -10,9 +10,19 @@ const emit = defineEmits<{
 </script>
 
 <template>
+  <!-- Wider grab zone (8px) with a thin visual line in the center -->
   <div
-    class="w-px bg-border hover:w-1 hover:bg-primary/40 cursor-col-resize shrink-0 transition-all z-10"
-    :class="{ 'w-1 bg-primary/50': draggingPaneIdx === paneIdx - 1 }"
+    class="w-2 shrink-0 cursor-col-resize z-10 group relative flex items-stretch justify-center"
+    :class="{ 'select-none': draggingPaneIdx === paneIdx - 1 }"
     @mousedown.prevent="emit('resize-start', $event, paneIdx - 1)"
-  />
+  >
+    <div
+      class="w-px transition-colors"
+      :class="
+        draggingPaneIdx === paneIdx - 1
+          ? 'bg-primary/60'
+          : 'bg-border group-hover:bg-primary/40'
+      "
+    />
+  </div>
 </template>

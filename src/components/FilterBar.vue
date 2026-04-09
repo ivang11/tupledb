@@ -10,6 +10,7 @@ import { useActionShortcut } from '@/composables/useKeyboardShortcut'
 
 const props = defineProps<{
   columns: { name: string, type_name: string }[]
+  initialFilter?: { match_all: boolean; rows: FilterRow[] } | null
 }>()
 
 const emit = defineEmits<{
@@ -38,10 +39,11 @@ const operators: { label: string, value: Operator }[] = [
   { label: '<=', value: 'less_or_equal' },
 ]
 
-const filterSet = ref<FilterSet>({
-  match_all: true,
-  rows: []
-})
+const filterSet = ref<FilterSet>(
+  props.initialFilter
+    ? JSON.parse(JSON.stringify(props.initialFilter))
+    : { match_all: true, rows: [] }
+)
 
 function addRow() {
   filterSet.value.rows.push({

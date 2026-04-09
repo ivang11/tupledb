@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import TitleBar from '@/components/TitleBar.vue'
 import StatusBar from '@/components/StatusBar.vue'
+import ToastContainer from '@/components/ToastContainer.vue'
 import KeybindingsDialog from '@/components/dialogs/KeybindingsDialog.vue'
 
 const showKeybindings = ref(false)
@@ -9,19 +10,15 @@ const showKeybindings = ref(false)
 
 <template>
   <div class="flex flex-col h-screen bg-background text-foreground overflow-hidden">
-    <!-- El TitleBar global -->
     <TitleBar @open-keybindings="showKeybindings = true" />
 
-    <!-- El contenido de la ruta -->
     <main class="flex-1 overflow-hidden relative bg-background min-h-0">
       <router-view />
     </main>
 
-    <!-- Status Bar (Query Log + Import/Export progress) -->
     <StatusBar />
-
-    <!-- Keybindings dialog -->
     <KeybindingsDialog v-model:open="showKeybindings" />
+    <ToastContainer />
   </div>
 </template>
 

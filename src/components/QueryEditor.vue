@@ -68,6 +68,8 @@ interface HistoryEntry {
 }
 
 const HISTORY_KEY = 'db-viewer:query-history'
+const SAVED_PANEL_WIDTH_KEY = 'db-viewer:saved-panel-width'
+const HISTORY_PANEL_WIDTH_KEY = 'db-viewer:history-panel-width'
 const MAX_HISTORY = 100
 
 const connStore = useConnectionStore()
@@ -172,6 +174,41 @@ const showHistory = ref(false)
 const showSaved = ref(false)
 const history = ref<HistoryEntry[]>([])
 const activeQueryId = ref<string | null>(null)
+
+// ── Side panel resize ─────────────────────────────────────────────────────────
+
+function loadPanelWidth(key: string, fallback = 280) {
+  try {
+    const raw = localStorage.getItem(key)
+    const parsed = raw ? parseInt(raw, 10) : fallback
+    return Number.isFinite(parsed) ? parsed : fallback
+  } catch {
+    return fallback
+  }
+}
+
+const savedPanelWidth = ref(loadPanelWidth(SAVED_PANEL_WIDTH_KEY))
+const historyPanelWidth = ref(loadPanelWidth(HISTORY_PANEL_WIDTH_KEY))
+
+function startPanelResize(e: MouseEvent, panel: 'saved' | 'history') {
+  e.preventDefault()
+  const startX = e.clientX
+  const widthRef = panel === 'saved' ? savedPanelWidth : historyPanelWidth
+  const storageKey = panel === 'saved' ? SAVED_PANEL_WIDTH_KEY : HISTORY_PANEL_WIDTH_KEY
+  const startW = widthRef.value
+  const onMove = (ev: MouseEvent) => {
+    widthRef.value = Math.max(200, Math.min(560, startW + (startX - ev.clientX)))
+  }
+  const onUp = () => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+    try {
+      localStorage.setItem(storageKey, String(widthRef.value))
+    } catch {}
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
 
 // Saved queries
 const saveDialogOpen = ref(false)
@@ -652,7 +689,7 @@ watch(showDbDropdown, (val) => {
 </script>
 
 <template>
-  <div class="flex flex-col min-h-0 overflow-hidden">
+  <div class="flex h-full flex-1 flex-col min-h-0 overflow-hidden">
     <!-- Toolbar -->
     <div class="h-12 border-b flex items-center gap-3 px-4 bg-background/50 backdrop-blur-sm shrink-0 relative z-10">
       <!-- Database selector -->
@@ -800,7 +837,7 @@ watch(showDbDropdown, (val) => {
     </div>
 
     <!-- Content area: editor + results + optional history panel -->
-    <div class="flex-1 flex min-h-0 overflow-hidden">
+    <div class="flex flex-1 h-0 min-h-0 items-stretch overflow-hidden">
       <!-- Left: SQL editor + results -->
       <div class="flex-1 flex flex-col min-w-0 min-h-0">
         <!-- SQL editor (CodeMirror) -->
@@ -901,8 +938,17 @@ watch(showDbDropdown, (val) => {
       <!-- Saved queries panel -->
       <div
         v-if="showSaved"
-        class="w-72 border-l flex flex-col bg-muted/5 shrink-0"
+        class="border-l flex h-full min-h-0 flex-col self-stretch bg-muted/5 shrink-0 overflow-hidden relative"
+        :style="{ width: savedPanelWidth + 'px' }"
       >
+        <!-- Resize handle -->
+        <div
+          class="group absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-10 flex items-stretch"
+          @mousedown.prevent="startPanelResize($event, 'saved')"
+        >
+          <div class="w-px bg-border group-hover:bg-primary/50 transition-colors" />
+        </div>
+
         <div class="h-10 border-b flex items-center justify-between px-3 shrink-0">
           <span class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Queries Guardadas</span>
           <button
@@ -920,7 +966,7 @@ watch(showDbDropdown, (val) => {
             class="w-full h-7 text-xs bg-muted/40 rounded-md px-2 border border-border/50 focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
-        <ScrollArea class="flex-1">
+        <ScrollArea class="flex-1 min-h-0">
           <div v-if="filteredSaved.length === 0" class="flex items-center justify-center p-4 text-muted-foreground/30 text-xs text-center">
             {{ savedStore.queries.length === 0 ? 'Aún no hay queries guardadas' : 'Sin resultados' }}
           </div>
@@ -929,34 +975,38 @@ watch(showDbDropdown, (val) => {
             :key="sq.id"
             class="group border-b border-muted/40 last:border-0 hover:bg-muted/30 transition-colors"
           >
-            <button @click="loadFromSaved(sq)" class="w-full text-left p-3 pr-2">
-              <div class="flex items-center gap-1.5 mb-1">
-                <BookmarkIcon class="size-3 text-primary/70 shrink-0" />
-                <span class="text-[11px] font-semibold text-foreground truncate flex-1">{{ sq.name }}</span>
+            <div class="flex items-start gap-2 p-3 pr-2">
+              <button @click="loadFromSaved(sq)" class="min-w-0 flex-1 text-left">
+                <div class="flex items-center gap-1.5 mb-1">
+                  <BookmarkIcon class="size-3 text-primary/70 shrink-0" />
+                  <span class="text-[11px] font-semibold text-foreground truncate flex-1">{{ sq.name }}</span>
+                </div>
+                <p v-if="sq.description" class="text-[10px] text-muted-foreground/60 mb-1 truncate">{{ sq.description }}</p>
+                <p class="text-[11px] font-mono text-foreground/50 truncate">{{ sq.sql }}</p>
+                <div class="flex items-center gap-2 mt-1.5">
+                  <span v-if="sq.database" class="text-[9px] text-muted-foreground/40 font-mono truncate">{{ sq.database }}</span>
+                  <span v-if="sq.connection_id" class="text-[9px] text-muted-foreground/40 truncate ml-auto">
+                    {{ connStore.connections.find(c => c.id === sq.connection_id)?.name ?? sq.connection_id }}
+                  </span>
+                </div>
+              </button>
+              <div class="flex items-center gap-1 shrink-0 pt-0.5 opacity-0 group-hover:opacity-100 transition-all">
                 <button
                   @click.stop="openSaveDialog(sq)"
-                  class="size-5 flex items-center justify-center rounded text-muted-foreground/30 hover:text-foreground hover:bg-muted/60 opacity-0 group-hover:opacity-100 transition-all"
+                  class="size-5 flex items-center justify-center rounded text-muted-foreground/30 hover:text-foreground hover:bg-muted/60"
                   title="Editar"
                 >
                   <PencilIcon class="size-3" />
                 </button>
                 <button
                   @click.stop="deleteSaved(sq.id)"
-                  class="size-5 flex items-center justify-center rounded text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-all"
+                  class="size-5 flex items-center justify-center rounded text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10"
                   title="Eliminar"
                 >
                   <XIcon class="size-3" />
                 </button>
               </div>
-              <p v-if="sq.description" class="text-[10px] text-muted-foreground/60 mb-1 truncate">{{ sq.description }}</p>
-              <p class="text-[11px] font-mono text-foreground/50 truncate">{{ sq.sql }}</p>
-              <div class="flex items-center gap-2 mt-1.5">
-                <span v-if="sq.database" class="text-[9px] text-muted-foreground/40 font-mono truncate">{{ sq.database }}</span>
-                <span v-if="sq.connection_id" class="text-[9px] text-muted-foreground/40 truncate ml-auto">
-                  {{ connStore.connections.find(c => c.id === sq.connection_id)?.name ?? sq.connection_id }}
-                </span>
-              </div>
-            </button>
+            </div>
           </div>
         </ScrollArea>
       </div>
@@ -964,8 +1014,17 @@ watch(showDbDropdown, (val) => {
       <!-- History panel -->
       <div
         v-if="showHistory"
-        class="w-72 border-l flex flex-col bg-muted/5 shrink-0"
+        class="border-l flex h-full min-h-0 flex-col self-stretch bg-muted/5 shrink-0 overflow-hidden relative"
+        :style="{ width: historyPanelWidth + 'px' }"
       >
+        <!-- Resize handle -->
+        <div
+          class="group absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-10 flex items-stretch"
+          @mousedown.prevent="startPanelResize($event, 'history')"
+        >
+          <div class="w-px bg-border group-hover:bg-primary/50 transition-colors" />
+        </div>
+
         <div class="h-10 border-b flex items-center justify-between px-3 shrink-0">
           <span class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Query History</span>
           <div class="flex items-center gap-1">
@@ -986,7 +1045,7 @@ watch(showDbDropdown, (val) => {
           </div>
         </div>
 
-        <ScrollArea class="flex-1">
+        <ScrollArea class="flex-1 min-h-0">
           <div v-if="history.length === 0" class="flex items-center justify-center h-full text-muted-foreground/30 text-xs p-4 text-center">
             No history yet
           </div>

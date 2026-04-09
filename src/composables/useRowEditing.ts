@@ -258,6 +258,7 @@ export function useRowEditing(ctx: RowEditingContext) {
       rows: [{ active: true, column: filterColumn, operator: 'equals', value: String(filterValue) }],
     }
     await loadTableData(targetTable, tab.connectionId, tab.database, filter, pane.id)
+    pane.showFilters = true
   }
 
   return {
