@@ -132,7 +132,17 @@ pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Resu
 
     println!("  -> Connection successful!");
 
-    let driver = Arc::new(MySqlDriver::new(pool));
+    // Detect if the server enforces ONLY_FULL_GROUP_BY (MySQL 5.7+).
+    // We use this to disable it per-session during export reads so that VIEWs
+    // created without strict mode can be exported without errors.
+    let no_group_by_check = sqlx::query_scalar::<_, String>("SELECT @@SESSION.sql_mode")
+        .fetch_one(&pool)
+        .await
+        .map(|mode| mode.contains("ONLY_FULL_GROUP_BY"))
+        .unwrap_or(false);
+    println!("  -> ONLY_FULL_GROUP_BY active: {}", no_group_by_check);
+
+    let driver = Arc::new(MySqlDriver::new(pool, no_group_by_check));
 
     let mut sessions = state.active_sessions.write();
     if let Some(old_session) = sessions.remove(&connection.id) {

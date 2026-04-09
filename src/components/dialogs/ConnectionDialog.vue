@@ -7,7 +7,6 @@ import {
   ShieldCheckIcon,
   HardDriveIcon,
   FolderOpenIcon,
-  XIcon,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -103,7 +102,6 @@ async function pickSshKey() {
   try {
     const selected = await openFileDialog({
       multiple: false,
-      filters: [{ name: 'SSH Key', extensions: ['*', 'pem', 'pub'] }],
     })
     if (selected && typeof selected === 'string') {
       sshForm.value.private_key_path = selected
@@ -248,19 +246,21 @@ async function pickSshKey() {
             <div v-if="sshAuthType === 'key'" class="space-y-3">
               <div class="space-y-2">
                 <Label>Private Key</Label>
-                <button
-                  type="button"
-                  @click="pickSshKey"
-                  class="w-full flex items-center gap-2.5 h-9 px-3 rounded-md border border-input bg-background text-sm transition-colors hover:bg-accent hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
-                >
-                  <FolderOpenIcon class="size-4 shrink-0 text-muted-foreground" />
-                  <span :class="sshForm.private_key_path ? 'text-foreground' : 'text-muted-foreground'" class="flex-1 text-left truncate">
-                    {{ sshForm.private_key_path || 'Select SSH key file...' }}
-                  </span>
-                  <span v-if="sshForm.private_key_path" @click.stop="sshForm.private_key_path = ''" class="text-muted-foreground hover:text-foreground">
-                    <XIcon class="size-3.5" />
-                  </span>
-                </button>
+                <div class="flex gap-1.5">
+                  <Input
+                    v-model="sshForm.private_key_path"
+                    placeholder="~/.ssh/id_rsa"
+                    class="flex-1"
+                  />
+                  <button
+                    type="button"
+                    @click="pickSshKey"
+                    title="Browse…"
+                    class="shrink-0 flex items-center justify-center h-9 w-9 rounded-md border border-input bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
+                  >
+                    <FolderOpenIcon class="size-4" />
+                  </button>
+                </div>
               </div>
               <div class="space-y-2">
                 <Label>Passphrase <span class="text-muted-foreground font-normal">(optional)</span></Label>

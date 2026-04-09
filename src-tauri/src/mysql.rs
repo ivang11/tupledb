@@ -281,13 +281,18 @@ fn get_str_lossy(row: &sqlx::mysql::MySqlRow, index: usize) -> String {
 pub struct MySqlDriver {
     pool: MySqlPool,
     running_queries: Arc<RwLock<HashMap<String, u64>>>,
+    /// True when the server has ONLY_FULL_GROUP_BY enabled (MySQL 5.7+).
+    /// Used to disable it for the session in read-only export queries so that
+    /// VIEWs created without strict mode can still be read.
+    no_group_by_check: bool,
 }
 
 impl MySqlDriver {
-    pub fn new(pool: MySqlPool) -> Self {
+    pub fn new(pool: MySqlPool, no_group_by_check: bool) -> Self {
         Self {
             pool,
             running_queries: Arc::new(RwLock::new(HashMap::new())),
+            no_group_by_check,
         }
     }
 }
@@ -527,6 +532,12 @@ impl DatabaseDriver for MySqlDriver {
     ) -> Result<(Vec<ColumnInfo>, Vec<Value>), String> {
         let query = format!("SELECT * FROM `{}`.`{}`", database, table);
         let mut conn = self.pool.acquire().await.map_err(|e| e.to_string())?;
+        if self.no_group_by_check {
+            sqlx::query("SET SESSION sql_mode=(SELECT REPLACE(@@SESSION.sql_mode,'ONLY_FULL_GROUP_BY',''))")
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| format!("Failed to set sql_mode: {}", e))?;
+        }
         let mut stream = sqlx::query(&query).fetch(&mut *conn);
         let mut columns: Vec<ColumnInfo> = Vec::new();
         let mut result_rows: Vec<Value> = Vec::new();
@@ -553,6 +564,12 @@ impl DatabaseDriver for MySqlDriver {
     ) -> Result<(), String> {
         let query = format!("SELECT * FROM `{}`.`{}`", database, table);
         let mut conn = self.pool.acquire().await.map_err(|e| e.to_string())?;
+        if self.no_group_by_check {
+            sqlx::query("SET SESSION sql_mode=(SELECT REPLACE(@@SESSION.sql_mode,'ONLY_FULL_GROUP_BY',''))")
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| format!("Failed to set sql_mode: {}", e))?;
+        }
         let mut stream = sqlx::query(&query).fetch(&mut *conn);
         let mut columns: Vec<ColumnInfo> = Vec::new();
         while let Some(row_result) = stream.next().await {
