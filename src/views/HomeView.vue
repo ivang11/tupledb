@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, computed, nextTick } from "vue";
+import { ref, watch, nextTick, defineAsyncComponent } from "vue";
 import type { TableTab } from "@/types/workspace";
 import { useConnectionStore } from "@/stores/connections";
-import QueryEditor from "@/components/QueryEditor.vue";
+const QueryEditor = defineAsyncComponent(() => import("@/components/QueryEditor.vue"));
 import FilterBar from "@/components/FilterBar.vue";
 import Sidebar from "@/components/Sidebar.vue";
 import TabBar from "@/components/TabBar.vue";

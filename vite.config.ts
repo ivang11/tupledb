@@ -14,6 +14,19 @@ export default defineConfig({
       '@': fileURLToPath(new URL('./src', import.meta.url))
     }
   },
+  build: {
+    chunkSizeWarningLimit: 800,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-vue': ['vue', 'vue-router', 'pinia'],
+          'vendor-editor': ['codemirror', '@codemirror/lang-sql', 'sql-formatter'],
+          'vendor-table': ['@tanstack/vue-table', '@tanstack/vue-virtual'],
+          'vendor-ui': ['reka-ui', 'lucide-vue-next', '@vueuse/core'],
+        },
+      },
+    },
+  },
 
   // Tauri expects a fixed port, fail if that port is used
   server: {
