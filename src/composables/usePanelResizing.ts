@@ -1,7 +1,36 @@
 import { ref, nextTick } from 'vue'
 import type { TableTab } from '@/types/workspace'
 
+const SIDEBAR_WIDTH_KEY = 'db-viewer:sidebar-width'
+
+function loadSidebarWidth(): number {
+  try {
+    const raw = localStorage.getItem(SIDEBAR_WIDTH_KEY)
+    return raw ? parseInt(raw, 10) : 288
+  } catch {
+    return 288
+  }
+}
+
 export function usePanelResizing() {
+  const sidebarWidth = ref<number>(loadSidebarWidth())
+
+  function startSidebarResize(e: MouseEvent) {
+    e.preventDefault()
+    const startX = e.clientX
+    const startWidth = sidebarWidth.value
+    const onMove = (ev: MouseEvent) => {
+      sidebarWidth.value = Math.max(180, Math.min(600, startWidth + (ev.clientX - startX)))
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+      try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(sidebarWidth.value)) } catch {}
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   const sidePanelWidths = ref<Record<string, number>>({})
 
   function startSidePanelResize(e: MouseEvent, paneId: string) {
@@ -91,6 +120,8 @@ export function usePanelResizing() {
   }
 
   return {
+    sidebarWidth,
+    startSidebarResize,
     sidePanelWidths,
     startSidePanelResize,
     columnWidths,

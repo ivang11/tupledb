@@ -969,6 +969,10 @@ impl DatabaseDriver for MySqlDriver {
             return vec![Err(format!("Failed to select database: {}", e))];
         }
         let _ = conn.execute("SET FOREIGN_KEY_CHECKS=0").await;
+        // Relax strict date/group-by rules for the duration of the import so that
+        // dumps containing '0000-00-00' defaults (e.g. WordPress) don't fail.
+        // This mirrors what mysqldump prepends to its output.
+        let _ = conn.execute("SET SESSION sql_mode='NO_AUTO_VALUE_ON_ZERO'").await;
         // Disable autocommit so all DML in this batch is committed in one shot,
         // avoiding a costly fsync per statement. DDL still triggers implicit commits.
         let _ = conn.execute("SET autocommit=0").await;
@@ -986,6 +990,7 @@ impl DatabaseDriver for MySqlDriver {
         let _ = conn.execute("COMMIT").await;
         let _ = conn.execute("SET autocommit=1").await;
         let _ = conn.execute("SET FOREIGN_KEY_CHECKS=1").await;
+        let _ = conn.execute("SET SESSION sql_mode=@@GLOBAL.sql_mode").await;
         results
     }
 }

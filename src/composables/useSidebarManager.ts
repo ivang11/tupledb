@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { v4 as uuidv4 } from "uuid";
 import { useConnectionStore } from "@/stores/connections";
+import { useProgressStore } from "@/stores/progress";
 import type { Connection } from "@/types/connection";
 import type { PaneState, TableTab } from "@/types/workspace";
 
@@ -31,6 +32,7 @@ interface SidebarContext {
 
 export function useSidebarManager(ctx: SidebarContext) {
   const store = useConnectionStore();
+  const progressStore = useProgressStore();
   const {
     panes,
     getPane,
@@ -139,9 +141,7 @@ export function useSidebarManager(ctx: SidebarContext) {
 
   // ── Import / Export ─────────────────────────────────────────────────────────
 
-  const isImporting = ref(false);
   const importResult = ref<{ executed: number; errors: string[] } | null>(null);
-  const importProgress = ref({ current: 0, total: 0, status: "" });
 
   async function importSql(connectionId: string, database: string) {
     const path = await open({
@@ -149,9 +149,10 @@ export function useSidebarManager(ctx: SidebarContext) {
       multiple: false,
     });
     if (!path) return;
-    isImporting.value = true;
+    progressStore.isImporting = true;
+    progressStore.importExpanded = true;
     importResult.value = null;
-    importProgress.value = { current: 0, total: 0, status: "Reading file..." };
+    progressStore.importProgress = { current: 0, total: 0, status: "Reading file..." };
     let unlisten: UnlistenFn | null = null;
     try {
       unlisten = await listen<{
@@ -159,7 +160,7 @@ export function useSidebarManager(ctx: SidebarContext) {
         total: number;
         status: string;
       }>("import-progress", (event) => {
-        importProgress.value = event.payload;
+        progressStore.importProgress = event.payload;
       });
       const result = await invoke<{ executed: number; errors: string[] }>(
         "import_sql",
@@ -173,7 +174,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     } catch (e: any) {
       importResult.value = { executed: 0, errors: [String(e)] };
     } finally {
-      isImporting.value = false;
+      progressStore.isImporting = false;
       if (unlisten) unlisten();
     }
   }
@@ -185,8 +186,6 @@ export function useSidebarManager(ctx: SidebarContext) {
   const exportContext = ref<{ connectionId: string; database: string } | null>(
     null,
   );
-  const isExportingDb = ref(false);
-  const exportProgress = ref({ current: 0, total: 0, status: "" });
   const exportResult = ref<{ success: boolean; message: string } | null>(null);
 
   const exportContextTables = computed(() => {
@@ -229,9 +228,10 @@ export function useSidebarManager(ctx: SidebarContext) {
       filters: [{ name: "SQL", extensions: ["sql"] }],
     });
     if (!path) return;
-    isExportingDb.value = true;
+    progressStore.isExporting = true;
+    progressStore.exportExpanded = true;
     exportResult.value = null;
-    exportProgress.value = {
+    progressStore.exportProgress = {
       current: 0,
       total: 0,
       status: "Initializing export...",
@@ -243,7 +243,7 @@ export function useSidebarManager(ctx: SidebarContext) {
         total: number;
         status: string;
       }>("export-progress", (event) => {
-        exportProgress.value = event.payload;
+        progressStore.exportProgress = event.payload;
       });
       const rows = await invoke<number>("export_database", {
         connectionId,
@@ -259,7 +259,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     } catch (e: any) {
       exportResult.value = { success: false, message: String(e) };
     } finally {
-      isExportingDb.value = false;
+      progressStore.isExporting = false;
       if (unlisten) unlisten();
     }
   }
@@ -844,16 +844,12 @@ export function useSidebarManager(ctx: SidebarContext) {
     disconnectConn,
     createDatabase,
     // Import/Export
-    isImporting,
     importResult,
-    importProgress,
     showTableSelector,
     isLoadingExportTables,
     selectedExportTables,
     currentExportMode,
     exportContext,
-    isExportingDb,
-    exportProgress,
     exportResult,
     exportContextTables,
     importSql,

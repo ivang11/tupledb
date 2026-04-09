@@ -1,6 +1,6 @@
 {
   "productName": "db-viewer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "identifier": "com.db-viewer.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -13,8 +13,10 @@
       {
         "label": "main",
         "title": "DB Viewer",
-        "width": 1000,
-        "height": 700,
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
         "decorations": false,
         "transparent": false,
         "backgroundColor": "#282c34"

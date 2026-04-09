@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import TitleBar from '@/components/TitleBar.vue'
-import QueryLogPanel from '@/components/QueryLogPanel.vue'
+import StatusBar from '@/components/StatusBar.vue'
 import KeybindingsDialog from '@/components/dialogs/KeybindingsDialog.vue'
 
 const showKeybindings = ref(false)
@@ -17,8 +17,8 @@ const showKeybindings = ref(false)
       <router-view />
     </main>
 
-    <!-- Query Log Panel -->
-    <QueryLogPanel />
+    <!-- Status Bar (Query Log + Import/Export progress) -->
+    <StatusBar />
 
     <!-- Keybindings dialog -->
     <KeybindingsDialog v-model:open="showKeybindings" />

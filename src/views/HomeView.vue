@@ -16,7 +16,6 @@ import PaneResizer from "@/components/PaneResizer.vue";
 import ConnectionDialog from "@/components/dialogs/ConnectionDialog.vue";
 import DeleteConfirmDialog from "@/components/dialogs/DeleteConfirmDialog.vue";
 import ExportDialog from "@/components/dialogs/ExportDialog.vue";
-import FloatingProgress from "@/components/dialogs/FloatingProgress.vue";
 import ImportResultDialog from "@/components/dialogs/ImportResultDialog.vue";
 import ExportResultDialog from "@/components/dialogs/ExportResultDialog.vue";
 import TableActionDialog from "@/components/dialogs/TableActionDialog.vue";
@@ -59,6 +58,8 @@ const {
 } = useWorkspace(panesContainer);
 
 const {
+  sidebarWidth,
+  startSidebarResize,
   sidePanelWidths,
   startSidePanelResize,
   startColResize,
@@ -141,17 +142,13 @@ const {
   toggleDatabase,
   disconnectConn,
   createDatabase,
-  isImporting,
   importResult,
-  importProgress,
   importSql,
   showTableSelector,
   isLoadingExportTables,
   selectedExportTables,
   currentExportMode,
   exportContext,
-  isExportingDb,
-  exportProgress,
   exportResult,
   exportContextTables,
   openExportSelector,
@@ -321,6 +318,7 @@ function getSchema(connectionId: string, database: string | null): Record<string
     <!-- Sidebar -->
     <Sidebar
       ref="sidebarRef"
+      :width="sidebarWidth"
       :search="search"
       :open-connections="store.openConnections"
       :closed-connections="closedConnections"
@@ -352,6 +350,7 @@ function getSchema(connectionId: string, database: string | null): Record<string
       @context-menu-connection="openSidebarContextMenu"
       @context-menu-table="openSidebarTableContextMenu"
       @context-menu-database="openSidebarDatabaseContextMenu"
+      @resize-start="startSidebarResize"
     />
 
     <!-- Panes container -->
@@ -584,19 +583,7 @@ function getSchema(connectionId: string, database: string | null): Record<string
       @update:current-mode="currentExportMode = $event"
       @start="startExport"
     />
-    <FloatingProgress
-      :open="isImporting"
-      title="Importing SQL"
-      :progress="importProgress"
-      :stack-index="0"
-    />
     <ImportResultDialog :result="importResult" @close="importResult = null" />
-    <FloatingProgress
-      :open="isExportingDb"
-      title="Exporting Data"
-      :progress="exportProgress"
-      :stack-index="isImporting ? 1 : 0"
-    />
     <ExportResultDialog :result="exportResult" @close="exportResult = null" />
     <ConnectionDialog
       :open="showNewConnDialog"

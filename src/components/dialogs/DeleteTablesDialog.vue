@@ -99,7 +99,7 @@ function handleDropDatabase() {
 
       <ScrollArea class="flex-1 bg-background">
         <div class="px-6 py-4">
-          <div class="flex items-center justify-between mb-3 sticky top-0 bg-background py-1 z-10 border-b">
+          <div class="flex items-center justify-between sticky top-0 bg-background pb-1 z-10 border-b">
             <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Tables</h3>
             <div class="flex items-center gap-3">
               <span class="text-[10px] font-bold text-muted-foreground">{{ selectedTables.length }} / {{ tables.length }}</span>
@@ -135,31 +135,12 @@ function handleDropDatabase() {
                   : 'border-muted-foreground/25']">
                 <CheckIcon v-if="selectedTables.includes(table.name)" class="size-2.5 text-destructive-foreground stroke-[3]" />
               </div>
-              <TableIcon :class="['size-3.5 transition-colors flex-shrink-0',
-                selectedTables.includes(table.name) ? 'text-destructive' : 'text-muted-foreground']" />
               <span :class="['text-sm truncate transition-colors',
                 selectedTables.includes(table.name) ? 'text-destructive font-semibold' : 'font-medium']">
                 {{ table.name }}
               </span>
             </div>
           </div>
-        </div>
-
-        <!-- FK checks option -->
-        <div class="px-6 pb-4" v-if="!loadingTables && tables.length > 0">
-          <button
-            @click="disableFkChecks = !disableFkChecks"
-            class="flex items-start gap-3 cursor-pointer w-full bg-muted/20 p-3 rounded-lg border border-border hover:bg-muted/40 transition-colors text-left"
-          >
-            <div :class="['mt-0.5 shrink-0 flex items-center justify-center size-4 rounded border-2 border-border transition-colors',
-              disableFkChecks ? 'bg-destructive border-destructive' : '']">
-              <CheckIcon v-if="disableFkChecks" class="size-3 text-destructive-foreground stroke-[3]" />
-            </div>
-            <div class="flex flex-col min-w-0">
-              <span class="text-sm font-bold text-foreground">Disable Foreign Key Checks</span>
-              <span class="text-xs text-muted-foreground leading-relaxed mt-0.5">Allows dropping tables referenced by others.</span>
-            </div>
-          </button>
         </div>
       </ScrollArea>
 
@@ -182,6 +163,20 @@ function handleDropDatabase() {
           Drop <code class="font-black">`{{ database }}`</code>? This permanently deletes the database and all its data.
         </span>
         <button @click="confirmDropDb = false" class="text-xs text-muted-foreground hover:text-foreground font-medium">Cancel</button>
+      </div>
+
+      <!-- FK checks option -->
+      <div v-if="!loadingTables && tables.length > 0" class="px-8 py-3 border-t bg-muted/10">
+        <button
+          @click="disableFkChecks = !disableFkChecks"
+          class="flex items-center gap-3 cursor-pointer"
+        >
+          <div :class="['shrink-0 flex items-center justify-center size-4 rounded border-2 transition-colors',
+            disableFkChecks ? 'bg-destructive border-destructive' : 'border-muted-foreground/30']">
+            <CheckIcon v-if="disableFkChecks" class="size-3 text-destructive-foreground stroke-[3]" />
+          </div>
+          <span class="text-xs text-muted-foreground hover:text-foreground transition-colors select-none">Disable Foreign Key Checks</span>
+        </button>
       </div>
 
       <div class="p-6 py-4 border-t bg-muted/10 flex flex-row items-center justify-between gap-2">
