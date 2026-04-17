@@ -1,5 +1,6 @@
 import { ref, nextTick, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { useToast } from '@/composables/useToast'
 import type { PaneState, TableTab } from '@/types/workspace'
 
 interface RowEditingContext {
@@ -16,12 +17,14 @@ export function useRowEditing(ctx: RowEditingContext) {
 
   // ── Core state ──────────────────────────────────────────────────────────────
 
+  const { error: toastError } = useToast()
   const isSaving = ref(false)
   const disableFkChecks = ref(false)
 
   // ── Insert row ──────────────────────────────────────────────────────────────
 
   const insertingRowPaneId = ref<string | null>(null)
+  const insertingRowTabId = ref<string | null>(null)
   const insertRowValues = ref<Record<string, string>>({})
   const insertRowLoading = ref(false)
   const insertRowError = ref<string | null>(null)
@@ -41,9 +44,13 @@ export function useRowEditing(ctx: RowEditingContext) {
   }
 
   function openInsertRowDialog(pane: PaneState) {
-    if (insertingRowPaneId.value === pane.id) { insertingRowPaneId.value = null; return }
     const tab = getPaneTab(pane)
     if (!tab) return
+    if (insertingRowPaneId.value === pane.id && insertingRowTabId.value === tab.id) {
+      insertingRowPaneId.value = null
+      insertingRowTabId.value = null
+      return
+    }
     insertRowValues.value = Object.fromEntries(
       (tab.tableStructure as any[])
         .filter((col: any) => col.extra !== 'auto_increment')
@@ -51,11 +58,13 @@ export function useRowEditing(ctx: RowEditingContext) {
     )
     insertRowError.value = null
     insertingRowPaneId.value = pane.id
+    insertingRowTabId.value = tab.id
     nextTick(() => document.querySelector<HTMLInputElement>('.insert-row-input')?.focus())
   }
 
   function cancelInsertRow() {
     insertingRowPaneId.value = null
+    insertingRowTabId.value = null
     insertRowError.value = null
   }
 
@@ -69,6 +78,7 @@ export function useRowEditing(ctx: RowEditingContext) {
       const values = Object.entries(insertRowValues.value).map(([column, value]) => {
         if (value === '' || value === null) return { column, value: null }
         const lower = String(value).toLowerCase().trim()
+        if (lower === 'null') return { column, value: null }
         if (lower === 'true') return { column, value: 1 }
         if (lower === 'false') return { column, value: 0 }
         return { column, value }
@@ -78,6 +88,7 @@ export function useRowEditing(ctx: RowEditingContext) {
         values, disableFkChecks: disableFkChecks.value,
       })
       insertingRowPaneId.value = null
+      insertingRowTabId.value = null
       await refreshActiveTab(pane.id)
     } catch (e: any) {
       const msg = String(e)
@@ -85,6 +96,52 @@ export function useRowEditing(ctx: RowEditingContext) {
       insertRowError.value = match ? match[1] : msg
     } finally {
       insertRowLoading.value = false
+    }
+  }
+
+  function duplicateRow(pane: PaneState, row: any) {
+    const tab = getPaneTab(pane)
+    if (!tab) return
+    insertRowValues.value = Object.fromEntries(
+      (tab.tableStructure as any[])
+        .filter((col: any) => col.extra !== 'auto_increment')
+        .map((col: any) => {
+          const val = row[col.field]
+          return [col.field, val === null || val === undefined ? '' : String(val)]
+        }),
+    )
+    insertRowError.value = null
+    insertingRowPaneId.value = pane.id
+    insertingRowTabId.value = tab.id
+    nextTick(() => document.querySelector<HTMLInputElement>('.insert-row-input')?.focus())
+  }
+
+  // ── Delete row (immediate, no pending changes) ──────────────────────────────
+
+  async function deleteRowImmediate(pane: PaneState, row: any) {
+    const tab = getPaneTab(pane)
+    const conn = getPaneConnection(pane)
+    const pk = getPrimaryKey(pane)
+    if (!tab || !conn || !pk) return
+    const pkVal = String(row[pk])
+    isSaving.value = true
+    try {
+      await invoke('apply_table_changes', {
+        connectionId: conn.id, database: tab.database, table: tab.tableName,
+        updates: [],
+        deletions: [{ pk_column: pk, pk_value: isNaN(Number(pkVal)) ? pkVal : Number(pkVal) }],
+        disableFkChecks: disableFkChecks.value,
+      })
+      if (tab.selectedRowPk === pkVal) {
+        tab.selectedRowPk = null
+        tab.inlineEditColumn = null
+      }
+      tab.selectedRowPks = tab.selectedRowPks.filter(p => p !== pkVal)
+      await refreshActiveTab(pane.id)
+    } catch (e: any) {
+      toastError('Failed to delete row', String(e))
+    } finally {
+      isSaving.value = false
     }
   }
 
@@ -117,6 +174,17 @@ export function useRowEditing(ctx: RowEditingContext) {
     else tab.pendingDeletions[pkVal] = true
   }
 
+  function toggleDeletionSelected(pane: PaneState) {
+    const tab = getPaneTab(pane)
+    const pk = getPrimaryKey(pane)
+    if (!tab || !pk || !tab.selectedRowPks.length) return
+    const rows = tab.queryResult?.rows ?? []
+    for (const pkVal of tab.selectedRowPks) {
+      const row = rows.find((r: any) => String(r[pk]) === pkVal)
+      if (row) toggleDeletion(pane, row)
+    }
+  }
+
   function discardChanges(pane: PaneState) {
     const tab = getPaneTab(pane)
     if (!tab) return
@@ -124,6 +192,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     tab.pendingDeletions = {}
     tab.pendingTruncate = false
     tab.selectedRowPk = null
+    tab.selectedRowPks = []
     tab.inlineEditColumn = null
   }
 
@@ -131,6 +200,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     const tab = getPaneTab(pane)
     if (!tab) return
     tab.selectedRowPk = null
+    tab.selectedRowPks = []
     tab.inlineEditColumn = null
   }
 
@@ -146,22 +216,53 @@ export function useRowEditing(ctx: RowEditingContext) {
     if (el.closest('button')) return
     const td = el.closest('td')
     if (!td?.parentElement) return
-    const idx = Array.from(td.parentElement.children).indexOf(td)
+    const tdIdx = Array.from(td.parentElement.children).indexOf(td)
     const pk = getPrimaryKey(pane)
     if (!pk) return
     const tab = getPaneTab(pane)
     if (!tab) return
     const pkVal = String((row as any)[pk])
-    if (idx === 0) {
+
+    // Ctrl/Meta: toggle individual row in multi-selection
+    if (e.ctrlKey || e.metaKey) {
+      const idx = tab.selectedRowPks.indexOf(pkVal)
+      if (idx === -1) tab.selectedRowPks.push(pkVal)
+      else tab.selectedRowPks.splice(idx, 1)
+      tab.selectedRowPk = pkVal
+      tab.inlineEditColumn = null
+      return
+    }
+
+    // Shift: range select from last selectedRowPk
+    if (e.shiftKey && tab.selectedRowPk && tab.queryResult?.rows) {
+      const rows = tab.queryResult.rows as any[]
+      const anchorIdx = rows.findIndex((r: any) => String(r[pk]) === tab.selectedRowPk)
+      const currentIdx = rows.findIndex((r: any) => String(r[pk]) === pkVal)
+      if (anchorIdx !== -1 && currentIdx !== -1) {
+        const start = Math.min(anchorIdx, currentIdx)
+        const end = Math.max(anchorIdx, currentIdx)
+        tab.selectedRowPks = rows.slice(start, end + 1).map((r: any) => String(r[pk]))
+        tab.inlineEditColumn = null
+        return
+      }
+    }
+
+    // Single click
+    if (tdIdx === 0) {
       if (tab.selectedRowPk === pkVal) return
-      tab.selectedRowPk = pkVal; tab.inlineEditColumn = null; return
+      tab.selectedRowPk = pkVal
+      tab.selectedRowPks = [pkVal]
+      tab.inlineEditColumn = null
+      return
     }
     const cols = tab.queryResult?.columns
-    const col = cols?.[idx - 1] as { name: string } | undefined
+    const col = cols?.[tdIdx - 1] as { name: string } | undefined
     if (tab.selectedRowPk === pkVal && tab.inlineEditColumn && tab.inlineEditColumn !== col?.name)
       tab.inlineEditColumn = null
     if (tab.selectedRowPk === pkVal) return
-    tab.selectedRowPk = pkVal; tab.inlineEditColumn = null
+    tab.selectedRowPk = pkVal
+    tab.selectedRowPks = [pkVal]
+    tab.inlineEditColumn = null
   }
 
   function onCellDblclick(pane: PaneState, row: any, colName: string) {
@@ -171,6 +272,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     const pkVal = String((row as any)[pk])
     if (tab.pendingDeletions[pkVal]) return
     tab.selectedRowPk = pkVal
+    tab.selectedRowPks = [pkVal]
     tab.inlineEditColumn = colName
     nextTick(() => {
       try {
@@ -223,10 +325,14 @@ export function useRowEditing(ctx: RowEditingContext) {
         const updates = Object.entries(tab.pendingChanges).map(([pkValue, changes]) => ({
           pk_column: pk,
           pk_value: isNaN(Number(pkValue)) ? pkValue : Number(pkValue),
-          changes: Object.entries(changes).map(([column, value]) => ({
-            column,
-            value: value === null ? null : isNaN(Number(value)) ? value : Number(value),
-          })),
+          changes: Object.entries(changes).map(([column, value]) => {
+            if (value === null) return { column, value: null }
+            const lower = String(value).toLowerCase().trim()
+            if (lower === 'null') return { column, value: null }
+            if (lower === 'true') return { column, value: 1 }
+            if (lower === 'false') return { column, value: 0 }
+            return { column, value: isNaN(Number(value)) ? value : Number(value) }
+          }),
         }))
         const deletions = Object.keys(tab.pendingDeletions).map(pkValue => ({
           pk_column: pk,
@@ -241,10 +347,11 @@ export function useRowEditing(ctx: RowEditingContext) {
       tab.pendingDeletions = {}
       tab.pendingTruncate = false
       tab.selectedRowPk = null
+      tab.selectedRowPks = []
       tab.inlineEditColumn = null
       await refreshActiveTab(pane.id)
     } catch (e: any) {
-      alert(`Failed to apply changes: ${e}`)
+      toastError('Failed to apply changes', String(e))
     } finally {
       isSaving.value = false
     }
@@ -265,6 +372,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     isSaving,
     disableFkChecks,
     insertingRowPaneId,
+    insertingRowTabId,
     insertRowValues,
     insertRowLoading,
     insertRowError,
@@ -273,8 +381,11 @@ export function useRowEditing(ctx: RowEditingContext) {
     openInsertRowDialog,
     cancelInsertRow,
     submitInsertRow,
+    duplicateRow,
+    deleteRowImmediate,
     updatePendingChange,
     toggleDeletion,
+    toggleDeletionSelected,
     discardChanges,
     clearRowSelection,
     getSelectedRow,

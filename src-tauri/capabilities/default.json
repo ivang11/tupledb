@@ -42,6 +42,6 @@
     "allow-get-table-ddl",
     "allow-get-saved-queries",
     "allow-upsert-saved-query",
-    "allow-delete-saved-query"
+    "allow-delete-saved-query",
   ]
 }

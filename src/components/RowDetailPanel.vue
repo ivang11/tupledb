@@ -100,7 +100,7 @@ const isPendingDelete = () => !!props.pendingDeletions[pkVal()]
           class="space-y-1"
         >
           <div class="flex items-center justify-between gap-1">
-            <Label class="text-xs font-bold text-foreground uppercase tracking-wide">{{ col.name }}</Label>
+            <Label class="text-xs font-bold text-foreground">{{ col.name }}</Label>
             <button
               type="button"
               class="size-5 shrink-0 flex items-center justify-center rounded transition-colors"

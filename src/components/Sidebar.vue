@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import {
   SearchIcon,
   DatabaseIcon,
@@ -20,6 +20,7 @@ import type { Connection, Environment } from "@/types/connection";
 const props = defineProps<{
   width: number;
   search: string;
+  selectedConnectionId: string | null;
   openConnections: Record<
     string,
     {
@@ -29,7 +30,6 @@ const props = defineProps<{
     }
   >;
   closedConnections: Connection[];
-  expandedConnections: Set<string>;
   expandedDatabases: Set<string>;
   connectingId: string | null;
   showNewDb: string | null;
@@ -46,9 +46,9 @@ const emit = defineEmits<{
   "update:search": [val: string];
   "update:showNewDb": [val: string | null];
   "update:newDbName": [val: string];
+  "update:selectedConnectionId": [id: string];
   "new-connection": [];
   "connect-saved": [conn: Connection];
-  "toggle-connection": [connId: string];
   "toggle-database": [connId: string, db: string];
   "load-table": [tableName: string, connId: string, db: string];
   "create-database": [connId: string];
@@ -141,6 +141,9 @@ function scrollToTable(tableName: string, db: string, connId: string) {
   const el = tableRefs.value[key];
   el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
+
+// Non-null alias used inside the v-if="selectedConnectionId" template blocks
+const activeConnId = computed(() => props.selectedConnectionId ?? '')
 </script>
 
 <template>
@@ -150,7 +153,6 @@ function scrollToTable(tableName: string, db: string, connId: string) {
   >
     <!-- Header -->
     <div class="shrink-0 border-b border-sidebar-border">
-      <!-- Top row: title + add button -->
       <div class="flex items-center gap-2 px-3 h-9">
         <div class="flex items-center gap-2 min-w-0 flex-1">
           <ServerIcon class="size-3.5 text-primary/60 shrink-0" />
@@ -172,99 +174,95 @@ function scrollToTable(tableName: string, db: string, connId: string) {
           <PlusIcon class="size-3.5" />
         </button>
       </div>
+    </div>
 
-      <!-- Search bar -->
-      <div
-        v-if="Object.keys(openConnections).length > 0"
-        ref="searchContainerRef"
-        class="px-2 pb-2"
+    <!-- Empty state -->
+    <div
+      v-if="Object.keys(openConnections).length === 0 && closedConnections.length === 0"
+      class="flex flex-col items-center justify-center py-16 px-4 text-center"
+    >
+      <PlugZapIcon class="size-7 text-sidebar-foreground/15 mb-3" />
+      <p class="text-xs text-sidebar-foreground/30 font-medium">No connections yet</p>
+      <button
+        @click="emit('new-connection')"
+        class="mt-3 text-[11px] text-primary/70 hover:text-primary transition-colors"
       >
-        <div class="relative">
-          <SearchIcon
-            class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-sidebar-foreground/30"
+        Add connection
+      </button>
+    </div>
+
+    <!-- Open connections list (compact, selectable) -->
+    <div
+      v-if="Object.keys(openConnections).length > 0"
+      class="shrink-0 border-b border-sidebar-border/60"
+    >
+      <div
+        v-for="(connState, connId) in openConnections"
+        :key="connId"
+        class="flex items-center gap-0 group overflow-hidden cursor-pointer transition-colors"
+        :class="selectedConnectionId === connId
+          ? 'bg-primary/8'
+          : 'hover:bg-sidebar-accent/50'"
+        @click="emit('update:selectedConnectionId', connId as string)"
+        @contextmenu="emit('context-menu-connection', $event, connState.connection)"
+      >
+        <span
+          :class="['w-1 self-stretch shrink-0', getEnvBorderColor(connState.connection.environment)]"
+        />
+        <div class="flex-1 flex items-center gap-1.5 px-2 py-1.5 min-w-0">
+          <DatabaseIcon
+            :class="[
+              'size-3 shrink-0',
+              selectedConnectionId === connId ? 'text-primary/70' : 'text-sidebar-foreground/30'
+            ]"
           />
-          <Input
-            :value="search"
-            @input="emit('update:search', ($event.target as HTMLInputElement).value)"
-            placeholder="Filter tables..."
-            class="h-7 pl-8 text-xs bg-sidebar-accent/50 border-none rounded focus-visible:ring-1 focus-visible:ring-primary/30"
-          />
+          <span
+            :class="[
+              'text-sm truncate flex-1',
+              selectedConnectionId === connId
+                ? 'font-semibold text-sidebar-foreground'
+                : 'font-medium text-sidebar-foreground/60'
+            ]"
+          >
+            {{ connState.connection.name }}
+          </span>
+          <Badge
+            variant="outline"
+            class="text-[9px] uppercase py-0 px-1.5 h-4 shrink-0 font-bold"
+            :class="getEnvColor(connState.connection.environment)"
+          >
+            {{ connState.connection.environment }}
+          </Badge>
         </div>
       </div>
     </div>
 
-    <!-- Tree -->
-    <ScrollArea class="flex-1 py-1">
-      <!-- Empty state -->
-      <div
-        v-if="Object.keys(openConnections).length === 0 && closedConnections.length === 0"
-        class="flex flex-col items-center justify-center py-16 px-4 text-center"
-      >
-        <PlugZapIcon class="size-7 text-sidebar-foreground/15 mb-3" />
-        <p class="text-xs text-sidebar-foreground/30 font-medium">No connections yet</p>
-        <button
-          @click="emit('new-connection')"
-          class="mt-3 text-[11px] text-primary/70 hover:text-primary transition-colors"
-        >
-          Add connection
-        </button>
+    <!-- Search bar (for selected connection's tables) -->
+    <div
+      v-if="selectedConnectionId && openConnections[selectedConnectionId]"
+      ref="searchContainerRef"
+      class="shrink-0 px-2 py-1.5 border-b border-sidebar-border/40"
+    >
+      <div class="relative">
+        <SearchIcon
+          class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-sidebar-foreground/30"
+        />
+        <Input
+          :value="search"
+          @input="emit('update:search', ($event.target as HTMLInputElement).value)"
+          placeholder="Filter tables..."
+          class="h-7 pl-8 text-xs bg-sidebar-accent/50 border-none rounded focus-visible:ring-1 focus-visible:ring-primary/30"
+        />
       </div>
+    </div>
 
-      <!-- Connected section -->
-      <template v-if="Object.keys(openConnections).length > 0">
-        <div class="px-3 pt-1 pb-0.5">
-          <span class="text-[10px] font-bold text-sidebar-foreground/30 uppercase tracking-widest">
-            Connected
-          </span>
-        </div>
-      </template>
+    <!-- Tree for selected connection -->
+    <ScrollArea class="flex-1 py-1">
+      <template v-if="selectedConnectionId && openConnections[selectedConnectionId]">
+        <div class="px-1 mt-0.5 space-y-px">
 
-      <div
-        v-for="(connState, connId) in openConnections"
-        :key="connId"
-        class="mb-0.5 px-1"
-      >
-        <!-- Connection header -->
-        <div
-          class="flex items-center gap-0 group rounded-md overflow-hidden hover:bg-sidebar-accent/60 transition-colors"
-        >
-          <span
-            :class="['w-1 self-stretch rounded-l shrink-0', getEnvBorderColor(connState.connection.environment)]"
-          />
-          <button
-            class="flex-1 flex items-center gap-1.5 px-2 py-1.5 min-w-0"
-            @click="emit('toggle-connection', connId as string)"
-            @contextmenu="emit('context-menu-connection', $event, connState.connection)"
-          >
-            <ChevronDownIcon
-              v-if="expandedConnections.has(connId as string)"
-              class="size-3 text-sidebar-foreground/40 shrink-0"
-            />
-            <ChevronRightIcon
-              v-else
-              class="size-3 text-sidebar-foreground/30 shrink-0"
-            />
-            <DatabaseIcon class="size-3 shrink-0 text-primary/60" />
-            <span class="text-sm font-semibold truncate flex-1 text-left text-sidebar-foreground">
-              {{ connState.connection.name }}
-            </span>
-            <Badge
-              variant="outline"
-              class="text-[9px] uppercase py-0 px-1.5 h-4 shrink-0 font-bold"
-              :class="getEnvColor(connState.connection.environment)"
-            >
-              {{ connState.connection.environment }}
-            </Badge>
-          </button>
-        </div>
-
-        <!-- Databases -->
-        <div
-          v-if="expandedConnections.has(connId as string)"
-          class="ml-3 mt-0.5 space-y-px"
-        >
           <!-- New DB form -->
-          <div v-if="showNewDb === connId" class="px-1 py-1">
+          <div v-if="showNewDb === activeConnId" class="px-1 py-1">
             <div class="flex items-center gap-1">
               <Input
                 :value="newDbName"
@@ -272,13 +270,13 @@ function scrollToTable(tableName: string, db: string, connId: string) {
                 placeholder="database_name"
                 class="h-7 text-xs bg-sidebar-accent/50 border-none flex-1"
                 autofocus
-                @keyup.enter="emit('create-database', connId as string)"
+                @keyup.enter="emit('create-database', activeConnId)"
                 @keyup.escape="emit('update:showNewDb', null); emit('update:newDbName', '')"
               />
               <button
                 class="flex items-center justify-center size-6 rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shrink-0"
                 :disabled="isCreatingDb || !newDbName.trim()"
-                @click="emit('create-database', connId as string)"
+                @click="emit('create-database', activeConnId)"
               >
                 <CheckIcon class="size-3" />
               </button>
@@ -292,15 +290,18 @@ function scrollToTable(tableName: string, db: string, connId: string) {
           </div>
 
           <!-- Databases -->
-          <div v-for="db in connState.databases" :key="db">
+          <div
+            v-for="db in openConnections[activeConnId].databases"
+            :key="db"
+          >
             <div class="flex items-center group/db rounded hover:bg-sidebar-accent/40 transition-colors">
               <button
                 class="flex-1 flex items-center gap-1.5 px-2 py-1 min-w-0"
-                @click="emit('toggle-database', connId as string, db)"
-                @contextmenu="emit('context-menu-database', $event, connId as string, db)"
+                @click="emit('toggle-database', activeConnId, db)"
+                @contextmenu="emit('context-menu-database', $event, activeConnId, db)"
               >
                 <ChevronDownIcon
-                  v-if="expandedDatabases.has(dbKey(connId as string, db))"
+                  v-if="expandedDatabases.has(dbKey(activeConnId, db))"
                   class="size-2.5 text-sidebar-foreground/40 shrink-0"
                 />
                 <ChevronRightIcon
@@ -316,20 +317,20 @@ function scrollToTable(tableName: string, db: string, connId: string) {
 
             <!-- Tables -->
             <div
-              v-if="expandedDatabases.has(dbKey(connId as string, db))"
+              v-if="expandedDatabases.has(dbKey(activeConnId, db))"
               class="ml-6 space-y-px mt-0.5 mb-1"
             >
               <button
-                v-for="table in filteredTables(connId as string, db)"
+                v-for="table in filteredTables(activeConnId, db)"
                 :key="table.name"
-                :ref="(el) => setTableRef(el as HTMLElement | null, table.name, db, connId as string)"
-                @click="handleTableClick($event, connId as string, db, table.name)"
-                @contextmenu="emit('context-menu-table', $event, connId as string, db, table.name)"
+                :ref="(el) => setTableRef(el as HTMLElement | null, table.name, db, activeConnId)"
+                @click="handleTableClick($event, activeConnId, db, table.name)"
+                @contextmenu="emit('context-menu-table', $event, activeConnId, db, table.name)"
                 :class="[
                   'w-full flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all text-left group/tbl',
-                  isTableSelected(connId as string, db, table.name)
+                  isTableSelected(activeConnId, db, table.name)
                     ? 'bg-primary/20 text-primary ring-1 ring-inset ring-primary/30'
-                    : isTableActive(table.name, db, connId as string)
+                    : isTableActive(table.name, db, activeConnId)
                       ? 'bg-primary text-primary-foreground'
                       : 'hover:bg-sidebar-accent/50 text-sidebar-foreground/70 hover:text-sidebar-foreground',
                 ]"
@@ -337,9 +338,9 @@ function scrollToTable(tableName: string, db: string, connId: string) {
                 <TableIcon
                   :class="[
                     'size-2.5 shrink-0',
-                    isTableActive(table.name, db, connId as string)
+                    isTableActive(table.name, db, activeConnId)
                       ? 'text-primary-foreground/70'
-                      : isTableSelected(connId as string, db, table.name)
+                      : isTableSelected(activeConnId, db, table.name)
                         ? 'text-primary'
                         : 'text-sidebar-foreground/30 group-hover/tbl:text-sidebar-foreground/60',
                   ]"
@@ -347,13 +348,13 @@ function scrollToTable(tableName: string, db: string, connId: string) {
                 <span class="flex-1 truncate text-xs">{{ table.name }}</span>
                 <!-- Open indicator -->
                 <span
-                  v-if="isTableOpen(table.name, db, connId as string) && !isTableActive(table.name, db, connId as string)"
+                  v-if="isTableOpen(table.name, db, activeConnId) && !isTableActive(table.name, db, activeConnId)"
                   class="size-1.5 rounded-full shrink-0 bg-primary/30"
                 />
               </button>
 
               <div
-                v-if="filteredTables(connId as string, db).length === 0 && search"
+                v-if="filteredTables(activeConnId, db).length === 0 && search"
                 class="px-2 py-1 text-[10px] text-sidebar-foreground/30 italic"
               >
                 No matches
@@ -361,11 +362,14 @@ function scrollToTable(tableName: string, db: string, connId: string) {
             </div>
           </div>
         </div>
-      </div>
+      </template>
 
       <!-- Saved (closed) connections -->
       <template v-if="closedConnections.length > 0">
-        <div class="border-t border-sidebar-border/50 my-1.5 mx-2" v-if="Object.keys(openConnections).length > 0" />
+        <div
+          class="border-t border-sidebar-border/50 my-1.5 mx-2"
+          v-if="Object.keys(openConnections).length > 0"
+        />
         <div class="px-3 pb-0.5">
           <span class="text-[9px] font-bold text-sidebar-foreground/25 uppercase tracking-widest">
             Saved

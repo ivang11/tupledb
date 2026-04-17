@@ -49,6 +49,7 @@ export function useSidebarManager(ctx: SidebarContext) {
   const search = ref("");
   const expandedConnections = ref<Set<string>>(new Set());
   const expandedDatabases = ref<Set<string>>(new Set());
+  const selectedSidebarConnectionId = ref<string | null>(null);
   const showNewDb = ref<string | null>(null);
   const newDbName = ref("");
   const isCreatingDb = ref(false);
@@ -62,6 +63,9 @@ export function useSidebarManager(ctx: SidebarContext) {
     await store.fetchConnections();
     for (const id of Object.keys(store.openConnections))
       expandedConnections.value.add(id);
+    if (!selectedSidebarConnectionId.value) {
+      selectedSidebarConnectionId.value = Object.keys(store.openConnections)[0] ?? null;
+    }
   });
 
   async function connectSaved(conn: any) {
@@ -69,8 +73,9 @@ export function useSidebarManager(ctx: SidebarContext) {
     try {
       await store.connect(conn);
       expandedConnections.value.add(conn.id);
+      selectedSidebarConnectionId.value = conn.id;
     } catch (e: any) {
-      alert(`Failed to connect: ${e}`);
+      toastError('Failed to connect', String(e));
     } finally {
       connectingId.value = null;
     }
@@ -341,7 +346,7 @@ export function useSidebarManager(ctx: SidebarContext) {
       showTableActionDialog.value = false;
       tableActionData.value = null;
     } catch (e: any) {
-      alert(`Failed to ${type} table: ${e}`);
+      toastError(`Failed to ${type} table`, String(e));
     } finally {
       isExecutingTableAction.value = false;
     }
@@ -462,7 +467,7 @@ export function useSidebarManager(ctx: SidebarContext) {
       showBulkTableActionDialog.value = false;
       // Note: showBulkDeleteDialog is handled in HomeView.vue
     } catch (e: any) {
-      alert(`Failed to delete tables: ${e}`);
+      toastError('Failed to delete tables', String(e));
     } finally {
       isExecutingBulkTableAction.value = false;
     }
@@ -513,7 +518,7 @@ export function useSidebarManager(ctx: SidebarContext) {
 
       selectedTables.value.clear();
     } catch (e: any) {
-      alert(`Failed to truncate tables: ${e}`);
+      toastError('Failed to truncate tables', String(e));
     } finally {
       isExecutingBulkTableAction.value = false;
     }
@@ -559,7 +564,7 @@ export function useSidebarManager(ctx: SidebarContext) {
       showDatabaseActionDialog.value = false;
       databaseActionData.value = null;
     } catch (e: any) {
-      alert(`Failed to drop database: ${e}`);
+      toastError('Failed to drop database', String(e));
     } finally {
       isExecutingDatabaseAction.value = false;
     }
@@ -664,7 +669,7 @@ export function useSidebarManager(ctx: SidebarContext) {
       showDeleteTablesDialog.value = false;
       deleteTablesContext.value = null;
     } catch (e: any) {
-      alert(`Failed to drop database: ${e}`);
+      toastError('Failed to drop database', String(e));
     } finally {
       isExecutingDeleteTables.value = false;
     }
@@ -806,7 +811,7 @@ export function useSidebarManager(ctx: SidebarContext) {
       }
       showNewConnDialog.value = false;
     } catch (e: any) {
-      alert(`Error: ${e}`);
+      toastError('Error', String(e));
     } finally {
       isSavingConn.value = false;
     }
@@ -839,6 +844,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     search,
     expandedConnections,
     expandedDatabases,
+    selectedSidebarConnectionId,
     showNewDb,
     newDbName,
     isCreatingDb,

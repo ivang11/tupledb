@@ -19,6 +19,7 @@ export interface TableTab {
   pendingDeletions: Record<string, boolean>
   pendingTruncate: boolean
   selectedRowPk: string | null
+  selectedRowPks: string[]
   inlineEditColumn: string | null
 }
 

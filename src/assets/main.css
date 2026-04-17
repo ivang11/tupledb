@@ -189,7 +189,3 @@
   background-color: color-mix(in srgb, var(--primary) 55%, transparent);
 }
 
-/* Data grid: disable default browser stripe on even rows */
-.data-grid tr:nth-child(even) {
-  background: transparent;
-}

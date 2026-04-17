@@ -5,6 +5,8 @@ export type KeybindingAction =
   | 'applyFilters'
   | 'sidebarSearch'
   | 'refreshTable'
+  | 'toggleSidebar'
+  | 'focusPane'
 
 export type KeybindingCategory = 'Tabs' | 'Editor' | 'Data' | 'Navigation'
 
@@ -58,6 +60,20 @@ export const KEYBINDING_DEFS: KeybindingDef[] = [
     description: 'Reload data for the active table tab',
     defaultKey: 'Ctrl+R',
     category: 'Data',
+  },
+  {
+    action: 'toggleSidebar',
+    label: 'Toggle Sidebar',
+    description: 'Show or hide the sidebar',
+    defaultKey: 'Ctrl+B',
+    category: 'Navigation',
+  },
+  {
+    action: 'focusPane',
+    label: 'Focus / Unpin Pane',
+    description: 'Pin the active pane to full width or unpin it',
+    defaultKey: 'Ctrl+Shift+M',
+    category: 'Navigation',
   },
 ]
 

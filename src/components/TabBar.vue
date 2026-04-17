@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from "vue";
+import { useKeybindings, formatKeybinding } from "@/composables/useKeybindings";
 import {
   TerminalIcon,
   TableIcon,
@@ -7,6 +9,9 @@ import {
   FilterIcon,
   RefreshCwIcon,
   PanelRightOpenIcon,
+  ChevronRightIcon,
+  PinIcon,
+  PinOffIcon,
 } from "lucide-vue-next";
 import type { Environment } from "@/types/connection";
 
@@ -30,6 +35,8 @@ const props = defineProps<{
   hasActiveTableTab: boolean;
   isLastPane: boolean;
   showClosePaneButton: boolean;
+  isFocused: boolean;
+  showFocusButton: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -40,6 +47,7 @@ const emit = defineEmits<{
   refresh: [];
   "add-pane": [];
   "remove-pane": [];
+  "toggle-focus": [];
 }>();
 
 const getEnvTopColor = (env: Environment): string => {
@@ -59,6 +67,18 @@ const getEnvDotColor = (env: Environment): string => {
     default:           return "bg-green-400";
   }
 };
+
+const { getBinding } = useKeybindings();
+const focusPaneKey = computed(() => formatKeybinding(getBinding('focusPane')));
+
+const activeTab = computed(() => props.tabs.find(t => t.id === props.activeTabId));
+const paneConnectionName = computed(() =>
+  activeTab.value ? (props.connectionNames[activeTab.value.connectionId] ?? null) : null
+);
+const paneDatabase = computed(() => activeTab.value?.database ?? null);
+const paneEnv = computed(() =>
+  activeTab.value ? (props.connectionEnvironments[activeTab.value.connectionId] ?? null) : null
+);
 </script>
 
 <template>
@@ -67,6 +87,17 @@ const getEnvDotColor = (env: Environment): string => {
     class="flex items-stretch border-b border-border bg-muted/5 overflow-x-auto shrink-0"
     style="height: 36px"
   >
+    <!-- Pane connection identity -->
+    <div
+      v-if="paneConnectionName"
+      class="flex items-center gap-1.5 px-2.5 border-r border-border shrink-0"
+    >
+      <span :class="['size-1.5 rounded-full shrink-0', paneEnv ? getEnvDotColor(paneEnv) : 'bg-muted-foreground/30']" />
+      <span class="text-[11px] font-semibold text-foreground/60 whitespace-nowrap">{{ paneConnectionName }}</span>
+      <ChevronRightIcon class="size-2.5 text-muted-foreground/30 shrink-0" />
+      <span class="text-[11px] text-muted-foreground/50 whitespace-nowrap">{{ paneDatabase }}</span>
+    </div>
+
     <!-- Tabs -->
     <button
       v-for="tab in tabs"
@@ -162,9 +193,25 @@ const getEnvDotColor = (env: Environment): string => {
       </div>
     </template>
 
+    <!-- Pin / focus pane -->
+    <button
+      v-if="showFocusButton"
+      @click="emit('toggle-focus')"
+      :class="[
+        'flex items-center gap-1 px-2.5 transition-colors shrink-0 border-l border-border',
+        isFocused
+          ? 'text-primary bg-primary/10 hover:bg-primary/20'
+          : 'text-muted-foreground/30 hover:text-muted-foreground hover:bg-muted/20',
+      ]"
+      :title="isFocused ? `Unpin pane (${focusPaneKey})` : `Pin pane — focus (${focusPaneKey})`"
+    >
+      <PinOffIcon v-if="isFocused" class="size-3" />
+      <PinIcon v-else class="size-3" />
+    </button>
+
     <!-- Split pane -->
     <button
-      v-if="isLastPane"
+      v-if="isLastPane && !isFocused"
       @click="emit('add-pane')"
       class="flex items-center gap-1 px-2.5 text-muted-foreground/30 hover:text-muted-foreground hover:bg-muted/20 transition-colors shrink-0 border-l border-border"
       title="Split pane"
@@ -174,7 +221,7 @@ const getEnvDotColor = (env: Environment): string => {
 
     <!-- Close pane -->
     <button
-      v-if="showClosePaneButton"
+      v-if="showClosePaneButton && !isFocused"
       @click="emit('remove-pane')"
       class="flex items-center gap-1 px-2.5 text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0 border-l border-border"
       title="Close pane"

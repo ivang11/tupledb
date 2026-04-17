@@ -1,10 +1,16 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { MinusIcon, SquareIcon, XIcon, KeyboardIcon } from 'lucide-vue-next'
+import { MinusIcon, SquareIcon, XIcon, KeyboardIcon, PanelLeftOpenIcon, PanelLeftCloseIcon } from 'lucide-vue-next'
+import { useSidebarState } from '@/composables/useSidebarState'
+import { useKeybindings, formatKeybinding } from '@/composables/useKeybindings'
 
 const emit = defineEmits<{ 'open-keybindings': [] }>()
 
 const win = getCurrentWindow()
+const { sidebarVisible } = useSidebarState()
+const { getBinding } = useKeybindings()
+const toggleSidebarKey = computed(() => formatKeybinding(getBinding('toggleSidebar')))
 </script>
 
 <template>
@@ -14,8 +20,8 @@ const win = getCurrentWindow()
     @dblclick="win.toggleMaximize()"
   >
     <!-- App identity -->
-    <div data-tauri-drag-region class="flex items-center gap-2 pointer-events-none">
-      <div class="flex items-center gap-1.5">
+    <div class="flex items-center gap-1.5">
+      <div data-tauri-drag-region class="flex items-center gap-1.5 pointer-events-none">
         <div class="size-2.5 rounded-full bg-primary/30 flex items-center justify-center">
           <div class="size-1 rounded-full bg-primary" />
         </div>
@@ -23,6 +29,14 @@ const win = getCurrentWindow()
           DB Viewer
         </span>
       </div>
+      <button
+        class="flex size-6 items-center justify-center rounded hover:bg-muted/60 transition-colors text-muted-foreground/40 hover:text-muted-foreground"
+        :title="sidebarVisible ? `Hide Sidebar (${toggleSidebarKey})` : `Show Sidebar (${toggleSidebarKey})`"
+        @click="sidebarVisible = !sidebarVisible"
+      >
+        <PanelLeftCloseIcon v-if="sidebarVisible" class="size-3.5" />
+        <PanelLeftOpenIcon v-else class="size-3.5" />
+      </button>
     </div>
 
     <!-- Window controls -->

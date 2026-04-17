@@ -12,6 +12,7 @@ const props = defineProps<{
   pendingDeletions: Record<string, boolean>
   pendingTruncate: boolean
   selectedRowPk: string | null
+  selectedRowPks: string[]
   inlineEditColumn: string | null
   sortColumn: string | null
   sortDesc: boolean
@@ -35,6 +36,8 @@ const emit = defineEmits<{
   'insert-row-input': [colName: string, value: string]
   'insert-row-submit': []
   'insert-row-cancel': []
+  'row-contextmenu': [row: any, x: number, y: number]
+  'delete-key-pressed': []
 }>()
 
 function colStyle(colName: string) {
@@ -79,6 +82,11 @@ function isPkRow(row: any) {
   return props.primaryKey && props.selectedRowPk === String(row[props.primaryKey])
 }
 
+function isMultiSelected(row: any) {
+  if (!props.primaryKey) return false
+  return props.selectedRowPks.includes(String(row[props.primaryKey]))
+}
+
 function isPendingDelete(row: any) {
   return !!props.pendingDeletions[String(row[props.primaryKey || ''])]
 }
@@ -86,12 +94,20 @@ function isPendingDelete(row: any) {
 function isPendingChange(row: any, col: string) {
   return props.pendingChanges[String(row[props.primaryKey || ''])]?.[col] !== undefined
 }
+
+function onRowContextMenu(e: MouseEvent, row: any) {
+  e.preventDefault()
+  e.stopPropagation()
+  emit('row-contextmenu', row, e.clientX, e.clientY)
+}
 </script>
 
 <template>
   <div
     ref="scrollContainer"
     class="flex-1 min-w-0 relative overflow-auto bg-background custom-scrollbar"
+    tabindex="0"
+    @keydown.delete.stop="emit('delete-key-pressed')"
   >
     <!-- Empty state -->
     <div
@@ -179,15 +195,18 @@ function isPendingChange(row: any, col: string) {
                 ? 'bg-destructive/10 text-destructive/70'
                 : isPkRow(rows[virtualRow.index])
                   ? 'bg-primary/8'
-                  : virtualRow.index % 2 === 1
-                    ? 'bg-muted/20'
-                    : 'bg-transparent',
+                  : isMultiSelected(rows[virtualRow.index])
+                    ? 'bg-primary/30 ring-1 ring-inset ring-primary/50'
+                    : virtualRow.index % 2 === 1
+                      ? 'bg-muted/20'
+                      : 'bg-transparent',
             primaryKey ? 'cursor-pointer' : '',
             !pendingTruncate && !isPendingDelete(rows[virtualRow.index]) && !isPkRow(rows[virtualRow.index])
               ? 'hover:bg-primary/5'
               : '',
           ]"
           @click="emit('row-click', rows[virtualRow.index], $event)"
+          @contextmenu="onRowContextMenu($event, rows[virtualRow.index])"
         >
           <td
             v-for="col in columns"
@@ -214,6 +233,12 @@ function isPendingChange(row: any, col: string) {
             <div
               v-if="isPkRow(rows[virtualRow.index]) && col.name === columns[0]?.name"
               class="absolute left-0 top-0 bottom-0 w-0.5 bg-primary"
+            />
+
+            <!-- Multi-selected row indicator (first col) -->
+            <div
+              v-else-if="isMultiSelected(rows[virtualRow.index]) && col.name === columns[0]?.name && !isPkRow(rows[virtualRow.index])"
+              class="absolute left-0 top-0 bottom-0 w-1 bg-primary"
             />
 
             <!-- Inline edit -->

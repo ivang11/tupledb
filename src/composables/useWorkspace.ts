@@ -14,16 +14,18 @@ export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
   const activePaneId = ref<string>(panes.value[0].id)
   const paneWidths = ref<number[]>([1])
   const draggingPaneIdx = ref<number | null>(null)
+  const focusedPaneId = ref<string | null>(null)
 
   function getPane(paneId?: string): PaneState {
     return panes.value.find(p => p.id === (paneId ?? activePaneId.value)) ?? panes.value[0]
   }
 
-  function addPane() {
+  function addPane(): string {
     const pane = createPane()
     panes.value.push(pane)
     paneWidths.value.push(1)
     activePaneId.value = pane.id
+    return pane.id
   }
 
   function removePane(paneId: string) {
@@ -35,6 +37,11 @@ export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
     if (activePaneId.value === paneId) {
       activePaneId.value = panes.value[Math.min(idx, panes.value.length - 1)].id
     }
+    if (focusedPaneId.value === paneId) focusedPaneId.value = null
+  }
+
+  function toggleFocusPane(paneId: string) {
+    focusedPaneId.value = focusedPaneId.value === paneId ? null : paneId
   }
 
   function startPaneResize(e: MouseEvent, idx: number) {
@@ -139,9 +146,11 @@ export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
     activePaneId,
     paneWidths,
     draggingPaneIdx,
+    focusedPaneId,
     getPane,
     addPane,
     removePane,
+    toggleFocusPane,
     startPaneResize,
     getPaneTab,
     isPaneActiveTabQuery,

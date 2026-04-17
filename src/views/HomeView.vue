@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, watch, nextTick, defineAsyncComponent } from "vue";
+import { ref, watch, watchEffect, computed, nextTick, defineAsyncComponent } from "vue";
+import { useKeybindings, formatKeybinding } from "@/composables/useKeybindings";
+import { useSidebarState } from "@/composables/useSidebarState";
 import type { TableTab } from "@/types/workspace";
 import { useConnectionStore } from "@/stores/connections";
 const QueryEditor = defineAsyncComponent(() => import("@/components/QueryEditor.vue"));
@@ -23,6 +25,7 @@ import DeleteTablesDialog from "@/components/dialogs/DeleteTablesDialog.vue";
 import ConnectionContextMenu from "@/components/ConnectionContextMenu.vue";
 import TableContextMenu from "@/components/TableContextMenu.vue";
 import DatabaseContextMenu from "@/components/DatabaseContextMenu.vue";
+import RowContextMenu from "@/components/RowContextMenu.vue";
 import { useWorkspace } from "@/composables/useWorkspace";
 import { usePanelResizing } from "@/composables/usePanelResizing";
 import { useTableTabs } from "@/composables/useTableTabs";
@@ -40,9 +43,11 @@ const {
   activePaneId,
   paneWidths,
   draggingPaneIdx,
+  focusedPaneId,
   getPane,
   addPane,
   removePane,
+  toggleFocusPane,
   startPaneResize,
   getPaneTab,
   isPaneActiveTabQuery,
@@ -85,16 +90,19 @@ const {
 } = useTableTabs({
   panes,
   activePaneId,
+  focusedPaneId,
   getPane,
   getPaneTab,
   getPrimaryKey,
   getPaneConnection,
+  addPane,
 });
 
 const {
   isSaving,
   disableFkChecks,
   insertingRowPaneId,
+  insertingRowTabId,
   insertRowValues,
   insertRowLoading,
   insertRowError,
@@ -103,7 +111,10 @@ const {
   openInsertRowDialog,
   cancelInsertRow,
   submitInsertRow,
+  duplicateRow,
+  deleteRowImmediate,
   updatePendingChange,
+  toggleDeletionSelected,
   discardChanges,
   clearRowSelection,
   getSelectedRow,
@@ -125,10 +136,61 @@ const {
 
 const showBulkTruncateDialog = ref(false);
 
+// ── Row context menu ──────────────────────────────────────────────────────────
+
+const rowContextMenu = ref({
+  show: false,
+  x: 0,
+  y: 0,
+  pane: null as ReturnType<typeof getPane> | null,
+  row: null as any,
+});
+
+const showDeleteRowDialog = ref(false);
+const deleteRowTarget = ref<{ pane: ReturnType<typeof getPane>; row: any } | null>(null);
+
+function openRowContextMenu(pane: ReturnType<typeof getPane>, row: any, x: number, y: number) {
+  rowContextMenu.value = { show: true, x, y, pane, row };
+  const close = () => {
+    rowContextMenu.value.show = false;
+    window.removeEventListener("click", close);
+  };
+  setTimeout(() => window.addEventListener("click", close), 0);
+}
+
+function handleRowContextDelete() {
+  rowContextMenu.value.show = false;
+  const tab = getPaneTab(rowContextMenu.value.pane!);
+  const selectedCount = tab?.selectedRowPks?.length ?? 0;
+  deleteRowTarget.value = { pane: rowContextMenu.value.pane!, row: rowContextMenu.value.row };
+  showDeleteRowDialog.value = true;
+}
+
+function handleRowContextDuplicate() {
+  rowContextMenu.value.show = false;
+  duplicateRow(rowContextMenu.value.pane!, rowContextMenu.value.row);
+}
+
+async function confirmDeleteRow() {
+  showDeleteRowDialog.value = false;
+  if (!deleteRowTarget.value) return;
+  const { pane, row } = deleteRowTarget.value;
+  const tab = getPaneTab(pane);
+  // If multiple rows selected, delete all selected via pending deletions + apply
+  if (tab && tab.selectedRowPks.length > 1) {
+    toggleDeletionSelected(pane);
+    await applyChanges(pane);
+  } else {
+    await deleteRowImmediate(pane, row);
+  }
+  deleteRowTarget.value = null;
+}
+
 const {
   search,
   expandedConnections,
   expandedDatabases,
+  selectedSidebarConnectionId,
   showNewDb,
   newDbName,
   isCreatingDb,
@@ -136,7 +198,6 @@ const {
   closedConnections,
   filteredTables,
   connectSaved,
-  toggleConnection,
   toggleDatabase,
   disconnectConn,
   createDatabase,
@@ -216,9 +277,22 @@ watch(
   () => resizeAllPanelTextareas(),
 );
 
+// ── Sidebar visibility ────────────────────────────────────────────────────────
+
+const { sidebarVisible } = useSidebarState();
+const { getBinding } = useKeybindings();
+
 // ── Keyboard shortcuts ────────────────────────────────────────────────────────
 
 const sidebarRef = ref<InstanceType<typeof Sidebar> | null>(null);
+
+useActionShortcut("toggleSidebar", () => {
+  sidebarVisible.value = !sidebarVisible.value;
+});
+
+useActionShortcut("focusPane", () => {
+  toggleFocusPane(activePaneId.value);
+});
 
 useActionShortcut("closeTab", () => {
   const activePane = getPane(activePaneId.value);
@@ -236,6 +310,7 @@ useActionShortcut("refreshTable", () => {
 });
 
 // Scroll sidebar to active table when the active tab changes
+// Also sync sidebar connection selection to the active pane's connection
 watch(
   () => {
     const pane = getPane(activePaneId.value);
@@ -245,9 +320,20 @@ watch(
   (key) => {
     if (!key) return;
     const [connId, db, tableName] = key.split(":");
+    if (store.openConnections[connId]) {
+      selectedSidebarConnectionId.value = connId;
+    }
     nextTick(() => sidebarRef.value?.scrollToTable(tableName, db, connId));
   },
 );
+
+// Initialize sidebar connection if nothing is selected yet
+watchEffect(() => {
+  if (!selectedSidebarConnectionId.value || !store.openConnections[selectedSidebarConnectionId.value]) {
+    const firstId = Object.keys(store.openConnections)[0] ?? null;
+    if (firstId) selectedSidebarConnectionId.value = firstId;
+  }
+});
 
 // ── FilterBar handlers (need store + tab context) ─────────────────────────────
 
@@ -313,12 +399,13 @@ function getSchema(connectionId: string, database: string | null): Record<string
   <div class="h-full flex overflow-hidden bg-background">
     <!-- Sidebar -->
     <Sidebar
+      v-show="sidebarVisible"
       ref="sidebarRef"
       :width="sidebarWidth"
       :search="search"
+      :selected-connection-id="selectedSidebarConnectionId"
       :open-connections="store.openConnections"
       :closed-connections="closedConnections"
-      :expanded-connections="expandedConnections"
       :expanded-databases="expandedDatabases"
       :connecting-id="connectingId"
       :show-new-db="showNewDb"
@@ -331,9 +418,9 @@ function getSchema(connectionId: string, database: string | null): Record<string
       @update:search="search = $event"
       @update:show-new-db="showNewDb = $event"
       @update:new-db-name="newDbName = $event"
+      @update:selected-connection-id="selectedSidebarConnectionId = $event"
       @new-connection="openNewConnDialog"
       @connect-saved="connectSaved"
-      @toggle-connection="toggleConnection"
       @toggle-database="toggleDatabase"
       @load-table="loadTableData"
       @toggle-table-selection="toggleTableSelection"
@@ -357,15 +444,16 @@ function getSchema(connectionId: string, database: string | null): Record<string
     >
       <template v-for="(pane, paneIdx) in panes" :key="pane.id">
         <PaneResizer
-          v-if="paneIdx > 0"
+          v-if="paneIdx > 0 && !focusedPaneId"
           :pane-idx="paneIdx"
           :dragging-pane-idx="draggingPaneIdx"
           @resize-start="startPaneResize"
         />
 
         <div
+          v-show="!focusedPaneId || focusedPaneId === pane.id"
           class="flex flex-col min-h-0 min-w-0 overflow-hidden bg-background"
-          :style="{ flex: paneWidths[paneIdx] }"
+          :style="{ flex: focusedPaneId === pane.id ? 1 : paneWidths[paneIdx] }"
           :class="
             panes.length > 1 && pane.id === activePaneId
               ? 'ring-1 ring-inset ring-primary/10'
@@ -395,6 +483,8 @@ function getSchema(connectionId: string, database: string | null): Record<string
             :has-active-table-tab="!!getPaneTab(pane)"
             :is-last-pane="paneIdx === panes.length - 1"
             :show-close-pane-button="panes.length > 1"
+            :is-focused="focusedPaneId === pane.id"
+            :show-focus-button="panes.length > 1"
             @switch-tab="(id) => switchToTab(id, pane.id)"
             @close-tab="(id, e) => closeTab(id, pane.id, e)"
             @new-query="(connId) => openQueryTab(connId, null, pane.id)"
@@ -402,6 +492,7 @@ function getSchema(connectionId: string, database: string | null): Record<string
             @refresh="refreshActiveTab(pane.id)"
             @add-pane="addPane"
             @remove-pane="removePane(pane.id)"
+            @toggle-focus="toggleFocusPane(pane.id)"
           />
 
           <!-- Query Editors -->
@@ -430,7 +521,7 @@ function getSchema(connectionId: string, database: string | null): Record<string
             <FilterBar
               v-show="pane.viewMode === 'content' && pane.showFilters"
               :key="pane.activeTabId"
-              :columns="getPaneTab(pane)?.queryResult?.columns ?? []"
+              :columns="(getPaneTab(pane)?.tableStructure ?? []).map((c: any) => ({ name: c.field, type_name: c.type }))"
               :initial-filter="getPaneTab(pane)?.filters"
               @apply="(filters) => applyFilters(pane, filters)"
               @clear="() => clearFilters(pane)"
@@ -462,10 +553,11 @@ function getSchema(connectionId: string, database: string | null): Record<string
                 :pending-deletions="getPaneTab(pane)?.pendingDeletions ?? {}"
                 :pending-truncate="getPaneTab(pane)?.pendingTruncate ?? false"
                 :selected-row-pk="getPaneTab(pane)?.selectedRowPk ?? null"
+                :selected-row-pks="getPaneTab(pane)?.selectedRowPks ?? []"
                 :inline-edit-column="getPaneTab(pane)?.inlineEditColumn ?? null"
                 :sort-column="getPaneTab(pane)?.sortColumn ?? null"
                 :sort-desc="getPaneTab(pane)?.sortDesc ?? false"
-                :inserting-row="insertingRowPaneId === pane.id"
+                :inserting-row="insertingRowTabId !== null && insertingRowTabId === pane.activeTabId"
                 :insert-row-values="insertRowValues"
                 :column-widths="getColumnWidths(getPaneTab(pane))"
                 :fk-map="getFkMap(pane)"
@@ -492,6 +584,8 @@ function getSchema(connectionId: string, database: string | null): Record<string
                 "
                 @insert-row-submit="submitInsertRow(pane)"
                 @insert-row-cancel="cancelInsertRow"
+                @row-contextmenu="(row, x, y) => openRowContextMenu(pane, row, x, y)"
+                @delete-key-pressed="toggleDeletionSelected(pane)"
               />
 
               <RowDetailPanel
@@ -542,7 +636,7 @@ function getSchema(connectionId: string, database: string | null): Record<string
               :page="pane.page"
               :page-size="pane.pageSize"
               :total-count="getPaneTab(pane)?.queryResult?.total_count ?? 0"
-              :is-inserting-row="insertingRowPaneId === pane.id"
+              :is-inserting-row="insertingRowTabId !== null && insertingRowTabId === pane.activeTabId"
               :insert-row-error="insertRowError"
               :insert-row-loading="insertRowLoading"
               @set-view-mode="(mode) => setViewMode(pane, mode)"
@@ -758,6 +852,33 @@ function getSchema(connectionId: string, database: string | null): Record<string
       @update:open="(val) => { if (!val) showDeleteTablesDialog = false }"
       @delete-tables="(tables, disableFk) => executeDeleteTablesFromDialog(tables, disableFk)"
       @drop-database="executeDropDatabaseFromDeleteDialog"
+    />
+
+    <!-- Row context menu -->
+    <RowContextMenu
+      :show="rowContextMenu.show"
+      :x="rowContextMenu.x"
+      :y="rowContextMenu.y"
+      :has-primary-key="!!rowContextMenu.pane && !!getPrimaryKey(rowContextMenu.pane)"
+      :selected-count="rowContextMenu.pane ? (getPaneTab(rowContextMenu.pane)?.selectedRowPks?.length ?? 1) : 1"
+      @delete="handleRowContextDelete"
+      @duplicate="handleRowContextDuplicate"
+    />
+
+    <!-- Row delete confirmation dialog -->
+    <DeleteConfirmDialog
+      :open="showDeleteRowDialog"
+      :title="deleteRowTarget && (getPaneTab(deleteRowTarget.pane)?.selectedRowPks?.length ?? 0) > 1
+        ? `Delete ${getPaneTab(deleteRowTarget.pane)?.selectedRowPks?.length} rows`
+        : 'Delete Row'"
+      :description="deleteRowTarget && (getPaneTab(deleteRowTarget.pane)?.selectedRowPks?.length ?? 0) > 1
+        ? `Are you sure you want to delete ${getPaneTab(deleteRowTarget.pane)?.selectedRowPks?.length} rows? This action cannot be undone.`
+        : 'Are you sure you want to delete this row? This action cannot be undone.'"
+      :show-fk-option="true"
+      :disable-fk-checks="disableFkChecks"
+      @update:open="(val) => { if (!val) showDeleteRowDialog = false }"
+      @update:disable-fk-checks="disableFkChecks = $event"
+      @confirm="confirmDeleteRow"
     />
   </div>
 </template>

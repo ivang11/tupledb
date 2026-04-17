@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useConnectionStore } from '@/stores/connections'
+import { useToast } from '@/composables/useToast'
 import type { Connection } from '@/types/connection'
 import { v4 as uuidv4 } from 'uuid'
 import {
@@ -19,6 +20,7 @@ import DeleteConfirmDialog from '@/components/dialogs/DeleteConfirmDialog.vue'
 
 const store = useConnectionStore()
 const router = useRouter()
+const { error: toastError } = useToast()
 const searchQuery = ref('')
 
 const showDialog = ref(false)
@@ -78,7 +80,7 @@ async function handleSave(conn: Connection) {
     await store.addConnection(conn)
     showDialog.value = false
   } catch (e: any) {
-    alert(`Error: ${e}`)
+    toastError('Error', String(e))
   } finally {
     isSaving.value = false
   }
@@ -95,7 +97,7 @@ async function handleDelete() {
   try {
     await store.removeConnection(connectionToDelete.value)
   } catch (e) {
-    alert(`Failed to delete: ${e}`)
+    toastError('Failed to delete', String(e))
   } finally {
     showDeleteDialog.value = false
     connectionToDelete.value = null
@@ -107,7 +109,7 @@ async function connect(conn: Connection) {
     await store.connect(conn)
     router.push('/')
   } catch (e) {
-    alert(`Failed to connect: ${e}`)
+    toastError('Failed to connect', String(e))
   }
 }
 

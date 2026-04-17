@@ -70,6 +70,7 @@ const canNextPage = computed(() => (props.page + 1) * props.pageSize < props.tot
       </div>
 
       <button
+        v-if="viewMode === 'content'"
         type="button"
         :class="[
           'size-6 flex items-center justify-center rounded border transition-colors',

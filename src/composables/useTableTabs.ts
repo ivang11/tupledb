@@ -5,10 +5,12 @@ import type { PaneState, TableTab, QueryTab } from '@/types/workspace'
 interface WorkspaceContext {
   panes: Ref<PaneState[]>
   activePaneId: Ref<string>
+  focusedPaneId: Ref<string | null>
   getPane: (paneId?: string) => PaneState
   getPaneTab: (pane: PaneState) => TableTab | null
   getPrimaryKey: (pane: PaneState) => string | null
   getPaneConnection: (pane: PaneState) => any
+  addPane: () => string
 }
 
 export function useTableTabs(ctx: WorkspaceContext) {
@@ -94,7 +96,30 @@ export function useTableTabs(ctx: WorkspaceContext) {
     initialFilter?: any,
     paneId?: string,
   ) {
-    const pane = getPane(paneId)
+    // Smart routing: keep tabs from the same connection+database together.
+    let pane = getPane(paneId)
+    if (!paneId) {
+      const tabDb = (t: { type: string; database: string | null } & { database?: string | null }) =>
+        t.type === 'table' ? (t as TableTab).database : t.database
+
+      // 1. If another pane already has tabs from this connection+db, route there
+      const sameConnDb = ctx.panes.value.find(p =>
+        p.tabs.some(t => t.connectionId === connectionId && tabDb(t) === database)
+      )
+      if (sameConnDb) {
+        pane = sameConnDb
+      } else {
+        // 2. If the active pane has tabs from a DIFFERENT connection/database,
+        //    auto-split so tables don't mix — but never during focus mode to
+        //    avoid creating ghost panes that confuse the layout on unpin.
+        const activePaneHasOtherDb = pane.tabs.length > 0 &&
+          !pane.tabs.some(t => t.connectionId === connectionId && tabDb(t) === database)
+        if (activePaneHasOtherDb && !ctx.focusedPaneId.value) {
+          const newPaneId = ctx.addPane()
+          pane = ctx.panes.value.find(p => p.id === newPaneId) ?? pane
+        }
+      }
+    }
     if (!initialFilter) {
       const existing = pane.tabs.find(t =>
         t.type === 'table' &&
@@ -111,7 +136,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
       page: 0, pageSize: pane.pageSize, viewMode: 'content',
       filters: initialFilter ?? null, sortColumn: null, sortDesc: false,
       pendingChanges: {}, pendingDeletions: {}, pendingTruncate: false,
-      selectedRowPk: null, inlineEditColumn: null,
+      selectedRowPk: null, selectedRowPks: [], inlineEditColumn: null,
     }
     let insertIndex = pane.tabs.length
     for (let i = pane.tabs.length - 1; i >= 0; i--) {
