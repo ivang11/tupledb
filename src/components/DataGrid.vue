@@ -26,7 +26,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  'row-click': [row: any, e: MouseEvent]
+  'row-click': [row: any, e: MouseEvent, index: number]
   'cell-dblclick': [row: any, colName: string]
   'cell-blur': []
   'cell-input': [row: any, colName: string, value: string]
@@ -78,8 +78,12 @@ function rowKey(virtualRow: any) {
   return props.primaryKey ? String(row[props.primaryKey]) : virtualRow.index
 }
 
-function isPkRow(row: any) {
-  return props.primaryKey && props.selectedRowPk === String(row[props.primaryKey])
+function rowSelectionKey(row: any, index: number) {
+  return props.primaryKey ? String(row[props.primaryKey]) : `__row_index:${index}`
+}
+
+function isPkRow(row: any, index: number) {
+  return props.selectedRowPk === rowSelectionKey(row, index)
 }
 
 function isMultiSelected(row: any) {
@@ -100,6 +104,18 @@ function onRowContextMenu(e: MouseEvent, row: any) {
   e.stopPropagation()
   emit('row-contextmenu', row, e.clientX, e.clientY)
 }
+
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  const tagName = target.tagName
+  return tagName === 'INPUT' || tagName === 'TEXTAREA' || target.isContentEditable
+}
+
+function onDeleteKeydown(e: KeyboardEvent) {
+  if (isEditableTarget(e.target)) return
+  e.stopPropagation()
+  emit('delete-key-pressed')
+}
 </script>
 
 <template>
@@ -107,7 +123,7 @@ function onRowContextMenu(e: MouseEvent, row: any) {
     ref="scrollContainer"
     class="flex-1 min-w-0 relative overflow-auto bg-background custom-scrollbar"
     tabindex="0"
-    @keydown.delete.stop="emit('delete-key-pressed')"
+    @keydown.delete="onDeleteKeydown"
   >
     <!-- Empty state -->
     <div
@@ -193,19 +209,19 @@ function onRowContextMenu(e: MouseEvent, row: any) {
               ? 'opacity-40 line-through bg-destructive/8'
               : isPendingDelete(rows[virtualRow.index])
                 ? 'bg-destructive/10 text-destructive/70'
-                : isPkRow(rows[virtualRow.index])
+                : isPkRow(rows[virtualRow.index], virtualRow.index)
                   ? 'bg-primary/8'
                   : isMultiSelected(rows[virtualRow.index])
                     ? 'bg-primary/30 ring-1 ring-inset ring-primary/50'
                     : virtualRow.index % 2 === 1
                       ? 'bg-muted/20'
                       : 'bg-transparent',
-            primaryKey ? 'cursor-pointer' : '',
-            !pendingTruncate && !isPendingDelete(rows[virtualRow.index]) && !isPkRow(rows[virtualRow.index])
+            'cursor-pointer',
+            !pendingTruncate && !isPendingDelete(rows[virtualRow.index]) && !isPkRow(rows[virtualRow.index], virtualRow.index)
               ? 'hover:bg-primary/5'
               : '',
           ]"
-          @click="emit('row-click', rows[virtualRow.index], $event)"
+          @click="emit('row-click', rows[virtualRow.index], $event, virtualRow.index)"
           @contextmenu="onRowContextMenu($event, rows[virtualRow.index])"
         >
           <td
@@ -215,7 +231,7 @@ function onRowContextMenu(e: MouseEvent, row: any) {
             :style="[cellStyle(col.name), { height: ROW_HEIGHT + 'px' }]"
             :class="[
               isPendingChange(rows[virtualRow.index], col.name) ? 'bg-amber-500/10' : '',
-              isPkRow(rows[virtualRow.index]) ? 'border-r-primary/10' : '',
+              isPkRow(rows[virtualRow.index], virtualRow.index) ? 'border-r-primary/10' : '',
             ]"
             @dblclick.stop="
               primaryKey
@@ -231,13 +247,13 @@ function onRowContextMenu(e: MouseEvent, row: any) {
 
             <!-- Selected row indicator (first col) -->
             <div
-              v-if="isPkRow(rows[virtualRow.index]) && col.name === columns[0]?.name"
+              v-if="isPkRow(rows[virtualRow.index], virtualRow.index) && col.name === columns[0]?.name"
               class="absolute left-0 top-0 bottom-0 w-0.5 bg-primary"
             />
 
             <!-- Multi-selected row indicator (first col) -->
             <div
-              v-else-if="isMultiSelected(rows[virtualRow.index]) && col.name === columns[0]?.name && !isPkRow(rows[virtualRow.index])"
+              v-else-if="isMultiSelected(rows[virtualRow.index]) && col.name === columns[0]?.name && !isPkRow(rows[virtualRow.index], virtualRow.index)"
               class="absolute left-0 top-0 bottom-0 w-1 bg-primary"
             />
 
@@ -249,6 +265,8 @@ function onRowContextMenu(e: MouseEvent, row: any) {
                 :value="getCellValue(rows[virtualRow.index], col.name)"
                 @input="(e) => emit('cell-input', rows[virtualRow.index], col.name, (e.target as HTMLInputElement).value)"
                 @blur="emit('cell-blur')"
+                @keydown.delete.stop
+                @keydown.backspace.stop
                 class="w-full bg-background border border-primary/40 rounded px-2 py-0.5 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary/50"
                 @click.stop
                 autofocus
@@ -259,6 +277,13 @@ function onRowContextMenu(e: MouseEvent, row: any) {
             <template v-else-if="rows[virtualRow.index][col.name] === null && !isPendingChange(rows[virtualRow.index], col.name)">
               <div class="flex items-center gap-1.5 h-full">
                 <span class="text-[10px] italic font-mono text-muted-foreground/25">NULL</span>
+              </div>
+            </template>
+
+            <!-- Empty string -->
+            <template v-else-if="getCellValue(rows[virtualRow.index], col.name) === '' && !isPendingChange(rows[virtualRow.index], col.name)">
+              <div class="flex items-center gap-1.5 h-full">
+                <span class="text-[10px] italic font-mono text-muted-foreground/25">EMPTY</span>
               </div>
             </template>
 
@@ -318,6 +343,8 @@ function onRowContextMenu(e: MouseEvent, row: any) {
               :placeholder="isBooleanCol(col.name) ? '0 / 1' : ''"
               class="insert-row-input w-full h-full px-2 text-xs font-mono bg-transparent focus:outline-none focus:bg-emerald-500/10 focus:ring-1 focus:ring-emerald-500/40 rounded"
               @input="emit('insert-row-input', col.name, ($event.target as HTMLInputElement).value)"
+              @keydown.delete.stop
+              @keydown.backspace.stop
               @keydown.enter="emit('insert-row-submit')"
               @keydown.escape="emit('insert-row-cancel')"
             />

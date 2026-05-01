@@ -1,38 +1,57 @@
+use crate::connections::Connection;
+use crate::mysql::MySqlDriver;
+use crate::ssh::SshTunnel;
+use crate::state::{ActiveConnection, AppState};
+use sqlx::{mysql::MySqlConnectOptions, mysql::MySqlSslMode};
+use std::sync::Arc;
 use tauri::State;
 use uuid::Uuid;
-use std::sync::Arc;
-use sqlx::{mysql::MySqlConnectOptions, mysql::MySqlSslMode};
-use crate::connections::Connection;
-use crate::state::{AppState, ActiveConnection};
-use crate::ssh::SshTunnel;
-use crate::mysql::MySqlDriver;
 
 #[tauri::command]
 pub async fn get_connections(state: State<'_, AppState>) -> Result<Vec<Connection>, String> {
     let connections = state.connections_config.read();
     // Strip passwords before sending to frontend
-    Ok(connections.values().map(|c| {
-        let mut c = c.clone();
-        c.mysql.password = None;
-        if let Some(ssh) = &mut c.ssh {
-            match &mut ssh.auth {
-                crate::connections::SshAuth::Password { password } => { *password = String::new(); }
-                crate::connections::SshAuth::Key { passphrase, .. } => { *passphrase = None; }
+    Ok(connections
+        .values()
+        .map(|c| {
+            let mut c = c.clone();
+            c.mysql.password = None;
+            if let Some(ssh) = &mut c.ssh {
+                match &mut ssh.auth {
+                    crate::connections::SshAuth::Password { password } => {
+                        *password = String::new();
+                    }
+                    crate::connections::SshAuth::Key { passphrase, .. } => {
+                        *passphrase = None;
+                    }
+                }
             }
-        }
-        c
-    }).collect())
+            c
+        })
+        .collect())
 }
 
 #[tauri::command]
-pub async fn add_connection(state: State<'_, AppState>, mut connection: Connection) -> Result<(), String> {
-    println!("Saving connection: {} (Env: {:?})", connection.name, connection.environment);
+pub async fn add_connection(
+    state: State<'_, AppState>,
+    mut connection: Connection,
+) -> Result<(), String> {
+    println!(
+        "Saving connection: {} (Env: {:?})",
+        connection.name, connection.environment
+    );
 
     // If editing and a password field is empty, preserve the existing stored password
     {
         let existing = state.connections_config.read();
         if let Some(existing_conn) = existing.get(&connection.id) {
-            if connection.mysql.password.as_deref().unwrap_or("").is_empty() {
+            if connection
+                .mysql
+                .password
+                .as_deref()
+                .unwrap_or("")
+                .is_empty()
+            {
                 connection.mysql.password = existing_conn.mysql.password.clone();
                 println!("  -> Preserving existing MySQL password");
             }
@@ -48,10 +67,16 @@ pub async fn add_connection(state: State<'_, AppState>, mut connection: Connecti
                         }
                     }
                     (
-                        crate::connections::SshAuth::Key { passphrase: new_pp, .. },
-                        crate::connections::SshAuth::Key { passphrase: old_pp, .. },
+                        crate::connections::SshAuth::Key {
+                            passphrase: new_pp, ..
+                        },
+                        crate::connections::SshAuth::Key {
+                            passphrase: old_pp, ..
+                        },
                     ) => {
-                        if new_pp.as_deref().unwrap_or("").is_empty() && old_pp.as_deref().map_or(false, |p| !p.is_empty()) {
+                        if new_pp.as_deref().unwrap_or("").is_empty()
+                            && old_pp.as_deref().map_or(false, |p| !p.is_empty())
+                        {
                             *new_pp = old_pp.clone();
                             println!("  -> Preserving existing SSH key passphrase");
                         }
@@ -90,7 +115,10 @@ pub async fn remove_connection(state: State<'_, AppState>, id: Uuid) -> Result<(
 
 #[tauri::command]
 pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Result<(), String> {
-    println!("Connecting to {} ({})", connection.name, connection.mysql.host);
+    println!(
+        "Connecting to {} ({})",
+        connection.name, connection.mysql.host
+    );
 
     // Always use stored passwords from config (frontend never has them)
     let connection = {
@@ -121,7 +149,9 @@ pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Resu
 
     println!("  -> Establishing MySQL connection pool...");
     let pool = sqlx::mysql::MySqlPoolOptions::new()
-        .acquire_timeout(std::time::Duration::from_secs(connection.timeout_secs.unwrap_or(30)))
+        .acquire_timeout(std::time::Duration::from_secs(
+            connection.timeout_secs.unwrap_or(30),
+        ))
         .test_before_acquire(true)
         .connect_with(opts)
         .await
@@ -156,12 +186,47 @@ pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Resu
 }
 
 #[tauri::command]
-pub async fn test_connection(state: State<'_, AppState>, mut connection: Connection) -> Result<String, String> {
+pub async fn export_connections(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    let connections = state.connections_config.read();
+    let content = serde_json::to_string_pretty(&*connections)
+        .map_err(|e| format!("Failed to serialize connections: {}", e))?;
+    std::fs::write(&path, content)
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn import_connections(state: State<'_, AppState>, path: String) -> Result<usize, String> {
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+    let imported: std::collections::HashMap<Uuid, Connection> = serde_json::from_str(&content)
+        .map_err(|e| format!("Invalid connections file: {}", e))?;
+    let count = imported.len();
+    let mut connections = state.connections_config.write();
+    for (id, conn) in imported {
+        connections.insert(id, conn);
+    }
+    drop(connections);
+    state.save()?;
+    Ok(count)
+}
+
+#[tauri::command]
+pub async fn test_connection(
+    state: State<'_, AppState>,
+    mut connection: Connection,
+) -> Result<String, String> {
     // If editing an existing connection with empty password, use the stored one
     {
         let configs = state.connections_config.read();
         if let Some(stored) = configs.get(&connection.id) {
-            if connection.mysql.password.as_deref().unwrap_or("").is_empty() {
+            if connection
+                .mysql
+                .password
+                .as_deref()
+                .unwrap_or("")
+                .is_empty()
+            {
                 connection.mysql.password = stored.mysql.password.clone();
             }
         }
@@ -189,7 +254,9 @@ pub async fn test_connection(state: State<'_, AppState>, mut connection: Connect
     }
 
     let pool = sqlx::mysql::MySqlPoolOptions::new()
-        .acquire_timeout(std::time::Duration::from_secs(connection.timeout_secs.unwrap_or(30)))
+        .acquire_timeout(std::time::Duration::from_secs(
+            connection.timeout_secs.unwrap_or(30),
+        ))
         .connect_with(opts)
         .await
         .map_err(|e| format!("MySQL Connection failed: {}", e))?;

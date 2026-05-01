@@ -5,6 +5,10 @@ export interface TableTab {
   tableName: string
   database: string
   queryResult: any | null
+  exactCountLoading?: boolean
+  metadataLoading?: boolean
+  metadataLoaded?: boolean
+  keysetPage?: number
   tableStructure: any[]
   tableIndexes: any[]
   foreignKeys: any[]

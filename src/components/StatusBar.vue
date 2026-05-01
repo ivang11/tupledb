@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import {
   TerminalIcon,
   TrashIcon,
@@ -7,12 +8,15 @@ import {
   ChevronDownIcon,
   UploadIcon,
   DownloadIcon,
+  XIcon,
 } from 'lucide-vue-next'
 import { useQueryLogStore } from '@/stores/queryLog'
 import { useProgressStore } from '@/stores/progress'
+import { useToast } from '@/composables/useToast'
 
 const queryLog = useQueryLogStore()
 const progress = useProgressStore()
+const { error: toastError } = useToast()
 
 // ── Query log resize ──────────────────────────────────────────────────────────
 
@@ -80,7 +84,11 @@ function onScroll() {
 
 const importPct = computed(() => {
   const { current, total } = progress.importProgress
-  return total ? Math.round((current / total) * 100) : 0
+  if (!total) return 0
+  const pct = (current / total) * 100
+  if (pct <= 0) return 0
+  if (pct >= 100) return 100
+  return Math.max(0.1, Math.round(pct * 10) / 10)
 })
 
 const exportPct = computed(() => {
@@ -89,6 +97,21 @@ const exportPct = computed(() => {
 })
 
 const hasActivity = computed(() => progress.isImporting || progress.isExporting)
+
+async function cancelImport() {
+  if (!progress.importConnectionId || !progress.importId || progress.isCancellingImport) return
+  progress.isCancellingImport = true
+  progress.importProgress.status = 'Cancelling import...'
+  try {
+    await invoke('cancel_import', {
+      connectionId: progress.importConnectionId,
+      importId: progress.importId,
+    })
+  } catch (e: any) {
+    progress.isCancellingImport = false
+    toastError('Failed to cancel import', String(e))
+  }
+}
 </script>
 
 <template>
@@ -112,7 +135,17 @@ const hasActivity = computed(() => progress.isImporting || progress.isExporting)
             <UploadIcon class="w-3 h-3 text-muted-foreground" />
             Importing SQL
           </span>
-          <span class="text-xs font-semibold tabular-nums text-primary">{{ importPct }}%</span>
+          <div class="flex items-center gap-2">
+            <button
+              class="inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/80 px-2.5 py-1 text-[10px] font-medium text-muted-foreground shadow-sm hover:border-destructive/30 hover:bg-destructive/5 hover:text-destructive transition-colors disabled:opacity-50 disabled:hover:border-border/70 disabled:hover:bg-background/80 disabled:hover:text-muted-foreground"
+              :disabled="progress.isCancellingImport"
+              @click="cancelImport"
+            >
+              <XIcon class="w-2.5 h-2.5 shrink-0" />
+              {{ progress.isCancellingImport ? 'Cancelling...' : 'Cancel' }}
+            </button>
+            <span class="text-xs font-semibold tabular-nums text-primary">{{ importPct }}%</span>
+          </div>
         </div>
         <div class="h-1 w-full bg-muted rounded-full overflow-hidden mb-1.5">
           <div

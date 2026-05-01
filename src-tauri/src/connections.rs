@@ -43,6 +43,11 @@ pub struct SshSettings {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SshAuth {
-    Password { password: String },
-    Key { private_key_path: String, passphrase: Option<String> },
+    Password {
+        password: String,
+    },
+    Key {
+        private_key_path: String,
+        passphrase: Option<String>,
+    },
 }

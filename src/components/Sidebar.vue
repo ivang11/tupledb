@@ -7,12 +7,12 @@ import {
   ChevronDownIcon,
   ChevronRightIcon,
   TableIcon,
+  EyeIcon,
   PlusIcon,
-  CheckIcon,
-  XIcon,
   PlugZapIcon,
+  DownloadIcon,
+  UploadIcon,
 } from "lucide-vue-next";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { Connection, Environment } from "@/types/connection";
@@ -32,9 +32,6 @@ const props = defineProps<{
   closedConnections: Connection[];
   expandedDatabases: Set<string>;
   connectingId: string | null;
-  showNewDb: string | null;
-  newDbName: string;
-  isCreatingDb: boolean;
   isTableActive: (name: string, db: string, connId: string) => boolean;
   isTableOpen: (name: string, db: string, connId: string) => boolean;
   filteredTables: (connId: string, db: string) => any[];
@@ -44,14 +41,11 @@ const props = defineProps<{
 const emit = defineEmits<{
   "resize-start": [e: MouseEvent];
   "update:search": [val: string];
-  "update:showNewDb": [val: string | null];
-  "update:newDbName": [val: string];
   "update:selectedConnectionId": [id: string];
   "new-connection": [];
   "connect-saved": [conn: Connection];
   "toggle-database": [connId: string, db: string];
   "load-table": [tableName: string, connId: string, db: string];
-  "create-database": [connId: string];
   "toggle-table-selection": [connId: string, db: string, tableName: string];
   "select-table-range": [connId: string, db: string, tableName: string];
   "clear-table-selection": [];
@@ -71,22 +65,24 @@ const emit = defineEmits<{
     connId: string,
     databaseName: string,
   ];
+  "export-connections": [];
+  "import-connections": [];
 }>();
 
-const getEnvColor = (env: Environment): string => {
+const getEnvTextColor = (env: Environment): string => {
   switch (env) {
     case "PRODUCTION":
-      return "bg-red-500/10 text-red-500";
+      return "text-red-100";
     case "STAGING":
-      return "bg-orange-500/10 text-orange-500";
+      return "text-orange-100";
     case "DEV":
-      return "bg-blue-500/10 text-blue-500";
+      return "text-blue-100";
     default:
-      return "bg-green-500/10 text-green-500";
+      return "text-green-100";
   }
 };
 
-const getEnvBorderColor = (env: Environment): string => {
+const getEnvAccentColor = (env: Environment): string => {
   switch (env) {
     case "PRODUCTION":
       return "bg-red-400/80";
@@ -96,6 +92,19 @@ const getEnvBorderColor = (env: Environment): string => {
       return "bg-blue-400/80";
     default:
       return "bg-green-400/80";
+  }
+};
+
+const getEnvChipColor = (env: Environment): string => {
+  switch (env) {
+    case "PRODUCTION":
+      return "bg-red-500/18 ring-1 ring-inset ring-red-400/28";
+    case "STAGING":
+      return "bg-orange-500/18 ring-1 ring-inset ring-orange-400/28";
+    case "DEV":
+      return "bg-blue-500/18 ring-1 ring-inset ring-blue-400/28";
+    default:
+      return "bg-green-500/18 ring-1 ring-inset ring-green-400/28";
   }
 };
 
@@ -142,6 +151,10 @@ function scrollToTable(tableName: string, db: string, connId: string) {
   el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
+function isView(table: any) {
+  return String(table?.table_type ?? '').toUpperCase().includes('VIEW')
+}
+
 // Non-null alias used inside the v-if="selectedConnectionId" template blocks
 const activeConnId = computed(() => props.selectedConnectionId ?? '')
 </script>
@@ -155,20 +168,34 @@ const activeConnId = computed(() => props.selectedConnectionId ?? '')
     <div class="shrink-0 border-b border-sidebar-border">
       <div class="flex items-center gap-2 px-3 h-9">
         <div class="flex items-center gap-2 min-w-0 flex-1">
-          <ServerIcon class="size-3.5 text-primary/60 shrink-0" />
-          <span class="text-xs font-bold text-sidebar-foreground/70 uppercase tracking-widest truncate">
+          <ServerIcon class="size-3.5 text-primary/75 shrink-0" />
+          <span class="text-[11px] font-black text-sidebar-foreground/88 uppercase tracking-[0.18em] truncate">
             Connections
           </span>
           <span
             v-if="Object.keys(openConnections).length > 0"
-            class="text-[11px] font-bold text-primary/60 tabular-nums"
+            class="text-[11px] font-bold text-primary/70 tabular-nums"
           >
             {{ Object.keys(openConnections).length }}
           </span>
         </div>
         <button
+          @click="emit('import-connections')"
+          class="size-6 flex items-center justify-center rounded text-sidebar-foreground/50 hover:text-primary hover:bg-primary/12 transition-colors shrink-0"
+          title="Import connections"
+        >
+          <UploadIcon class="size-3.5" />
+        </button>
+        <button
+          @click="emit('export-connections')"
+          class="size-6 flex items-center justify-center rounded text-sidebar-foreground/50 hover:text-primary hover:bg-primary/12 transition-colors shrink-0"
+          title="Export connections"
+        >
+          <DownloadIcon class="size-3.5" />
+        </button>
+        <button
           @click="emit('new-connection')"
-          class="size-6 flex items-center justify-center rounded text-sidebar-foreground/40 hover:text-primary hover:bg-primary/10 transition-colors shrink-0"
+          class="size-6 flex items-center justify-center rounded text-sidebar-foreground/50 hover:text-primary hover:bg-primary/12 transition-colors shrink-0"
           title="New Connection"
         >
           <PlusIcon class="size-3.5" />
@@ -201,38 +228,42 @@ const activeConnId = computed(() => props.selectedConnectionId ?? '')
         :key="connId"
         class="flex items-center gap-0 group overflow-hidden cursor-pointer transition-colors"
         :class="selectedConnectionId === connId
-          ? 'bg-primary/8'
-          : 'hover:bg-sidebar-accent/50'"
+          ? 'bg-primary/10 shadow-[inset_0_1px_0_rgba(122,162,247,0.08)]'
+          : 'hover:bg-sidebar-accent/55'"
         @click="emit('update:selectedConnectionId', connId as string)"
         @contextmenu="emit('context-menu-connection', $event, connState.connection)"
       >
         <span
-          :class="['w-1 self-stretch shrink-0', getEnvBorderColor(connState.connection.environment)]"
+          :class="['w-1 self-stretch shrink-0', getEnvAccentColor(connState.connection.environment)]"
         />
-        <div class="flex-1 flex items-center gap-1.5 px-2 py-1.5 min-w-0">
+        <div class="flex-1 flex items-center gap-2 px-2.5 py-2 min-w-0">
           <DatabaseIcon
             :class="[
-              'size-3 shrink-0',
-              selectedConnectionId === connId ? 'text-primary/70' : 'text-sidebar-foreground/30'
+              'size-3.5 shrink-0',
+              selectedConnectionId === connId ? 'text-primary/80' : 'text-sidebar-foreground/38'
             ]"
           />
           <span
             :class="[
-              'text-sm truncate flex-1',
+              'text-sm truncate flex-1 tracking-[0.01em]',
               selectedConnectionId === connId
                 ? 'font-semibold text-sidebar-foreground'
-                : 'font-medium text-sidebar-foreground/60'
+                : 'font-medium text-sidebar-foreground/82'
             ]"
           >
             {{ connState.connection.name }}
           </span>
-          <Badge
-            variant="outline"
-            class="text-[9px] uppercase py-0 px-1.5 h-4 shrink-0 font-bold"
-            :class="getEnvColor(connState.connection.environment)"
+          <span
+            class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 shrink-0"
+            :class="getEnvChipColor(connState.connection.environment)"
           >
-            {{ connState.connection.environment }}
-          </Badge>
+            <span
+              class="text-[9px] font-bold uppercase tracking-[0.08em]"
+              :class="getEnvTextColor(connState.connection.environment)"
+            >
+              {{ connState.connection.environment }}
+            </span>
+          </span>
         </div>
       </div>
     </div>
@@ -245,13 +276,13 @@ const activeConnId = computed(() => props.selectedConnectionId ?? '')
     >
       <div class="relative">
         <SearchIcon
-          class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-sidebar-foreground/30"
+          class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-sidebar-foreground/42"
         />
         <Input
           :value="search"
           @input="emit('update:search', ($event.target as HTMLInputElement).value)"
           placeholder="Filter tables..."
-          class="h-7 pl-8 text-xs bg-sidebar-accent/50 border-none rounded focus-visible:ring-1 focus-visible:ring-primary/30"
+          class="h-7 pl-8 text-xs text-sidebar-foreground/90 placeholder:text-sidebar-foreground/38 bg-sidebar-accent/65 border-none rounded focus-visible:ring-1 focus-visible:ring-primary/30"
         />
       </div>
     </div>
@@ -260,43 +291,14 @@ const activeConnId = computed(() => props.selectedConnectionId ?? '')
     <ScrollArea class="flex-1 py-1">
       <template v-if="selectedConnectionId && openConnections[selectedConnectionId]">
         <div class="px-1 mt-0.5 space-y-px">
-
-          <!-- New DB form -->
-          <div v-if="showNewDb === activeConnId" class="px-1 py-1">
-            <div class="flex items-center gap-1">
-              <Input
-                :value="newDbName"
-                @input="emit('update:newDbName', ($event.target as HTMLInputElement).value)"
-                placeholder="database_name"
-                class="h-7 text-xs bg-sidebar-accent/50 border-none flex-1"
-                autofocus
-                @keyup.enter="emit('create-database', activeConnId)"
-                @keyup.escape="emit('update:showNewDb', null); emit('update:newDbName', '')"
-              />
-              <button
-                class="flex items-center justify-center size-6 rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors shrink-0"
-                :disabled="isCreatingDb || !newDbName.trim()"
-                @click="emit('create-database', activeConnId)"
-              >
-                <CheckIcon class="size-3" />
-              </button>
-              <button
-                class="flex items-center justify-center size-6 rounded hover:bg-sidebar-accent transition-colors text-sidebar-foreground/50 shrink-0"
-                @click="emit('update:showNewDb', null); emit('update:newDbName', '')"
-              >
-                <XIcon class="size-3" />
-              </button>
-            </div>
-          </div>
-
           <!-- Databases -->
           <div
             v-for="db in openConnections[activeConnId].databases"
             :key="db"
           >
-            <div class="flex items-center group/db rounded hover:bg-sidebar-accent/40 transition-colors">
+            <div class="flex items-center group/db rounded hover:bg-sidebar-accent/45 transition-colors">
               <button
-                class="flex-1 flex items-center gap-1.5 px-2 py-1 min-w-0"
+                class="flex-1 flex items-center gap-1.5 px-2 py-1.5 min-w-0"
                 @click="emit('toggle-database', activeConnId, db)"
                 @contextmenu="emit('context-menu-database', $event, activeConnId, db)"
               >
@@ -308,8 +310,8 @@ const activeConnId = computed(() => props.selectedConnectionId ?? '')
                   v-else
                   class="size-2.5 text-sidebar-foreground/20 shrink-0"
                 />
-                <DatabaseIcon class="size-2.5 shrink-0 text-sidebar-foreground/40" />
-                <span class="text-sm truncate flex-1 text-left font-medium text-sidebar-foreground/80">
+                <DatabaseIcon class="size-2.5 shrink-0 text-sidebar-foreground/48" />
+                <span class="text-sm truncate flex-1 text-left font-medium text-sidebar-foreground/88">
                   {{ db }}
                 </span>
               </button>
@@ -327,25 +329,37 @@ const activeConnId = computed(() => props.selectedConnectionId ?? '')
                 @click="handleTableClick($event, activeConnId, db, table.name)"
                 @contextmenu="emit('context-menu-table', $event, activeConnId, db, table.name)"
                 :class="[
-                  'w-full flex items-center gap-1.5 px-2 py-1 rounded text-xs transition-all text-left group/tbl',
+                  'w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-xs transition-all text-left group/tbl',
                   isTableSelected(activeConnId, db, table.name)
                     ? 'bg-primary/20 text-primary ring-1 ring-inset ring-primary/30'
                     : isTableActive(table.name, db, activeConnId)
                       ? 'bg-primary text-primary-foreground'
-                      : 'hover:bg-sidebar-accent/50 text-sidebar-foreground/70 hover:text-sidebar-foreground',
+                      : 'hover:bg-sidebar-accent/50 text-sidebar-foreground/78 hover:text-sidebar-foreground',
                 ]"
               >
-                <TableIcon
+                <EyeIcon
+                  v-if="isView(table)"
                   :class="[
                     'size-2.5 shrink-0',
                     isTableActive(table.name, db, activeConnId)
                       ? 'text-primary-foreground/70'
                       : isTableSelected(activeConnId, db, table.name)
                         ? 'text-primary'
-                        : 'text-sidebar-foreground/30 group-hover/tbl:text-sidebar-foreground/60',
+                        : 'text-sidebar-foreground/36 group-hover/tbl:text-sidebar-foreground/68',
                   ]"
                 />
-                <span class="flex-1 truncate text-xs">{{ table.name }}</span>
+                <TableIcon
+                  v-else
+                  :class="[
+                    'size-2.5 shrink-0',
+                    isTableActive(table.name, db, activeConnId)
+                      ? 'text-primary-foreground/70'
+                      : isTableSelected(activeConnId, db, table.name)
+                        ? 'text-primary'
+                        : 'text-sidebar-foreground/36 group-hover/tbl:text-sidebar-foreground/68',
+                  ]"
+                />
+                <span class="flex-1 truncate text-xs font-medium tracking-[0.01em]">{{ table.name }}</span>
                 <!-- Open indicator -->
                 <span
                   v-if="isTableOpen(table.name, db, activeConnId) && !isTableActive(table.name, db, activeConnId)"
@@ -371,7 +385,7 @@ const activeConnId = computed(() => props.selectedConnectionId ?? '')
           v-if="Object.keys(openConnections).length > 0"
         />
         <div class="px-3 pb-0.5">
-          <span class="text-[9px] font-bold text-sidebar-foreground/25 uppercase tracking-widest">
+          <span class="text-[10px] font-black text-sidebar-foreground/42 uppercase tracking-[0.18em]">
             Saved
           </span>
         </div>
@@ -379,22 +393,26 @@ const activeConnId = computed(() => props.selectedConnectionId ?? '')
           <div
             v-for="conn in closedConnections"
             :key="conn.id"
-            class="flex items-center gap-0 group rounded overflow-hidden hover:bg-sidebar-accent/40 transition-colors"
+            class="flex items-center gap-0 group rounded overflow-hidden hover:bg-sidebar-accent/45 transition-colors"
             @dblclick="emit('connect-saved', conn)"
             @contextmenu="emit('context-menu-connection', $event, conn)"
           >
-            <div class="flex-1 flex items-center gap-1.5 px-3 py-1.5 min-w-0">
-              <div class="size-1.5 rounded-full bg-sidebar-foreground/15 shrink-0" />
-              <DatabaseIcon class="size-3 shrink-0 text-sidebar-foreground/25" />
-              <span class="text-sm truncate flex-1 text-sidebar-foreground/40 font-medium">
+            <div class="flex-1 flex items-center gap-2 px-3 py-2 min-w-0">
+              <DatabaseIcon class="size-3 shrink-0 text-sidebar-foreground/34" />
+              <span class="text-sm truncate flex-1 text-sidebar-foreground/68 font-medium tracking-[0.01em]">
                 {{ conn.name }}
               </span>
-              <Badge
-                variant="outline"
-                :class="[getEnvColor(conn.environment), 'text-[9px] uppercase py-0 px-1 h-3.5 shrink-0 opacity-60']"
+              <span
+                class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 shrink-0 opacity-95"
+                :class="getEnvChipColor(conn.environment)"
               >
-                {{ conn.environment }}
-              </Badge>
+                <span
+                  class="text-[9px] font-bold uppercase tracking-[0.08em]"
+                  :class="getEnvTextColor(conn.environment)"
+                >
+                  {{ conn.environment }}
+                </span>
+              </span>
             </div>
           </div>
         </div>

@@ -22,6 +22,7 @@ import TableActionDialog from "@/components/dialogs/TableActionDialog.vue";
 import BulkTableActionDialog from "@/components/dialogs/BulkTableActionDialog.vue";
 import DatabaseActionDialog from "@/components/dialogs/DatabaseActionDialog.vue";
 import DeleteTablesDialog from "@/components/dialogs/DeleteTablesDialog.vue";
+import NewDatabaseDialog from "@/components/dialogs/NewDatabaseDialog.vue";
 import ConnectionContextMenu from "@/components/ConnectionContextMenu.vue";
 import TableContextMenu from "@/components/TableContextMenu.vue";
 import DatabaseContextMenu from "@/components/DatabaseContextMenu.vue";
@@ -80,6 +81,8 @@ const {
   closeTab,
   loadTableData,
   refreshActiveTab,
+  refreshExactCount,
+  loadStructureViewMetadata,
   sortPayload,
   changePage,
   changeLimit,
@@ -201,6 +204,7 @@ const {
   toggleDatabase,
   disconnectConn,
   createDatabase,
+  refreshDatabaseSchema,
   importSql,
   showTableSelector,
   isLoadingExportTables,
@@ -258,6 +262,8 @@ const {
   showDeleteConnDialog,
   confirmDeleteConn,
   deleteConn,
+  exportConnections,
+  importConnections,
 } = useSidebarManager({
   panes,
   activePaneId,
@@ -408,16 +414,11 @@ function getSchema(connectionId: string, database: string | null): Record<string
       :closed-connections="closedConnections"
       :expanded-databases="expandedDatabases"
       :connecting-id="connectingId"
-      :show-new-db="showNewDb"
-      :new-db-name="newDbName"
-      :is-creating-db="isCreatingDb"
       :is-table-active="isTableActiveInAnyPane"
       :is-table-open="isTableOpenInAnyPane"
       :filtered-tables="filteredTables"
       :is-table-selected="isTableSelected"
       @update:search="search = $event"
-      @update:show-new-db="showNewDb = $event"
-      @update:new-db-name="newDbName = $event"
       @update:selected-connection-id="selectedSidebarConnectionId = $event"
       @new-connection="openNewConnDialog"
       @connect-saved="connectSaved"
@@ -429,10 +430,11 @@ function getSchema(connectionId: string, database: string | null): Record<string
       @open-query="openQueryTab"
       @import-sql="importSql"
       @export-database="openExportSelector"
-      @create-database="createDatabase"
       @context-menu-connection="openSidebarContextMenu"
       @context-menu-table="openSidebarTableContextMenu"
       @context-menu-database="openSidebarDatabaseContextMenu"
+      @export-connections="exportConnections"
+      @import-connections="importConnections"
       @resize-start="startSidebarResize"
     />
 
@@ -534,6 +536,8 @@ function getSchema(connectionId: string, database: string | null): Record<string
               :table-indexes="getPaneTab(pane)?.tableIndexes ?? []"
               :fk-map="getFkMap(pane)"
               :ddl="getPaneTab(pane)?.ddl ?? null"
+              :metadata-loading="getPaneTab(pane)?.metadataLoading ?? false"
+              :metadata-loaded="getPaneTab(pane)?.metadataLoaded ?? false"
               :pane-id="pane.id"
               :index-panel-height="structureIndexHeights[pane.id]"
               @start-index-resize="startStructureResize"
@@ -564,7 +568,7 @@ function getSchema(connectionId: string, database: string | null): Record<string
                 :is-col-auto-increment="(col) => isColAutoIncrement(pane, col)"
                 :is-boolean-col="(col) => isBooleanCol(pane, col)"
                 :get-cell-value="(row, col) => cellEditValue(pane, row, col)"
-                @row-click="(row, e) => onTableRowClick(pane, row, e)"
+                @row-click="(row, e, index) => onTableRowClick(pane, row, e, index)"
                 @cell-dblclick="(row, col) => onCellDblclick(pane, row, col)"
                 @cell-blur="onCellBlur(pane)"
                 @cell-input="
@@ -589,7 +593,7 @@ function getSchema(connectionId: string, database: string | null): Record<string
               />
 
               <RowDetailPanel
-                v-if="getPrimaryKey(pane) && getSelectedRow(pane)"
+                v-if="getSelectedRow(pane)"
                 :pane-id="pane.id"
                 :row="getSelectedRow(pane)!"
                 :columns="getPaneTab(pane)?.queryResult?.columns ?? []"
@@ -635,17 +639,26 @@ function getSchema(connectionId: string, database: string | null): Record<string
               :view-mode="pane.viewMode"
               :page="pane.page"
               :page-size="pane.pageSize"
+              :row-count="getPaneTab(pane)?.queryResult?.rows?.length ?? 0"
               :total-count="getPaneTab(pane)?.queryResult?.total_count ?? 0"
+              :total-count-approximate="getPaneTab(pane)?.queryResult?.total_count_is_estimate ?? false"
+              :exact-count-loading="getPaneTab(pane)?.exactCountLoading ?? false"
               :is-inserting-row="insertingRowTabId !== null && insertingRowTabId === pane.activeTabId"
               :insert-row-error="insertRowError"
               :insert-row-loading="insertRowLoading"
-              @set-view-mode="(mode) => setViewMode(pane, mode)"
+              @set-view-mode="
+                (mode) => {
+                  setViewMode(pane, mode);
+                  if (mode === 'structure') loadStructureViewMetadata(pane);
+                }
+              "
               @toggle-insert-row="openInsertRowDialog(pane)"
               @submit-insert-row="submitInsertRow(pane)"
               @cancel-insert-row="cancelInsertRow"
               @change-page="(delta) => changePage(pane, delta)"
               @change-limit="(limit) => changeLimit(pane, limit)"
               @goto-offset="(offset) => gotoOffset(pane, offset)"
+              @request-exact-count="refreshExactCount(pane)"
             />
           </template>
 
@@ -686,6 +699,22 @@ function getSchema(connectionId: string, database: string | null): Record<string
         }
       "
       @save="saveNewConn"
+    />
+    <NewDatabaseDialog
+      :open="!!showNewDb"
+      :connection-name="showNewDb ? (store.openConnections[showNewDb]?.connection.name ?? '') : ''"
+      :name="newDbName"
+      :is-creating="isCreatingDb"
+      @update:open="
+        (val) => {
+          if (!val && !isCreatingDb) {
+            showNewDb = null;
+            newDbName = '';
+          }
+        }
+      "
+      @update:name="newDbName = $event"
+      @create="showNewDb && createDatabase(showNewDb)"
     />
     <DeleteConfirmDialog
       :open="showDeleteConnDialog"
@@ -774,6 +803,7 @@ function getSchema(connectionId: string, database: string | null): Record<string
       @new-database="
         (id) => {
           if (!expandedConnections.has(id)) expandedConnections.add(id);
+          selectedSidebarConnectionId = id;
           showNewDb = id;
           newDbName = '';
           sidebarContextMenu.show = false;
@@ -813,6 +843,12 @@ function getSchema(connectionId: string, database: string | null): Record<string
       :database-name="sidebarDatabaseContextMenu.databaseName"
       @open-query="
         openQueryTab(
+          sidebarDatabaseContextMenu.connectionId,
+          sidebarDatabaseContextMenu.databaseName,
+        )
+      "
+      @refresh-schema="
+        refreshDatabaseSchema(
           sidebarDatabaseContextMenu.connectionId,
           sidebarDatabaseContextMenu.databaseName,
         )

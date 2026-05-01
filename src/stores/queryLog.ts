@@ -37,5 +37,5 @@ export const useQueryLogStore = defineStore('queryLog', () => {
     addEntry(event.payload)
   })
 
-  return { entries, isOpen, clear, toggle }
+  return { entries, isOpen, addEntry, clear, toggle }
 })

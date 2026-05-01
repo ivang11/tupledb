@@ -24,6 +24,16 @@ description = "Permite establecer una conexión activa"
 commands.allow = ["connect"]
 
 [[permission]]
+identifier = "allow-export-connections"
+description = "Permite exportar conexiones a un archivo JSON"
+commands.allow = ["export_connections"]
+
+[[permission]]
+identifier = "allow-import-connections"
+description = "Permite importar conexiones desde un archivo JSON"
+commands.allow = ["import_connections"]
+
+[[permission]]
 identifier = "allow-get-databases"
 description = "Permite listar las bases de datos"
 commands.allow = ["get_databases"]
@@ -69,6 +79,11 @@ description = "Permite importar un archivo SQL en una base de datos"
 commands.allow = ["import_sql"]
 
 [[permission]]
+identifier = "allow-cancel-import"
+description = "Permite cancelar una importación SQL en curso"
+commands.allow = ["cancel_import"]
+
+[[permission]]
 identifier = "allow-apply-table-changes"
 description = "Permite aplicar cambios (updates/deletes) a una tabla"
 commands.allow = ["apply_table_changes"]
@@ -77,6 +92,11 @@ commands.allow = ["apply_table_changes"]
 identifier = "allow-drop-table"
 description = "Permite borrar una tabla físicamente"
 commands.allow = ["drop_table"]
+
+[[permission]]
+identifier = "allow-drop-tables"
+description = "Permite borrar varias tablas en una sola operación"
+commands.allow = ["drop_tables"]
 
 [[permission]]
 identifier = "allow-truncate-table"

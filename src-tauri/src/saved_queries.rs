@@ -1,7 +1,7 @@
+use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
-use crate::state::AppState;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SavedQuery {
@@ -24,7 +24,10 @@ pub async fn get_saved_queries(state: State<'_, AppState>) -> Result<Vec<SavedQu
 }
 
 #[tauri::command]
-pub async fn upsert_saved_query(state: State<'_, AppState>, query: SavedQuery) -> Result<(), String> {
+pub async fn upsert_saved_query(
+    state: State<'_, AppState>,
+    query: SavedQuery,
+) -> Result<(), String> {
     {
         let mut queries = state.saved_queries.write();
         queries.insert(query.id, query);

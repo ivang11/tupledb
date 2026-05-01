@@ -1,17 +1,17 @@
 pub mod commands;
 pub mod connections;
 pub mod driver;
-pub mod ssh;
+pub mod filters;
 pub mod mysql;
+pub mod query_builder;
 pub mod saved_queries;
 pub mod schema;
-pub mod filters;
-pub mod query_builder;
 pub mod security;
+pub mod ssh;
 pub mod state;
 
-use tauri::Manager;
 use crate::state::AppState;
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -28,6 +28,8 @@ pub fn run() {
             crate::commands::remove_connection,
             crate::commands::test_connection,
             crate::commands::connect,
+            crate::commands::export_connections,
+            crate::commands::import_connections,
             crate::schema::get_databases,
             crate::schema::create_database,
             crate::schema::drop_database,
@@ -35,11 +37,13 @@ pub fn run() {
             crate::schema::get_table_structure,
             crate::schema::export_database,
             crate::schema::import_sql,
+            crate::schema::cancel_import,
             crate::mysql::get_table_data,
             crate::mysql::export_table,
             crate::mysql::apply_table_changes,
             crate::mysql::insert_row,
             crate::mysql::drop_table,
+            crate::mysql::drop_tables,
             crate::mysql::truncate_table,
             crate::schema::get_foreign_keys,
             crate::schema::get_table_indexes,

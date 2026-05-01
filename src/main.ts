@@ -18,11 +18,6 @@ const router = createRouter({
           name: "home",
           component: () => import("./views/HomeView.vue"),
         },
-        {
-          path: "connections",
-          name: "connections",
-          component: () => import("./views/ConnectionsView.vue"),
-        },
       ],
     },
   ],

@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { LayoutListIcon, TablePropertiesIcon, PlusIcon, ChevronLeftIcon, ChevronRightIcon } from 'lucide-vue-next'
+import { LayoutListIcon, TablePropertiesIcon, PlusIcon, ChevronLeftIcon, ChevronRightIcon, HashIcon } from 'lucide-vue-next'
 
 const props = defineProps<{
   viewMode: 'content' | 'structure'
   page: number
   pageSize: number
+  rowCount: number
   totalCount: number
+  totalCountApproximate?: boolean
+  exactCountLoading?: boolean
   isInsertingRow: boolean
   insertRowError: string | null
   insertRowLoading: boolean
@@ -20,17 +23,27 @@ const emit = defineEmits<{
   'change-page': [delta: number]
   'change-limit': [newLimit: number]
   'goto-offset': [offset: number]
+  'request-exact-count': []
 }>()
 
 const rowRangeLabel = computed(() => {
-  if (props.totalCount === 0) return '0 rows'
+  if (props.rowCount === 0) return '0 rows'
   const from = props.page * props.pageSize + 1
-  const to = Math.min((props.page + 1) * props.pageSize, props.totalCount)
-  return `${from.toLocaleString()} – ${to.toLocaleString()} of ${props.totalCount.toLocaleString()}`
+  const currentPageEnd = props.page * props.pageSize + props.rowCount
+  const to = props.totalCountApproximate
+    ? currentPageEnd
+    : Math.min(currentPageEnd, props.totalCount)
+  const displayTotal = Math.max(props.totalCount, currentPageEnd)
+  const prefix = props.totalCountApproximate ? '~' : ''
+  const suffix = props.totalCountApproximate && props.rowCount >= props.pageSize ? '+' : ''
+  return `${from.toLocaleString()} – ${to.toLocaleString()} of ${prefix}${displayTotal.toLocaleString()}${suffix}`
 })
 
 const canPrevPage = computed(() => props.page > 0)
-const canNextPage = computed(() => (props.page + 1) * props.pageSize < props.totalCount)
+const canNextPage = computed(() => {
+  if (props.totalCountApproximate) return props.rowCount >= props.pageSize
+  return (props.page + 1) * props.pageSize < props.totalCount
+})
 </script>
 
 <template>
@@ -117,6 +130,17 @@ const canNextPage = computed(() => (props.page + 1) * props.pageSize < props.tot
       <span class="text-[11px] font-semibold text-muted-foreground tabular-nums">
         {{ rowRangeLabel }}
       </span>
+      <button
+        v-if="totalCountApproximate"
+        type="button"
+        class="h-5 inline-flex items-center gap-1 rounded border border-border/60 px-1.5 text-[10px] font-bold text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-colors disabled:opacity-50"
+        :disabled="exactCountLoading"
+        title="Calculate exact row count"
+        @click="emit('request-exact-count')"
+      >
+        <HashIcon class="size-2.5" />
+        {{ exactCountLoading ? 'Counting...' : 'Exact' }}
+      </button>
 
       <!-- Limit + Offset controls -->
       <div class="flex items-center gap-2 border-l border-border pl-3">

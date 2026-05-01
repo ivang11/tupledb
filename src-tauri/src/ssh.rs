@@ -1,8 +1,8 @@
+use crate::connections::{SshAuth, SshSettings};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
-use crate::connections::{SshSettings, SshAuth};
 
 pub struct SshTunnel {
     pub local_port: u16,
@@ -10,7 +10,11 @@ pub struct SshTunnel {
 }
 
 impl SshTunnel {
-    pub fn new(settings: &SshSettings, remote_host: &str, remote_port: u16) -> Result<Self, String> {
+    pub fn new(
+        settings: &SshSettings,
+        remote_host: &str,
+        remote_port: u16,
+    ) -> Result<Self, String> {
         // Find a free local port
         let local_port = {
             let listener = TcpListener::bind("127.0.0.1:0")
@@ -30,7 +34,10 @@ impl SshTunnel {
         let mut askpass_script: Option<std::path::PathBuf> = None;
 
         let mut child = match &settings.auth {
-            SshAuth::Key { private_key_path, passphrase } => {
+            SshAuth::Key {
+                private_key_path,
+                passphrase,
+            } => {
                 let has_passphrase = passphrase.as_ref().map_or(false, |p| !p.is_empty());
 
                 let mut cmd = Command::new("ssh");
@@ -58,8 +65,11 @@ impl SshTunnel {
                     #[cfg(unix)]
                     {
                         use std::os::unix::fs::PermissionsExt;
-                        std::fs::set_permissions(&data_path, std::fs::Permissions::from_mode(0o600))
-                            .map_err(|e| format!("Failed to set passphrase file permissions: {}", e))?;
+                        std::fs::set_permissions(
+                            &data_path,
+                            std::fs::Permissions::from_mode(0o600),
+                        )
+                        .map_err(|e| format!("Failed to set passphrase file permissions: {}", e))?;
                     }
 
                     let script_content = format!("#!/bin/sh\ncat '{}'\n", data_path.display());
@@ -69,14 +79,20 @@ impl SshTunnel {
                     #[cfg(unix)]
                     {
                         use std::os::unix::fs::PermissionsExt;
-                        std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o700))
-                            .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
+                        std::fs::set_permissions(
+                            &script_path,
+                            std::fs::Permissions::from_mode(0o700),
+                        )
+                        .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
                     }
 
                     cmd.env("SSH_ASKPASS", &script_path)
                         .env("SSH_ASKPASS_REQUIRE", "force")
                         // DISPLAY is needed on older OpenSSH versions to trigger askpass
-                        .env("DISPLAY", std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into()));
+                        .env(
+                            "DISPLAY",
+                            std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into()),
+                        );
 
                     askpass_script = Some(script_path);
                 } else {
@@ -99,7 +115,8 @@ impl SshTunnel {
                     });
                 }
 
-                cmd.spawn().map_err(|e| format!("Failed to start ssh: {}", e))?
+                cmd.spawn()
+                    .map_err(|e| format!("Failed to start ssh: {}", e))?
             }
 
             SshAuth::Password { password } => {
@@ -111,11 +128,10 @@ impl SshTunnel {
                     .unwrap_or(false);
 
                 if !has_sshpass {
-                    return Err(
-                        "SSH password authentication requires 'sshpass'.\n\
+                    return Err("SSH password authentication requires 'sshpass'.\n\
                          Install it with: sudo apt install sshpass\n\
-                         Or use key-based authentication instead.".into()
-                    );
+                         Or use key-based authentication instead."
+                        .into());
                 }
 
                 Command::new("sshpass")
@@ -162,7 +178,11 @@ impl SshTunnel {
                     use std::io::Read;
                     let mut buf = String::new();
                     s.read_to_string(&mut buf).ok()?;
-                    if buf.trim().is_empty() { None } else { Some(buf.trim().to_string()) }
+                    if buf.trim().is_empty() {
+                        None
+                    } else {
+                        Some(buf.trim().to_string())
+                    }
                 })
                 .unwrap_or_default();
 

@@ -7,7 +7,7 @@ export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
   const store = useConnectionStore()
 
   function createPane(): PaneState {
-    return { id: crypto.randomUUID(), tabs: [], activeTabId: null, viewMode: 'content', page: 0, pageSize: 50, showFilters: false }
+    return { id: crypto.randomUUID(), tabs: [], activeTabId: null, viewMode: 'content', page: 0, pageSize: 300, showFilters: false }
   }
 
   const panes = ref<PaneState[]>([createPane()])

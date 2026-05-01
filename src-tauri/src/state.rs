@@ -1,14 +1,14 @@
-use parking_lot::RwLock;
-use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
-use std::sync::Arc;
-use uuid::Uuid;
-use tauri::Manager;
 use crate::connections::Connection;
 use crate::driver::DatabaseDriver;
 use crate::saved_queries::SavedQuery;
 use crate::ssh::SshTunnel;
+use parking_lot::RwLock;
+use std::collections::{HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
+use std::sync::Arc;
+use tauri::Manager;
+use uuid::Uuid;
 
 pub struct ActiveConnection {
     pub driver: Arc<dyn DatabaseDriver>,
@@ -19,25 +19,32 @@ pub struct AppState {
     pub connections_config: RwLock<HashMap<Uuid, Connection>>,
     pub active_sessions: RwLock<HashMap<Uuid, ActiveConnection>>,
     pub saved_queries: RwLock<HashMap<Uuid, SavedQuery>>,
+    pub canceled_imports: RwLock<HashSet<String>>,
     pub app_handle: tauri::AppHandle,
     config_dir: PathBuf,
 }
 
 impl AppState {
     pub fn emit_query_log(&self, sql: &str, duration_ms: u64, error: Option<&str>) {
-        use tauri::Emitter;
         use serde_json::json;
+        use tauri::Emitter;
         let now = chrono::Local::now();
-        let _ = self.app_handle.emit("query-log", json!({
-            "sql": sql,
-            "timestamp": now.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
-            "duration_ms": duration_ms,
-            "error": error,
-        }));
+        let _ = self.app_handle.emit(
+            "query-log",
+            json!({
+                "sql": sql,
+                "timestamp": now.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
+                "duration_ms": duration_ms,
+                "error": error,
+            }),
+        );
     }
 
     pub fn new(app_handle: &tauri::AppHandle) -> Self {
-        let config_dir = app_handle.path().app_config_dir().expect("failed to get config dir");
+        let config_dir = app_handle
+            .path()
+            .app_config_dir()
+            .expect("failed to get config dir");
         if !config_dir.exists() {
             fs::create_dir_all(&config_dir).expect("failed to create config dir");
         }
@@ -68,6 +75,7 @@ impl AppState {
             connections_config: RwLock::new(connections),
             active_sessions: RwLock::new(HashMap::new()),
             saved_queries: RwLock::new(saved_queries),
+            canceled_imports: RwLock::new(HashSet::new()),
             app_handle: app_handle.clone(),
             config_dir,
         }
@@ -104,5 +112,17 @@ impl AppState {
             .ok_or("No active session found")?
             .driver
             .clone())
+    }
+
+    pub fn request_import_cancel(&self, import_id: &str) {
+        self.canceled_imports.write().insert(import_id.to_string());
+    }
+
+    pub fn clear_import_cancel(&self, import_id: &str) {
+        self.canceled_imports.write().remove(import_id);
+    }
+
+    pub fn is_import_canceled(&self, import_id: &str) -> bool {
+        self.canceled_imports.read().contains(import_id)
     }
 }

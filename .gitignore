@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+.tmp-tests/
 src-tauri/target/
 
 # Tauri generated files

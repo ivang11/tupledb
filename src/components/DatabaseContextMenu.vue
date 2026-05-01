@@ -5,6 +5,7 @@ import {
   UploadIcon,
   DownloadIcon,
   TableIcon,
+  RefreshCwIcon,
 } from "lucide-vue-next";
 
 defineProps<{
@@ -16,6 +17,7 @@ defineProps<{
 
 const emit = defineEmits<{
   "open-query": [];
+  "refresh-schema": [];
   "import-sql": [];
   "export-database": [];
   "delete-tables": [];
@@ -35,6 +37,13 @@ const emit = defineEmits<{
       @click="emit('open-query')"
     >
       <TerminalIcon class="size-3.5" /> New Query
+    </button>
+    <button
+      class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-primary/10 text-foreground transition-colors text-left"
+      title="Refresh schema"
+      @click="emit('refresh-schema')"
+    >
+      <RefreshCwIcon class="size-3.5" /> Refresh Schema
     </button>
     <button
       class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-primary/10 text-foreground transition-colors text-left"

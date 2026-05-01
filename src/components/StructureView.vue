@@ -7,6 +7,8 @@ defineProps<{
   tableIndexes: any[]
   fkMap: Record<string, { table: string; column: string }>
   ddl: string | null
+  metadataLoading?: boolean
+  metadataLoaded?: boolean
   paneId: string
   indexPanelHeight: number | undefined
 }>()
@@ -126,6 +128,7 @@ const emit = defineEmits<{
             </template>
           </tbody>
         </table>
+        <div v-else-if="metadataLoading" class="px-4 py-6 text-xs text-muted-foreground/50 italic">Loading metadata...</div>
         <div v-else class="px-4 py-6 text-xs text-muted-foreground/40 italic">No indexes found</div>
       </div>
     </div>
@@ -139,6 +142,12 @@ const emit = defineEmits<{
       <div class="flex-1 min-h-0 overflow-auto">
         <pre class="px-4 py-3 text-xs font-mono text-foreground/80 whitespace-pre leading-relaxed">{{ ddl }}</pre>
       </div>
+    </div>
+    <div
+      v-else-if="metadataLoading"
+      class="shrink-0 border-t px-4 py-3 text-xs text-muted-foreground/40 italic"
+    >
+      Loading DDL...
     </div>
   </div>
 </template>

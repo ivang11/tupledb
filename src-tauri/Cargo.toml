@@ -1,6 +1,6 @@
 [package]
 name = "db-viewer"
-version = "0.6.1"
+version = "0.6.2"
 description = "A secure MySQL client built with Tauri and Vue"
 authors = ["Ivan"]
 edition = "2021"

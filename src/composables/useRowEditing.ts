@@ -2,6 +2,16 @@ import { ref, nextTick, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useToast } from '@/composables/useToast'
 import type { PaneState, TableTab } from '@/types/workspace'
+import {
+  normalizeInsertValue,
+  normalizeChangeValue,
+  coercePkValue,
+  computeCellEditValue,
+} from '@/lib/tableEditing'
+import {
+  computeRowClickSelection,
+  computeNoPkRowClick,
+} from '@/lib/rowSelection'
 
 interface RowEditingContext {
   panes: Ref<PaneState[]>
@@ -75,14 +85,10 @@ export function useRowEditing(ctx: RowEditingContext) {
     insertRowLoading.value = true
     insertRowError.value = null
     try {
-      const values = Object.entries(insertRowValues.value).map(([column, value]) => {
-        if (value === '' || value === null) return { column, value: null }
-        const lower = String(value).toLowerCase().trim()
-        if (lower === 'null') return { column, value: null }
-        if (lower === 'true') return { column, value: 1 }
-        if (lower === 'false') return { column, value: 0 }
-        return { column, value }
-      })
+      const values = Object.entries(insertRowValues.value).map(([column, value]) => ({
+        column,
+        value: normalizeInsertValue(value),
+      }))
       await invoke('insert_row', {
         connectionId: conn.id, database: tab.database, table: tab.tableName,
         values, disableFkChecks: disableFkChecks.value,
@@ -129,7 +135,7 @@ export function useRowEditing(ctx: RowEditingContext) {
       await invoke('apply_table_changes', {
         connectionId: conn.id, database: tab.database, table: tab.tableName,
         updates: [],
-        deletions: [{ pk_column: pk, pk_value: isNaN(Number(pkVal)) ? pkVal : Number(pkVal) }],
+        deletions: [{ pk_column: pk, pk_value: coercePkValue(pkVal) }],
         disableFkChecks: disableFkChecks.value,
       })
       if (tab.selectedRowPk === pkVal) {
@@ -207,62 +213,45 @@ export function useRowEditing(ctx: RowEditingContext) {
   function getSelectedRow(pane: PaneState): Record<string, any> | null {
     const tab = getPaneTab(pane)
     const pk = getPrimaryKey(pane)
-    if (!tab?.queryResult?.rows || !tab.selectedRowPk || !pk) return null
+    if (!tab?.queryResult?.rows || !tab.selectedRowPk) return null
+    if (!pk) {
+      const match = tab.selectedRowPk.match(/^__row_index:(\d+)$/)
+      if (!match) return null
+      return tab.queryResult.rows[Number(match[1])] ?? null
+    }
     return tab.queryResult.rows.find((r: any) => String(r[pk]) === tab.selectedRowPk) ?? null
   }
 
-  function onTableRowClick(pane: PaneState, row: any, e: MouseEvent) {
+  function onTableRowClick(pane: PaneState, row: any, e: MouseEvent, rowIndex?: number) {
     const el = e.target as HTMLElement
     if (el.closest('button')) return
     const td = el.closest('td')
     if (!td?.parentElement) return
     const tdIdx = Array.from(td.parentElement.children).indexOf(td)
     const pk = getPrimaryKey(pane)
-    if (!pk) return
     const tab = getPaneTab(pane)
     if (!tab) return
+
+    if (!pk) {
+      const key = `__row_index:${rowIndex ?? tab.queryResult?.rows?.indexOf(row) ?? 0}`
+      const next = computeNoPkRowClick(key, tab.selectedRowPk)
+      if (next) Object.assign(tab, next)
+      return
+    }
+
     const pkVal = String((row as any)[pk])
-
-    // Ctrl/Meta: toggle individual row in multi-selection
-    if (e.ctrlKey || e.metaKey) {
-      const idx = tab.selectedRowPks.indexOf(pkVal)
-      if (idx === -1) tab.selectedRowPks.push(pkVal)
-      else tab.selectedRowPks.splice(idx, 1)
-      tab.selectedRowPk = pkVal
-      tab.inlineEditColumn = null
-      return
-    }
-
-    // Shift: range select from last selectedRowPk
-    if (e.shiftKey && tab.selectedRowPk && tab.queryResult?.rows) {
-      const rows = tab.queryResult.rows as any[]
-      const anchorIdx = rows.findIndex((r: any) => String(r[pk]) === tab.selectedRowPk)
-      const currentIdx = rows.findIndex((r: any) => String(r[pk]) === pkVal)
-      if (anchorIdx !== -1 && currentIdx !== -1) {
-        const start = Math.min(anchorIdx, currentIdx)
-        const end = Math.max(anchorIdx, currentIdx)
-        tab.selectedRowPks = rows.slice(start, end + 1).map((r: any) => String(r[pk]))
-        tab.inlineEditColumn = null
-        return
-      }
-    }
-
-    // Single click
-    if (tdIdx === 0) {
-      if (tab.selectedRowPk === pkVal) return
-      tab.selectedRowPk = pkVal
-      tab.selectedRowPks = [pkVal]
-      tab.inlineEditColumn = null
-      return
-    }
     const cols = tab.queryResult?.columns
-    const col = cols?.[tdIdx - 1] as { name: string } | undefined
-    if (tab.selectedRowPk === pkVal && tab.inlineEditColumn && tab.inlineEditColumn !== col?.name)
-      tab.inlineEditColumn = null
-    if (tab.selectedRowPk === pkVal) return
-    tab.selectedRowPk = pkVal
-    tab.selectedRowPks = [pkVal]
-    tab.inlineEditColumn = null
+    const colName = tdIdx > 0 ? ((cols?.[tdIdx - 1] as { name: string } | undefined)?.name ?? null) : null
+    const allRowPks = (tab.queryResult?.rows as any[] ?? []).map((r: any) => String(r[pk]))
+    const next = computeRowClickSelection(
+      pkVal,
+      tdIdx,
+      colName,
+      { ctrl: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey },
+      { selectedRowPk: tab.selectedRowPk, selectedRowPks: tab.selectedRowPks, inlineEditColumn: tab.inlineEditColumn },
+      allRowPks,
+    )
+    if (next) Object.assign(tab, next)
   }
 
   function onCellDblclick(pane: PaneState, row: any, colName: string) {
@@ -290,19 +279,14 @@ export function useRowEditing(ctx: RowEditingContext) {
 
   function cellEditValue(pane: PaneState, row: any, colName: string): string {
     const tab = getPaneTab(pane)
-    const pk = getPrimaryKey(pane)
-    if (!tab || !pk) return ''
-    const pkVal = String((row as any)[pk])
-    const pending = tab.pendingChanges[pkVal]?.[colName]
-    if (pending !== undefined) return pending === null ? '' : String(pending)
-    const v = (row as any)[colName]
-    if (v === null || v === undefined) return ''
-    if (typeof v === 'object') return JSON.stringify(v)
-    return String(v)
+    if (!tab) return ''
+    return computeCellEditValue(tab.pendingChanges, getPrimaryKey(pane), row, colName)
   }
 
   function setViewMode(pane: PaneState, mode: 'content' | 'structure') {
     pane.viewMode = mode
+    const tab = getPaneTab(pane)
+    if (tab) tab.viewMode = mode
     if (mode !== 'content') clearRowSelection(pane)
   }
 
@@ -324,19 +308,15 @@ export function useRowEditing(ctx: RowEditingContext) {
         if (!pk) throw new Error('Table has no Primary Key')
         const updates = Object.entries(tab.pendingChanges).map(([pkValue, changes]) => ({
           pk_column: pk,
-          pk_value: isNaN(Number(pkValue)) ? pkValue : Number(pkValue),
-          changes: Object.entries(changes).map(([column, value]) => {
-            if (value === null) return { column, value: null }
-            const lower = String(value).toLowerCase().trim()
-            if (lower === 'null') return { column, value: null }
-            if (lower === 'true') return { column, value: 1 }
-            if (lower === 'false') return { column, value: 0 }
-            return { column, value: isNaN(Number(value)) ? value : Number(value) }
-          }),
+          pk_value: coercePkValue(pkValue),
+          changes: Object.entries(changes).map(([column, value]) => ({
+            column,
+            value: normalizeChangeValue(value),
+          })),
         }))
         const deletions = Object.keys(tab.pendingDeletions).map(pkValue => ({
           pk_column: pk,
-          pk_value: isNaN(Number(pkValue)) ? pkValue : Number(pkValue),
+          pk_value: coercePkValue(pkValue),
         }))
         await invoke('apply_table_changes', {
           connectionId: conn.id, database: tab.database, table: tab.tableName,

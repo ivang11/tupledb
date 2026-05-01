@@ -38,6 +38,16 @@ export const useConnectionStore = defineStore('connections', () => {
     return invoke<string>('test_connection', { connection })
   }
 
+  async function exportConnections(path: string) {
+    await invoke('export_connections', { path })
+  }
+
+  async function importConnections(path: string) {
+    const count = await invoke<number>('import_connections', { path })
+    await fetchConnections()
+    return count
+  }
+
   async function connect(connection: Connection) {
     await invoke('connect', { connection })
     if (!openConnections.value[connection.id]) {
@@ -74,9 +84,11 @@ export const useConnectionStore = defineStore('connections', () => {
     database: string,
     tableName: string,
     page = 0,
-    pageSize = 50,
+    pageSize = 300,
     filters: any = null,
     sort: { column: string; desc: boolean } | null = null,
+    exactCount = true,
+    keyset: { column: string; value: any; direction: 'next' | 'prev' } | null = null,
   ) {
     return invoke<any>('get_table_data', {
       connectionId,
@@ -87,6 +99,8 @@ export const useConnectionStore = defineStore('connections', () => {
       filters,
       sortColumn: sort?.column ?? null,
       sortDesc: sort?.desc ?? null,
+      exactCount,
+      keyset,
     })
   }
 
@@ -130,5 +144,7 @@ export const useConnectionStore = defineStore('connections', () => {
     fetchTableIndexes,
     fetchForeignKeys,
     fetchTableDdl,
+    exportConnections,
+    importConnections,
   }
 })

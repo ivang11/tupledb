@@ -45,6 +45,7 @@ function autoResize(el: HTMLTextAreaElement | null) {
   })
 }
 
+const isReadOnly = () => !props.primaryKey
 const pkVal = () => props.primaryKey ? String(props.row[props.primaryKey]) : ''
 const isPendingDelete = () => !!props.pendingDeletions[pkVal()]
 </script>
@@ -64,9 +65,11 @@ const isPendingDelete = () => !!props.pendingDeletions[pkVal()]
     <!-- Header -->
     <div class="h-11 shrink-0 border-b flex items-center justify-between gap-2 px-3 bg-muted/25">
       <div class="min-w-0">
-        <p class="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate">Selected row</p>
+        <p class="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate">
+          {{ isReadOnly() ? 'Read-only row' : 'Selected row' }}
+        </p>
         <p class="text-[11px] font-mono font-semibold text-foreground truncate">
-          {{ primaryKey }} = {{ primaryKey ? row[primaryKey] : '' }}
+          {{ primaryKey ? `${primaryKey} = ${row[primaryKey]}` : 'No primary key' }}
         </p>
       </div>
       <button
@@ -116,10 +119,13 @@ const isPendingDelete = () => !!props.pendingDeletions[pkVal()]
             <textarea
               :ref="(el) => autoResize(el as HTMLTextAreaElement)"
               rows="1"
-              class="flex-1 min-w-0 rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono resize-none overflow-hidden leading-relaxed focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed"
+              class="flex-1 min-w-0 rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono resize-none overflow-hidden leading-relaxed focus:outline-none focus:ring-1 focus:ring-ring read-only:bg-muted/20 read-only:text-foreground/80 disabled:opacity-50 disabled:cursor-not-allowed"
+              :readonly="isReadOnly()"
               :disabled="isPendingDelete()"
               :value="getCellValue(row, col.name)"
+              :placeholder="row[col.name] === null ? 'NULL' : 'EMPTY'"
               @input="(e) => {
+                if (isReadOnly()) return
                 const t = e.target as HTMLTextAreaElement
                 t.style.height = 'auto'
                 t.style.height = t.scrollHeight + 'px'

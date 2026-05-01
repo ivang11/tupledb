@@ -32,6 +32,15 @@ import { useKeybindings } from '@/composables/useKeybindings'
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { type CompletionContext, type CompletionResult, type Completion } from '@codemirror/autocomplete'
 import { tags } from '@lezer/highlight'
+import {
+  QUERY_RESULT_ROW_LIMIT,
+  applyQueryChunk,
+  finalizeStreamedQueryResult,
+  limitBufferedQueryResult,
+  type ColumnInfo,
+  type RawQueryResult,
+} from '@/lib/queryStreaming'
+import { getQueryCancelButtonState, shouldSurfaceQueryError } from '@/lib/queryExecutionUi'
 
 const props = defineProps<{
   connectionId: string
@@ -43,18 +52,6 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ 'update:sql': [string] }>()
-
-interface ColumnInfo {
-  name: string
-  type_name: string
-}
-
-interface RawQueryResult {
-  columns: ColumnInfo[]
-  rows: Record<string, any>[]
-  rows_affected: number
-  is_select: boolean
-}
 
 interface HistoryEntry {
   id: string
@@ -170,10 +167,17 @@ const isRunning = ref(false)
 const isCancelling = ref(false)
 const executionTime = ref<number | null>(null)
 const rowsFetched = ref<number | null>(null)
+const resultRowsLimited = ref(false)
+const resultTotalRows = ref<number | null>(null)
 const showHistory = ref(false)
 const showSaved = ref(false)
 const history = ref<HistoryEntry[]>([])
 const activeQueryId = ref<string | null>(null)
+const cancelButtonState = computed(() => getQueryCancelButtonState(
+  isRunning.value,
+  isCancelling.value,
+  activeQueryId.value,
+))
 
 // ── Side panel resize ─────────────────────────────────────────────────────────
 
@@ -313,8 +317,11 @@ async function runQuery() {
   isCancelling.value = false
   queryError.value = null
   result.value = null
+  resultRowsLimited.value = false
+  resultTotalRows.value = null
   rowsFetched.value = null
   const start = Date.now()
+  let streamedRowsSeen = 0
 
   let unlisten: (() => void) | null = null
   let unlistenProgress: (() => void) | null = null
@@ -337,23 +344,25 @@ async function runQuery() {
     unlistenChunk = await listen<{ columns?: ColumnInfo[]; rows: Record<string, any>[] }>(
       `query-chunk:${queryId}`,
       event => {
-        const { columns, rows } = event.payload
-        if (!result.value) {
+        const wasEmpty = !result.value
+        const nextState = applyQueryChunk({
+          result: result.value,
+          rowsLimited: resultRowsLimited.value,
+          streamedRowsSeen,
+        }, event.payload)
+
+        streamedRowsSeen = nextState.streamedRowsSeen
+        resultRowsLimited.value = nextState.rowsLimited
+        result.value = nextState.result ? markRaw(nextState.result) : null
+
+        if (wasEmpty && result.value) {
           // First chunk — create the result object and scroll to top
-          result.value = markRaw({
-            columns: columns ?? [],
-            rows,
-            rows_affected: rows.length,
-            is_select: true,
-          })
           nextTick(() => resultScrollEl.value?.scrollTo(0, 0))
         } else {
           // Subsequent chunks — append rows and force virtualizer to re-count
-          result.value.rows.push(...rows)
-          result.value.rows_affected = result.value.rows.length
           triggerRef(result)
         }
-        rowsFetched.value = result.value.rows.length
+        rowsFetched.value = streamedRowsSeen
       },
     )
 
@@ -370,7 +379,7 @@ async function runQuery() {
     executionTime.value = payload.duration_ms as number
 
     if (payload.error) {
-      if (!isCancelling.value) {
+      if (shouldSurfaceQueryError(isCancelling.value)) {
         // Clear any partial streamed result on error
         result.value = null
         throw new Error(payload.error)
@@ -379,13 +388,17 @@ async function runQuery() {
       const meta = payload.ok as RawQueryResult
       if (payload.streamed) {
         // Rows already arrived via chunks — just update final metadata
-        if (result.value) {
-          (result.value as RawQueryResult).rows_affected = meta.rows_affected
-          triggerRef(result)
-        }
+        const finalized = finalizeStreamedQueryResult(result.value, resultRowsLimited.value, meta)
+        result.value = finalized.result ? markRaw(finalized.result) : null
+        resultRowsLimited.value = finalized.rowsLimited
+        resultTotalRows.value = finalized.totalRows
+        triggerRef(result)
       } else {
         // Non-SELECT or legacy buffered result
-        result.value = markRaw(meta)
+        const limited = limitBufferedQueryResult(meta)
+        resultRowsLimited.value = limited.rowsLimited
+        resultTotalRows.value = limited.totalRows
+        result.value = markRaw(limited.result)
         nextTick(() => resultScrollEl.value?.scrollTo(0, 0))
       }
       addToHistory({
@@ -399,7 +412,7 @@ async function runQuery() {
       })
     }
   } catch (e: any) {
-    if (!isCancelling.value) {
+    if (shouldSurfaceQueryError(isCancelling.value)) {
       queryError.value = String(e)
       executionTime.value = executionTime.value ?? Date.now() - start
       addToHistory({
@@ -424,7 +437,7 @@ async function runQuery() {
 }
 
 async function cancelQuery() {
-  if (!isRunning.value || !activeQueryId.value) return
+  if (!cancelButtonState.value.canRequestCancel || !activeQueryId.value) return
   isCancelling.value = true
   try {
     await invoke('cancel_query', {
@@ -809,18 +822,23 @@ watch(showDbDropdown, (val) => {
       <span
         v-if="isRunning && rowsFetched !== null"
         class="text-[10px] font-bold text-muted-foreground tabular-nums"
-      >{{ rowsFetched.toLocaleString() }} rows…</span>
+      >
+        {{ rowsFetched.toLocaleString() }} rows…
+        <span v-if="resultRowsLimited" class="text-amber-500">
+          showing {{ QUERY_RESULT_ROW_LIMIT.toLocaleString() }}
+        </span>
+      </span>
 
       <!-- Cancel button (only while running) -->
       <button
         v-if="isRunning"
         @click="cancelQuery"
-        :disabled="isCancelling"
+        :disabled="cancelButtonState.disabled"
         class="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-bold bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-destructive/20"
         title="Cancel query"
       >
         <Square class="size-3" />
-        {{ isCancelling ? 'Cancelling…' : 'Cancel' }}
+        {{ cancelButtonState.label }}
       </button>
 
       <!-- Run button -->
@@ -876,45 +894,57 @@ watch(showDbDropdown, (val) => {
               <p class="text-sm font-bold text-muted-foreground">No rows returned</p>
               <p class="text-xs text-muted-foreground/50">Query completed in {{ formatDuration(executionTime!) }}</p>
             </div>
-            <table v-else class="border-collapse" style="min-width: 100%;">
-              <thead>
-                <tr>
-                  <th
-                    v-for="col in result.columns"
-                    :key="col.name"
-                    class="sticky top-0 z-20 bg-background backdrop-blur-md px-4 py-3 border-b border-r last:border-r-0 text-left whitespace-nowrap"
-                    style="min-width: 140px;"
+            <div v-else>
+              <div
+                v-if="resultRowsLimited"
+                class="sticky top-0 z-30 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs font-semibold text-amber-200"
+              >
+                Showing first {{ result.rows.length.toLocaleString() }} rows
+                <span v-if="resultTotalRows !== null">
+                  of {{ resultTotalRows.toLocaleString() }}
+                </span>. Add a LIMIT/OFFSET or export the source table for the full dataset.
+              </div>
+              <table class="border-collapse" style="min-width: 100%;">
+                <thead>
+                  <tr>
+                    <th
+                      v-for="col in result.columns"
+                      :key="col.name"
+                      class="sticky z-20 bg-background backdrop-blur-md px-4 py-3 border-b border-r last:border-r-0 text-left whitespace-nowrap"
+                      :class="resultRowsLimited ? 'top-[33px]' : 'top-0'"
+                      style="min-width: 140px;"
+                    >
+                      <div class="text-xs font-semibold font-mono tracking-normal text-foreground">{{ col.name }}</div>
+                      <div class="text-[9px] font-medium font-mono tracking-normal text-muted-foreground opacity-70">{{ col.type_name }}</div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-if="resultPaddingTop > 0">
+                    <td :colspan="result.columns.length" :style="{ height: resultPaddingTop + 'px', padding: 0, border: 'none' }" />
+                  </tr>
+                  <tr
+                    v-for="vRow in virtualResultRows"
+                    :key="vRow.index"
+                    class="hover:bg-primary/5 transition-colors"
+                    :class="vRow.index % 2 === 0 ? 'bg-background/30' : 'bg-transparent'"
                   >
-                    <div class="text-xs font-semibold font-mono tracking-normal text-foreground">{{ col.name }}</div>
-                    <div class="text-[9px] font-medium font-mono tracking-normal text-muted-foreground opacity-70">{{ col.type_name }}</div>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-if="resultPaddingTop > 0">
-                  <td :colspan="result.columns.length" :style="{ height: resultPaddingTop + 'px', padding: 0, border: 'none' }" />
-                </tr>
-                <tr
-                  v-for="vRow in virtualResultRows"
-                  :key="vRow.index"
-                  class="hover:bg-primary/5 transition-colors"
-                  :class="vRow.index % 2 === 0 ? 'bg-background/30' : 'bg-transparent'"
-                >
-                  <td
-                    v-for="col in result.columns"
-                    :key="col.name"
-                    class="px-4 py-2.5 text-sm border-b border-r last:border-r-0"
-                    style="max-width: 320px;"
-                  >
-                    <span v-if="result.rows[vRow.index][col.name] === null" class="text-[10px] italic font-normal uppercase tracking-widest text-muted-foreground/30">NULL</span>
-                    <span v-else class="font-medium text-foreground/80 truncate block">{{ result.rows[vRow.index][col.name] }}</span>
-                  </td>
-                </tr>
-                <tr v-if="resultPaddingBottom > 0">
-                  <td :colspan="result.columns.length" :style="{ height: resultPaddingBottom + 'px', padding: 0, border: 'none' }" />
-                </tr>
-              </tbody>
-            </table>
+                    <td
+                      v-for="col in result.columns"
+                      :key="col.name"
+                      class="px-4 py-2.5 text-sm border-b border-r last:border-r-0"
+                      style="max-width: 320px;"
+                    >
+                      <span v-if="result.rows[vRow.index][col.name] === null" class="text-[10px] italic font-normal uppercase tracking-widest text-muted-foreground/30">NULL</span>
+                      <span v-else class="font-medium text-foreground/80 truncate block">{{ result.rows[vRow.index][col.name] }}</span>
+                    </td>
+                  </tr>
+                  <tr v-if="resultPaddingBottom > 0">
+                    <td :colspan="result.columns.length" :style="{ height: resultPaddingBottom + 'px', padding: 0, border: 'none' }" />
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </template>
 
           <!-- Empty state -->
@@ -927,7 +957,12 @@ watch(showDbDropdown, (val) => {
         <!-- Result count footer -->
         <div v-if="result && result.is_select && result.rows_affected > 0" class="h-9 border-t flex items-center justify-between px-4 bg-background shrink-0">
           <span class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-            {{ result.rows_affected }} {{ result.rows_affected === 1 ? 'row' : 'rows' }}
+            <template v-if="resultRowsLimited">
+              Showing {{ result.rows.length.toLocaleString() }} of {{ result.rows_affected.toLocaleString() }} rows
+            </template>
+            <template v-else>
+              {{ result.rows_affected }} {{ result.rows_affected === 1 ? 'row' : 'rows' }}
+            </template>
           </span>
           <span v-if="executionTime !== null" class="text-[11px] font-bold text-muted-foreground">
             {{ formatDuration(executionTime) }}
