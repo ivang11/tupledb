@@ -11,7 +11,9 @@
     "preview": "vite preview",
     "dev:app": "node node_modules/@tauri-apps/cli/tauri.js dev",
     "build:app": "NO_STRIP=true node node_modules/@tauri-apps/cli/tauri.js build",
+    "build:app:ci": "node node_modules/@tauri-apps/cli/tauri.js build",
     "build:app:signed": "node scripts/build-signed-release.mjs",
+    "build:app:signed:ci": "TAURI_BUILD_SCRIPT=build:app:ci node scripts/build-signed-release.mjs",
     "release:github": "node scripts/publish-github-release.mjs",
     "version:set": "node scripts/set-version.mjs"
   },

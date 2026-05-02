@@ -64,6 +64,10 @@ Si la clave esta en otro sitio, puedes seguir usando
 `TAURI_SIGNING_PRIVATE_KEY_PATH` para indicarle al script otra ruta. El script
 lee el archivo y pasa el contenido a Tauri con `TAURI_SIGNING_PRIVATE_KEY`.
 
+En local, este comando usa `NO_STRIP=true` para evitar problemas de
+`linuxdeploy` en CachyOS/Arch. En GitHub Actions se usa
+`build:app:signed:ci`, que compila sin `NO_STRIP=true` en Ubuntu.
+
 No subas nunca la clave privada al repo ni a un release publico. En GitHub
 Actions debe guardarse como secret.
 
@@ -280,7 +284,7 @@ Cuando subes un tag `v*`, GitHub Actions:
 
 1. Instala dependencias.
 2. Comprueba que el tag coincide con la version de `package.json`.
-3. Compila la AppImage firmada.
+3. Compila la AppImage firmada en modo CI, sin `NO_STRIP=true`.
 4. Genera `latest.json`.
 5. Publica o actualiza la GitHub Release.
 

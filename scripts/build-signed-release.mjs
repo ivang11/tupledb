@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process'
 const defaultKeyPath = join(homedir(), '.config/db-viewer/updater.key')
 const keyPath = process.env.TAURI_SIGNING_PRIVATE_KEY_PATH || defaultKeyPath
 const password = process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? ''
+const buildScript = process.env.TAURI_BUILD_SCRIPT || 'build:app'
 
 if (!existsSync(keyPath) && !process.env.TAURI_SIGNING_PRIVATE_KEY) {
   console.error(`Error: updater signing key not found at ${keyPath}`)
@@ -26,7 +27,7 @@ const env = {
 }
 delete env.TAURI_SIGNING_PRIVATE_KEY_PATH
 
-const result = spawnSync('npm', ['run', 'build:app'], {
+const result = spawnSync('npm', ['run', buildScript], {
   env,
   stdio: 'inherit',
 })
