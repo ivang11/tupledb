@@ -315,10 +315,15 @@ npm run version:set -- 0.6.8
 git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json
 git commit -m "Release 0.6.8"
 git tag v0.6.8
-git push origin main --tags
+git push origin main
+git push origin v0.6.8
 ```
 
 Despues mira el progreso en **Actions** dentro de GitHub.
+
+Evita `git push origin main --tags` para releases. Si tienes varios tags locales
+sin subir, GitHub puede recibir muchos tags de golpe y no disparar el workflow de
+release para ellos.
 
 ## Test manual completo
 
