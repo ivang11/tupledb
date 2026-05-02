@@ -12,8 +12,8 @@ defineProps<{
       <TableIcon class="size-10 text-muted-foreground/30" />
     </div>
     <h2 class="text-2xl font-bold tracking-tight mb-3">Table Explorer</h2>
-    <p class="text-muted-foreground max-w-sm mb-8 leading-relaxed">
-      {{ hasConnections ? 'Expand a database in the sidebar and select a table to browse.' : 'Connect to a database from the sidebar to get started.' }}
+    <p v-if="hasConnections" class="text-muted-foreground max-w-sm mb-8 leading-relaxed">
+      Expand a database in the sidebar and select a table to browse.
     </p>
   </div>
 </template>

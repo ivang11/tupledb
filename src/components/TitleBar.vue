@@ -1,16 +1,32 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { MinusIcon, SquareIcon, XIcon, KeyboardIcon, PanelLeftOpenIcon, PanelLeftCloseIcon } from 'lucide-vue-next'
+import {
+  DownloadIcon,
+  KeyboardIcon,
+  LoaderCircleIcon,
+  MinusIcon,
+  PanelLeftCloseIcon,
+  PanelLeftOpenIcon,
+  SquareIcon,
+  XIcon,
+} from 'lucide-vue-next'
 import { useSidebarState } from '@/composables/useSidebarState'
 import { useKeybindings, formatKeybinding } from '@/composables/useKeybindings'
+import { useUpdater } from '@/composables/useUpdater'
 
 const emit = defineEmits<{ 'open-keybindings': [] }>()
 
 const win = getCurrentWindow()
 const { sidebarVisible } = useSidebarState()
 const { getBinding } = useKeybindings()
+const { checkForUpdates, isChecking, isInstalling } = useUpdater()
 const toggleSidebarKey = computed(() => formatKeybinding(getBinding('toggleSidebar')))
+const updaterTitle = computed(() => {
+  if (isInstalling.value) return 'Installing update'
+  if (isChecking.value) return 'Checking for updates'
+  return 'Check for updates'
+})
 </script>
 
 <template>
@@ -41,6 +57,16 @@ const toggleSidebarKey = computed(() => formatKeybinding(getBinding('toggleSideb
 
     <!-- Window controls -->
     <div class="flex items-center gap-0.5">
+      <button
+        class="flex size-6 items-center justify-center rounded hover:bg-muted/60 transition-colors text-muted-foreground/50 hover:text-muted-foreground"
+        :class="{ 'pointer-events-none opacity-70': isChecking || isInstalling }"
+        :title="updaterTitle"
+        :disabled="isChecking || isInstalling"
+        @click="checkForUpdates"
+      >
+        <LoaderCircleIcon v-if="isChecking || isInstalling" class="size-3 animate-spin" />
+        <DownloadIcon v-else class="size-3" />
+      </button>
       <button
         class="flex size-6 items-center justify-center rounded hover:bg-muted/60 transition-colors text-muted-foreground/50 hover:text-muted-foreground"
         title="Keyboard shortcuts"

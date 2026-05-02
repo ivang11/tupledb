@@ -1,6 +1,6 @@
 {
   "productName": "db-viewer",
-  "version": "0.6.2",
+  "version": "0.6.8",
   "identifier": "com.db-viewer.app",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -28,7 +28,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["appimage"],
+    "createUpdaterArtifacts": true,
+    "targets": [
+      "appimage"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -36,5 +39,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZGQThFRTBDRUI0OTMyMUUKUldRZU1rbnJETzZvLzhNY3dkZU1XUGlONVZqRGhNUWxoelFyZElwb2YrSUYyS05mTUxsNnJ2MWcK",
+      "endpoints": [
+        "https://github.com/IvanG11/db-viewer/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

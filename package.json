@@ -1,7 +1,7 @@
 {
   "name": "db-viewer",
   "private": true,
-  "version": "0.6.2",
+  "version": "0.6.8",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,10 @@
     "test:component": "vitest run",
     "preview": "vite preview",
     "dev:app": "node node_modules/@tauri-apps/cli/tauri.js dev",
-    "build:app": "NO_STRIP=true node node_modules/@tauri-apps/cli/tauri.js build"
+    "build:app": "NO_STRIP=true node node_modules/@tauri-apps/cli/tauri.js build",
+    "build:app:signed": "node scripts/build-signed-release.mjs",
+    "release:github": "node scripts/publish-github-release.mjs",
+    "version:set": "node scripts/set-version.mjs"
   },
   "dependencies": {
     "@codemirror/lang-sql": "^6.10.0",
@@ -21,6 +24,8 @@
     "@tauri-apps/plugin-fs": "^2.2.0",
     "@tauri-apps/plugin-notification": "^2.2.1",
     "@tauri-apps/plugin-opener": "^2.2.3",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "@vueuse/core": "^12.5.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

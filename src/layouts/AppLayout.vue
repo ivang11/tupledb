@@ -1,11 +1,18 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import TitleBar from '@/components/TitleBar.vue'
 import StatusBar from '@/components/StatusBar.vue'
 import ToastContainer from '@/components/ToastContainer.vue'
 import KeybindingsDialog from '@/components/dialogs/KeybindingsDialog.vue'
+import UpdaterDialog from '@/components/dialogs/UpdaterDialog.vue'
+import { useUpdater } from '@/composables/useUpdater'
 
 const showKeybindings = ref(false)
+const { checkForUpdates } = useUpdater()
+
+onMounted(() => {
+  void checkForUpdates({ silent: true })
+})
 </script>
 
 <template>
@@ -18,6 +25,7 @@ const showKeybindings = ref(false)
 
     <StatusBar />
     <KeybindingsDialog v-model:open="showKeybindings" />
+    <UpdaterDialog />
     <ToastContainer />
   </div>
 </template>

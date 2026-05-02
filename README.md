@@ -56,6 +56,15 @@ Build de la app Tauri:
 npm run build:app
 ```
 
+## Releases y updater
+
+La app usa el updater de Tauri para descargar nuevas versiones desde GitHub
+Releases.
+
+Guia paso a paso:
+
+- [docs/UPDATER_RELEASE.md](./docs/UPDATER_RELEASE.md)
+
 ## Tests
 
 Unit tests Rust:
