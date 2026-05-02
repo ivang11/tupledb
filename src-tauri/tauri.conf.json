@@ -1,6 +1,6 @@
 {
   "productName": "db-viewer",
-  "version": "0.6.9",
+  "version": "0.6.11",
   "identifier": "com.db-viewer.app",
   "build": {
     "beforeDevCommand": "npm run dev",
