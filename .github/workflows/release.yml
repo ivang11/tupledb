@@ -10,8 +10,8 @@ permissions:
   contents: write
 
 jobs:
-  release-linux:
-    name: Build and publish Linux release
+  build-linux:
+    name: Build Linux x86_64
     runs-on: ubuntu-22.04
 
     steps:
@@ -58,11 +58,103 @@ jobs:
 
       - name: Build signed AppImage
         env:
+          TAURI_BUILD_SCRIPT: tauri:build:linux
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: npm run build:app:signed:ci
+        run: npm run release:build
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-linux-x86_64
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
+
+  build-macos:
+    name: Build macOS ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-13
+          - arch: aarch64
+            runner: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Check tag matches package version
+        if: github.event_name == 'push'
+        run: |
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PACKAGE_VERSION" != "$TAG_VERSION" ]; then
+            echo "Tag v$TAG_VERSION does not match package.json version $PACKAGE_VERSION"
+            exit 1
+          fi
+
+      - name: Build signed macOS bundle
+        env:
+          TAURI_BUILD_SCRIPT: tauri:build:macos
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run release:build
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-macos-${{ matrix.arch }}
+          if-no-files-found: error
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
+
+  publish:
+    name: Publish GitHub release
+    runs-on: ubuntu-22.04
+    needs:
+      - build-linux
+      - build-macos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: release-artifacts
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: npm run release:github
+        run: |
+          npm run release:publish -- \
+            --artifacts-dir release-artifacts \
+            --require-platform linux-x86_64 \
+            --require-platform darwin-x86_64 \
+            --require-platform darwin-aarch64

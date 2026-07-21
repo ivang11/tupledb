@@ -3,6 +3,7 @@ name = "tupledb"
 version = "0.7.0"
 description = "A secure MySQL client built with Tauri and Vue"
 authors = ["Ivan"]
+license = "MIT"
 edition = "2021"
 
 [lib]

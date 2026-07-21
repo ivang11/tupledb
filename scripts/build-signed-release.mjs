@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process'
 const defaultKeyPath = join(homedir(), '.config/tupledb/updater.key')
 const keyPath = process.env.TAURI_SIGNING_PRIVATE_KEY_PATH || defaultKeyPath
 const password = process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? ''
-const buildScript = process.env.TAURI_BUILD_SCRIPT || 'build:app:ci'
+const buildScript = process.env.TAURI_BUILD_SCRIPT || 'tauri:build:ci'
 
 if (!existsSync(keyPath) && !process.env.TAURI_SIGNING_PRIVATE_KEY) {
   console.error(`Error: updater signing key not found at ${keyPath}`)

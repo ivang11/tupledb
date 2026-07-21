@@ -1,7 +1,7 @@
 {
   "productName": "TupleDB",
   "version": "0.7.0",
-  "identifier": "tupledb",
+  "identifier": "com.tupledb.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:1440",
@@ -41,7 +41,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZGQThFRTBDRUI0OTMyMUUKUldRZU1rbnJETzZvLzhNY3dkZU1XUGlONVZqRGhNUWxoelFyZElwb2YrSUYyS05mTUxsNnJ2MWcK",
       "endpoints": [
-                "https://github.com/ivang11/tupledb/releases/latest/download/latest.json"
+        "https://github.com/ivang11/tupledb/releases/latest/download/latest.json"
       ]
     }
   }
