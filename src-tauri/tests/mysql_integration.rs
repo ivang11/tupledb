@@ -1,23 +1,23 @@
 use app_lib::driver::{DatabaseDriver, KeysetPage, RowChange, RowDeletion, TableChange};
 use app_lib::filters::{FilterRow, FilterSet, Operator};
 use app_lib::mysql::{export_table_file, MySqlDriver};
-use app_lib::schema::{export_database_file, import_sql_file};
+use app_lib::schema::{export_database_file, import_sql_file, ExportOptions};
 use serde_json::{json, Value};
 use sqlx::{MySqlPool, Row};
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
 async fn test_pool() -> MySqlPool {
-    let url = std::env::var("DB_VIEWER_TEST_MYSQL_URL").expect(
-        "Set DB_VIEWER_TEST_MYSQL_URL, for example mysql://root:password@127.0.0.1:3306/mysql",
+    let url = std::env::var("TUPLEDB_TEST_MYSQL_URL").expect(
+        "Set TUPLEDB_TEST_MYSQL_URL, for example mysql://root:password@127.0.0.1:3306/mysql",
     );
     MySqlPool::connect(&url)
         .await
-        .expect("connect to DB_VIEWER_TEST_MYSQL_URL")
+        .expect("connect to TUPLEDB_TEST_MYSQL_URL")
 }
 
 async fn setup_database(pool: &MySqlPool) -> String {
-    let db = format!("db_viewer_it_{}", Uuid::new_v4().simple());
+    let db = format!("tupledb_it_{}", Uuid::new_v4().simple());
     sqlx::query(&format!("CREATE DATABASE `{}`", db))
         .execute(pool)
         .await
@@ -67,7 +67,7 @@ fn object_at(rows: &[Value], index: usize) -> &serde_json::Map<String, Value> {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn get_table_data_preserves_null_empty_and_common_types() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -107,7 +107,7 @@ async fn get_table_data_preserves_null_empty_and_common_types() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn filters_and_sort_are_applied_by_driver() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -151,7 +151,7 @@ async fn filters_and_sort_are_applied_by_driver() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn keyset_pagination_fetches_next_page_after_cursor() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -201,7 +201,7 @@ async fn keyset_pagination_fetches_next_page_after_cursor() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn views_are_listed_as_views_and_readable() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -244,7 +244,7 @@ async fn views_are_listed_as_views_and_readable() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn get_table_structure_marks_primary_key_and_nullable_columns() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -278,7 +278,7 @@ async fn get_table_structure_marks_primary_key_and_nullable_columns() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn import_session_executes_representative_dump_in_batches() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -345,7 +345,7 @@ async fn import_session_executes_representative_dump_in_batches() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn import_sql_file_runs_dump_and_reports_metrics() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -428,7 +428,7 @@ async fn import_sql_file_runs_dump_and_reports_metrics() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn export_table_file_writes_csv_json_sql_and_sql_can_be_reimported() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -561,7 +561,7 @@ async fn export_table_file_writes_csv_json_sql_and_sql_can_be_reimported() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn export_database_file_writes_full_dump_and_sql_can_be_reimported() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -617,9 +617,12 @@ async fn export_database_file_writes_full_dump_and_sql_can_be_reimported() {
             .expect("temp path should be utf-8")
             .to_string(),
         None,
+        "sql",
+        ExportOptions::default(),
         &move |progress| {
             progress_for_cb.lock().unwrap().push(progress.status);
         },
+        &|| false,
     )
     .await
     .expect("export database file");
@@ -694,12 +697,12 @@ async fn export_database_file_writes_full_dump_and_sql_can_be_reimported() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn destructive_operations_handle_fk_checks_and_unusual_names() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
     let driver = MySqlDriver::new(pool.clone(), false);
-    let dropped_db = format!("db_viewer_drop_{}", Uuid::new_v4().simple());
+    let dropped_db = format!("tupledb_drop_{}", Uuid::new_v4().simple());
 
     sqlx::query(&format!(
         "CREATE TABLE `{}`.`parent table` (id INT PRIMARY KEY)",
@@ -772,7 +775,7 @@ async fn destructive_operations_handle_fk_checks_and_unusual_names() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn insert_row_and_apply_table_changes_preserve_edit_semantics() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -893,7 +896,7 @@ async fn insert_row_and_apply_table_changes_preserve_edit_semantics() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn rare_mysql_types_are_parsed_to_stable_json_values() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -969,7 +972,7 @@ async fn rare_mysql_types_are_parsed_to_stable_json_values() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn execute_query_streams_select_results_in_chunks() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -1020,13 +1023,19 @@ async fn execute_query_streams_select_results_in_chunks() {
     assert_eq!(result.rows_affected, 1205);
     assert!(result.rows.is_empty());
     assert_eq!(*chunk_sizes.lock().unwrap(), vec![500, 500, 205]);
-    let columns = first_chunk_columns.lock().unwrap();
-    let columns = columns
-        .as_ref()
-        .expect("first chunk should include columns");
+    let column_names = {
+        let columns = first_chunk_columns.lock().unwrap();
+        let columns = columns
+            .as_ref()
+            .expect("first chunk should include columns");
+        columns
+            .iter()
+            .map(|c| c.name.clone())
+            .collect::<Vec<_>>()
+    };
     assert_eq!(
-        columns.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(),
-        vec!["id", "label"]
+        column_names,
+        vec!["id".to_string(), "label".to_string()]
     );
     assert!(driver.get_thread_id_for_query("streaming-test").is_none());
 
@@ -1034,7 +1043,7 @@ async fn execute_query_streams_select_results_in_chunks() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn cancel_query_kills_running_select_and_cleans_tracking() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
@@ -1081,7 +1090,7 @@ async fn cancel_query_kills_running_select_and_cleans_tracking() {
 }
 
 #[tokio::test]
-#[ignore = "requires DB_VIEWER_TEST_MYSQL_URL pointing to a MySQL server"]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn abort_import_session_kills_running_batch_and_cleans_tracking() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;

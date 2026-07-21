@@ -1,6 +1,7 @@
 import { ref, computed, onMounted, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { downloadDir } from "@tauri-apps/api/path";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { v4 as uuidv4 } from "uuid";
 import { useConnectionStore } from "@/stores/connections";
@@ -54,11 +55,11 @@ export function useSidebarManager(ctx: SidebarContext) {
   }
   const {
     panes,
+    activePaneId,
     getPane,
     getPaneTab,
     switchToTab,
     closeTab,
-    refreshActiveTab,
     loadTableData,
   } = ctx;
 
@@ -87,15 +88,40 @@ export function useSidebarManager(ctx: SidebarContext) {
   });
 
   async function connectSaved(conn: any) {
+    const existing = store.openConnections[conn.id];
+    if (existing) {
+      existing.selectedDatabase =
+        existing.selectedDatabase ??
+        existing.openedDatabases?.[0] ??
+        existing.databases[0] ??
+        null;
+      expandedConnections.value.add(conn.id);
+      selectedSidebarConnectionId.value = conn.id;
+      return true;
+    }
+
     connectingId.value = conn.id;
     try {
       await store.connect(conn);
       expandedConnections.value.add(conn.id);
       selectedSidebarConnectionId.value = conn.id;
+      return true;
     } catch (e: any) {
       toastError('Failed to connect', String(e));
+      return false;
     } finally {
       connectingId.value = null;
+    }
+  }
+
+  async function selectDatabase(connectionId: string, database: string) {
+    try {
+      await store.selectDatabase(connectionId, database);
+      expandedDatabases.value.add(dbKey(connectionId, database));
+      selectedSidebarConnectionId.value = connectionId;
+      clearTableSelection();
+    } catch (e: any) {
+      toastError('Failed to select database', String(e));
     }
   }
 
@@ -157,6 +183,7 @@ export function useSidebarManager(ctx: SidebarContext) {
         name: databaseName,
       });
       await store.fetchDatabasesForConnection(connectionId);
+      await store.selectDatabase(connectionId, databaseName);
       expandedDatabases.value.add(dbKey(connectionId, databaseName));
       toastSuccess("Database created", `Created \`${databaseName}\`.`);
       newDbName.value = "";
@@ -229,56 +256,66 @@ export function useSidebarManager(ctx: SidebarContext) {
 
   // ── Import / Export ─────────────────────────────────────────────────────────
 
-  async function importSql(connectionId: string, database: string) {
-    type ImportMetrics = {
-      parsed_statements: number;
-      compacted_statements: number;
-      executed_batches: number;
-      sql_blocks: number;
-      read_ms: number;
-      process_ms: number;
-      execute_ms: number;
-      total_ms: number;
-    };
+  interface ExportOptions {
+    dropIfExists: boolean;
+    includeViews: boolean;
+    useTransactions: boolean;
+    compressGzip: boolean;
+  }
 
-    const formatDuration = (ms: number) => {
-      if (ms < 1000) return `${ms}ms`;
-      const seconds = ms / 1000;
-      if (seconds < 60) return `${seconds.toFixed(1)}s`;
-      const minutes = Math.floor(seconds / 60);
-      const remainingSeconds = Math.round(seconds % 60);
-      return `${minutes}m ${remainingSeconds}s`;
-    };
+  interface ExportStartPayload {
+    format: string;
+    options: ExportOptions;
+  }
 
-    const formatImportSummary = (metrics: ImportMetrics) => {
-      const parts = [
-        `read ${formatDuration(metrics.read_ms)}`,
-        `process ${formatDuration(metrics.process_ms)}`,
-        `execute ${formatDuration(metrics.execute_ms)}`,
-        `${metrics.executed_batches.toLocaleString()} batches`,
-      ];
+  type ImportMetrics = {
+    parsed_statements: number;
+    compacted_statements: number;
+    executed_batches: number;
+    sql_blocks: number;
+    read_ms: number;
+    process_ms: number;
+    execute_ms: number;
+    total_ms: number;
+  };
 
-      if (metrics.compacted_statements > 0) {
-        parts.push(
-          `${metrics.compacted_statements.toLocaleString()} compacted into ${metrics.sql_blocks.toLocaleString()} SQL blocks`,
-        );
-      }
+  function formatImportDuration(ms: number) {
+    if (ms < 1000) return `${ms}ms`;
+    const seconds = ms / 1000;
+    if (seconds < 60) return `${seconds.toFixed(1)}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.round(seconds % 60);
+    return `${minutes}m ${remainingSeconds}s`;
+  }
 
-      return parts.join(" · ");
-    };
+  function formatImportSummary(metrics: ImportMetrics) {
+    const parts = [
+      `read ${formatImportDuration(metrics.read_ms)}`,
+      `process ${formatImportDuration(metrics.process_ms)}`,
+      `execute ${formatImportDuration(metrics.execute_ms)}`,
+      `${metrics.executed_batches.toLocaleString()} batches`,
+    ];
+    if (metrics.compacted_statements > 0) {
+      parts.push(
+        `${metrics.compacted_statements.toLocaleString()} compacted into ${metrics.sql_blocks.toLocaleString()} SQL blocks`,
+      );
+    }
+    return parts.join(" · ");
+  }
 
-    const nowTimestamp = () =>
-      new Date().toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-      });
-
-    const path = await open({
-      filters: [{ name: "SQL", extensions: ["sql"] }],
-      multiple: false,
+  function nowTimestamp() {
+    return new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
     });
-    if (!path) return;
+  }
+
+  async function runImportFromPath(
+    connectionId: string,
+    database: string,
+    path: string,
+  ) {
     const importId = crypto.randomUUID();
     progressStore.isImporting = true;
     progressStore.importConnectionId = connectionId;
@@ -301,15 +338,22 @@ export function useSidebarManager(ctx: SidebarContext) {
         metrics: ImportMetrics;
       }>(
         "import_sql",
-        { connectionId, database, path, importId },
+        {
+          connectionId,
+          database,
+          path,
+          importId,
+        },
       );
       await store.fetchTablesForConnection(connectionId, database);
       const tab = getPaneTab(getPane());
       if (tab && tab.connectionId === connectionId && tab.database === database)
         await loadTableData(tab.tableName, connectionId, database);
-      const toastSummary = `Completed in ${formatDuration(result.metrics.total_ms)}. ${result.executed.toLocaleString()} statements imported.`;
+      const toastSummary = `Completed in ${formatImportDuration(result.metrics.total_ms)}. ${result.executed.toLocaleString()} statements imported.`;
       const detailedSummary = `${toastSummary} ${formatImportSummary(result.metrics)}.`;
       recordQueryLogEntry({
+        connection_id: connectionId,
+        database,
         sql: `-- IMPORT SQL INTO \`${database}\`\n${detailedSummary}`,
         timestamp: nowTimestamp(),
         duration_ms: result.metrics.total_ms,
@@ -330,6 +374,8 @@ export function useSidebarManager(ctx: SidebarContext) {
       const msg = String(e);
       if (msg.includes('Import cancelled')) {
         recordQueryLogEntry({
+          connection_id: connectionId,
+          database,
           sql: `-- IMPORT SQL INTO \`${database}\`\nImport cancelled by user.`,
           timestamp: nowTimestamp(),
           duration_ms: 0,
@@ -350,6 +396,34 @@ export function useSidebarManager(ctx: SidebarContext) {
       progressStore.isCancellingImport = false;
       if (unlisten) unlisten();
     }
+  }
+
+  // ── Import modal flow ─────────────────────────────────────────────────────
+  const showImportDialog = ref(false);
+  const importContext = ref<{ connectionId: string; database: string } | null>(null);
+
+  function openImportSelector(connectionId: string, database: string) {
+    importContext.value = { connectionId, database };
+    showImportDialog.value = true;
+  }
+
+  async function confirmImportFromBrowse() {
+    if (!importContext.value) return;
+    const { connectionId, database } = importContext.value;
+    showImportDialog.value = false;
+    const path = await open({
+      filters: [{ name: "SQL", extensions: ["sql", "gz"] }],
+      multiple: false,
+    });
+    if (!path) return;
+    await runImportFromPath(connectionId, database, path as string);
+  }
+
+  async function confirmImportFromFilePath(filePath: string) {
+    if (!importContext.value) return;
+    const { connectionId, database } = importContext.value;
+    showImportDialog.value = false;
+    await runImportFromPath(connectionId, database, filePath);
   }
 
   const showTableSelector = ref(false);
@@ -391,133 +465,155 @@ export function useSidebarManager(ctx: SidebarContext) {
     ).map((t: any) => t.name);
   }
 
-  async function startExport() {
+  async function startExport(payload: ExportStartPayload) {
     if (!exportContext.value) return;
     showTableSelector.value = false;
     if (selectedExportTables.value.length === 0) return;
     const { connectionId, database } = exportContext.value;
+    const selectedTables = payload.options.includeViews
+      ? selectedExportTables.value
+      : selectedExportTables.value.filter((name) => {
+          const table = exportContextTables.value.find((t: any) => t.name === name);
+          return !String(table?.table_type ?? "").toUpperCase().includes("VIEW");
+        });
+    if (selectedTables.length === 0) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const baseExt = payload.format === "csv" ? "csv" : payload.format === "json" ? "json" : "sql";
+    const ext = payload.options.compressGzip ? `${baseExt}.gz` : baseExt;
+    const filterName = payload.options.compressGzip
+      ? `${baseExt.toUpperCase()} (gzip)`
+      : baseExt.toUpperCase();
+    const filterExts = payload.options.compressGzip ? ["gz", ext] : [baseExt];
+    const downloadsPath = await downloadDir().catch(() => null);
+    const defaultPath = downloadsPath
+      ? `${downloadsPath}/${database}-${today}.${ext}`
+      : `${database}-${today}.${ext}`;
     const path = await save({
-      defaultPath: `${database}_${currentExportMode.value}.sql`,
-      filters: [{ name: "SQL", extensions: ["sql"] }],
+      defaultPath,
+      filters: [{ name: filterName, extensions: filterExts }],
     });
     if (!path) return;
     progressStore.isExporting = true;
     progressStore.exportExpanded = true;
-    progressStore.exportProgress = {
-      current: 0,
-      total: 0,
-      status: "Initializing export...",
-    };
+    progressStore.exportProgress = { current: 0, total: 0, status: "" };
+    progressStore.exportTables = [...selectedTables];
+    progressStore.exportDoneCount = 0;
+    progressStore.exportStartTime = Date.now();
+    progressStore.exportConnectionId = connectionId;
+    progressStore.exportId = uuidv4();
+    progressStore.isCancellingExport = false;
     let unlisten: UnlistenFn | null = null;
     try {
+      let lastStatus = "";
       unlisten = await listen<{
         current: number;
         total: number;
         status: string;
       }>("export-progress", (event) => {
         progressStore.exportProgress = event.payload;
+        const s = event.payload.status;
+        if (s && s !== lastStatus) {
+          if (lastStatus) progressStore.exportDoneCount++;
+          lastStatus = s;
+        }
       });
+      const t0 = Date.now();
       const rows = await invoke<number>("export_database", {
         connectionId,
         database,
         mode: currentExportMode.value,
         path,
-        tables: selectedExportTables.value,
+        tables: selectedTables,
+        exportId: progressStore.exportId,
+        format: payload.format,
+        dropIfExists: payload.options.dropIfExists,
+        includeViews: payload.options.includeViews,
+        useTransactions: payload.options.useTransactions,
+        compressGzip: payload.options.compressGzip,
+      });
+      const durationMs = Date.now() - t0;
+      const tableCount = selectedTables.length;
+      const summary = `${rows.toLocaleString()} rows · ${tableCount} table${tableCount !== 1 ? 's' : ''} · ${formatImportDuration(durationMs)}`;
+      recordQueryLogEntry({
+        connection_id: connectionId,
+        database,
+        sql: `-- EXPORT \`${database}\` → ${path.split(/[\\/]/).pop()}\n-- ${summary}`,
+        timestamp: nowTimestamp(),
+        duration_ms: durationMs,
+        error: null,
       });
       toastSuccess(
         'Export complete',
-        `${rows.toLocaleString()} rows from ${selectedExportTables.value.length} table${selectedExportTables.value.length !== 1 ? 's' : ''} exported.`,
+        summary,
       );
     } catch (e: any) {
+      recordQueryLogEntry({
+        connection_id: connectionId,
+        database,
+        sql: `-- EXPORT \`${database}\` failed`,
+        timestamp: nowTimestamp(),
+        duration_ms: 0,
+        error: String(e),
+      });
       toastError('Export failed', String(e));
     } finally {
       progressStore.isExporting = false;
+      progressStore.exportTables = [];
+      progressStore.exportDoneCount = 0;
+      progressStore.exportStartTime = null;
+      progressStore.exportConnectionId = null;
+      progressStore.exportId = null;
+      progressStore.isCancellingExport = false;
       if (unlisten) unlisten();
     }
   }
 
   // ── Table actions ───────────────────────────────────────────────────────────
 
-  const showTableActionDialog = ref(false);
-  const tableActionData = ref<{
-    type: "truncate" | "drop";
-    connectionId: string;
-    database: string;
-    tableName: string;
-  } | null>(null);
-  const isExecutingTableAction = ref(false);
-
-  function confirmSidebarTableAction(
+  async function stageTableAction(
     type: "truncate" | "drop",
     connectionId: string,
     database: string,
     tableName: string,
   ) {
-    tableActionData.value = { type, connectionId, database, tableName };
-    showTableActionDialog.value = true;
+    await loadTableData(tableName, connectionId, database);
+    const pane = getPane(activePaneId.value);
+    const tab = getPaneTab(pane);
+    if (
+      !tab ||
+      tab.connectionId !== connectionId ||
+      tab.database !== database ||
+      tab.tableName !== tableName
+    ) {
+      return;
+    }
+
+    tab.pendingChanges = {};
+    tab.pendingDeletions = {};
+    tab.pendingInserts = [];
+    tab.selectedRowPk = null;
+    tab.selectedRowPks = [];
+    tab.inlineEditColumn = null;
+    tab.pendingTruncate = type === "truncate";
+    tab.pendingDrop = type === "drop";
   }
 
-  async function executeTableAction(disableFk: boolean) {
-    if (!tableActionData.value) return;
-    const { type, connectionId, database, tableName } = tableActionData.value;
-    isExecutingTableAction.value = true;
+  async function stageSidebarTableAction(
+    type: "truncate" | "drop",
+    connectionId: string,
+    database: string,
+    tableName: string,
+  ) {
     try {
-      if (type === "drop") {
-        await invoke("drop_table", {
-          connectionId,
-          database,
-          table: tableName,
-          disableFkChecks: disableFk,
-        });
-        for (const pane of panes.value) {
-          const related = pane.tabs.filter(
-            (t) =>
-              t.type === "table" &&
-              (t as TableTab).tableName === tableName &&
-              (t as TableTab).database === database &&
-              t.connectionId === connectionId,
-          );
-          related.forEach((t) => closeTab(t.id, pane.id));
-        }
-        await store.fetchTablesForConnection(connectionId, database);
-      } else {
-        await invoke("truncate_table", {
-          connectionId,
-          database,
-          table: tableName,
-          disableFkChecks: disableFk,
-        });
-        for (const pane of panes.value) {
-          const tab = pane.tabs.find(
-            (t) =>
-              t.type === "table" &&
-              (t as TableTab).tableName === tableName &&
-              (t as TableTab).database === database &&
-              t.connectionId === connectionId,
-          ) as TableTab | undefined;
-          if (tab) {
-            tab.pendingTruncate = false;
-            tab.pendingChanges = {};
-            tab.pendingDeletions = {};
-            if (tab.id === pane.activeTabId) await refreshActiveTab(pane.id);
-          }
-        }
-      }
-      showTableActionDialog.value = false;
-      tableActionData.value = null;
+      await stageTableAction(type, connectionId, database, tableName);
     } catch (e: any) {
       toastError(`Failed to ${type} table`, String(e));
-    } finally {
-      isExecutingTableAction.value = false;
     }
   }
 
   // ── Multiple table selection ────────────────────────────────────────────────
 
   const selectedTables = ref<Set<string>>(new Set());
-  const showBulkTableActionDialog = ref(false);
-  const isExecutingBulkTableAction = ref(false);
-
   function tableSelectionKey(
     connectionId: string,
     database: string,
@@ -566,116 +662,58 @@ export function useSidebarManager(ctx: SidebarContext) {
   function selectTableRange(
     connectionId: string,
     database: string,
-    tableNames: string[],
+    tableName: string,
   ) {
+    const tables = filteredTables(connectionId, database).map((table: any) => table.name);
+    const firstKey = [...selectedTables.value][0];
+    const firstTableName = firstKey?.split(":")[2] ?? tableName;
+    const start = tables.indexOf(firstTableName);
+    const end = tables.indexOf(tableName);
+    const tableNames =
+      start >= 0 && end >= 0
+        ? tables.slice(Math.min(start, end), Math.max(start, end) + 1)
+        : [tableName];
+
+    const firstSelection = [...selectedTables.value][0];
+    if (firstSelection) {
+      const [existingConn, existingDb] = firstSelection.split(":");
+      if (existingConn !== connectionId || existingDb !== database) {
+        selectedTables.value.clear();
+      }
+    }
+
     for (const name of tableNames) {
       selectedTables.value.add(tableSelectionKey(connectionId, database, name));
     }
   }
 
-  async function executeBulkTableDeletion(disableFk: boolean) {
+  async function stageSelectedTableDeletion() {
     if (selectedTables.value.size === 0) return;
 
-    isExecutingBulkTableAction.value = true;
     try {
-      const groupedDeletes = new Map<string, string[]>();
-
       for (const key of selectedTables.value) {
         const [connectionId, database, tableName] = key.split(":");
-        const groupKey = `${connectionId}:${database}`;
-        const tables = groupedDeletes.get(groupKey) ?? [];
-        tables.push(tableName);
-        groupedDeletes.set(groupKey, tables);
-      }
-
-      for (const [groupKey, tableNames] of groupedDeletes) {
-        const [connectionId, database] = groupKey.split(":");
-        await invoke("drop_tables", {
-          connectionId,
-          database,
-          tables: tableNames,
-          disableFkChecks: disableFk,
-        });
-
-        for (const pane of panes.value) {
-          const related = pane.tabs.filter((t) => {
-            if (
-              t.type !== "table" ||
-              (t as TableTab).database !== database ||
-              t.connectionId !== connectionId
-            ) {
-              return false;
-            }
-
-            return tableNames.includes((t as TableTab).tableName);
-          });
-          related.forEach((t) => closeTab(t.id, pane.id));
-        }
-      }
-
-      for (const dbKey of groupedDeletes.keys()) {
-        const [connectionId, database] = dbKey.split(":");
-        await store.fetchTablesForConnection(connectionId, database);
+        await stageTableAction("drop", connectionId, database, tableName);
       }
 
       selectedTables.value.clear();
-      showBulkTableActionDialog.value = false;
-      // Note: showBulkDeleteDialog is handled in HomeView.vue
     } catch (e: any) {
       toastError('Failed to delete tables', String(e));
-    } finally {
-      isExecutingBulkTableAction.value = false;
     }
   }
 
-  async function executeBulkTableTruncation(disableFk: boolean) {
+  async function stageSelectedTableTruncation() {
     if (selectedTables.value.size === 0) return;
 
-    isExecutingBulkTableAction.value = true;
     try {
-      const toTruncate: Array<{
-        connectionId: string;
-        database: string;
-        table: string;
-      }> = [];
-
       for (const key of selectedTables.value) {
         const [connectionId, database, tableName] = key.split(":");
-        toTruncate.push({ connectionId, database, table: tableName });
-      }
-
-      // Execute all truncates
-      for (const item of toTruncate) {
-        await invoke("truncate_table", {
-          connectionId: item.connectionId,
-          database: item.database,
-          table: item.table,
-          disableFkChecks: disableFk,
-        });
-
-        // Reset pending changes for truncated tables
-        for (const pane of panes.value) {
-          const tab = pane.tabs.find(
-            (t) =>
-              t.type === "table" &&
-              (t as TableTab).tableName === item.table &&
-              (t as TableTab).database === item.database &&
-              t.connectionId === item.connectionId,
-          ) as TableTab | undefined;
-          if (tab) {
-            tab.pendingTruncate = false;
-            tab.pendingChanges = {};
-            tab.pendingDeletions = {};
-            if (tab.id === pane.activeTabId) await refreshActiveTab(pane.id);
-          }
-        }
+        await stageTableAction("truncate", connectionId, database, tableName);
       }
 
       selectedTables.value.clear();
     } catch (e: any) {
       toastError('Failed to truncate tables', String(e));
-    } finally {
-      isExecutingBulkTableAction.value = false;
     }
   }
 
@@ -859,8 +897,16 @@ export function useSidebarManager(ctx: SidebarContext) {
     databaseName: "",
   });
 
+  function closeSidebarContextMenus() {
+    sidebarContextMenu.value.show = false;
+    sidebarTableContextMenu.value.show = false;
+    sidebarDatabaseContextMenu.value.show = false;
+  }
+
   function openSidebarContextMenu(e: MouseEvent, conn: Connection) {
     e.preventDefault();
+    e.stopPropagation();
+    closeSidebarContextMenus();
     sidebarContextMenu.value = {
       show: true,
       x: e.clientX,
@@ -882,6 +928,7 @@ export function useSidebarManager(ctx: SidebarContext) {
   ) {
     e.preventDefault();
     e.stopPropagation();
+    closeSidebarContextMenus();
     sidebarTableContextMenu.value = {
       show: true,
       x: e.clientX,
@@ -905,6 +952,7 @@ export function useSidebarManager(ctx: SidebarContext) {
   ) {
     e.preventDefault();
     e.stopPropagation();
+    closeSidebarContextMenus();
     sidebarDatabaseContextMenu.value = {
       show: true,
       x: e.clientX,
@@ -936,6 +984,7 @@ export function useSidebarManager(ctx: SidebarContext) {
         password: "",
         database: "",
       },
+      allow_writes: true,
     };
   }
 
@@ -1039,6 +1088,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     closedConnections,
     filteredTables,
     connectSaved,
+    selectDatabase,
     toggleConnection,
     toggleDatabase,
     disconnectConn,
@@ -1051,25 +1101,23 @@ export function useSidebarManager(ctx: SidebarContext) {
     currentExportMode,
     exportContext,
     exportContextTables,
-    importSql,
+    showImportDialog,
+    importContext,
+    openImportSelector,
+    confirmImportFromBrowse,
+    confirmImportFromFilePath,
     openExportSelector,
     startExport,
     // Table actions
-    showTableActionDialog,
-    tableActionData,
-    isExecutingTableAction,
-    confirmSidebarTableAction,
-    executeTableAction,
+    stageSidebarTableAction,
     // Multiple table selection
     selectedTables,
-    showBulkTableActionDialog,
-    isExecutingBulkTableAction,
     isTableSelected,
     toggleTableSelection,
     selectTableRange,
     clearTableSelection,
-    executeBulkTableDeletion,
-    executeBulkTableTruncation,
+    stageSelectedTableDeletion,
+    stageSelectedTableTruncation,
     // Database actions
     showDatabaseActionDialog,
     databaseActionData,

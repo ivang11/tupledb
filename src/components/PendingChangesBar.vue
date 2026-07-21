@@ -1,28 +1,9 @@
-<script setup lang="ts">
-import { Button } from '@/components/ui/button'
-
-defineProps<{
-  pendingTruncate: boolean
-  pendingChangesCount: number
-  pendingDeletionsCount: number
-  disableFkChecks: boolean
-  isSaving: boolean
-}>()
-
-const emit = defineEmits<{
-  'update:disableFkChecks': [val: boolean]
-  'discard': []
-  'apply': []
-}>()
-</script>
-
 <template>
-  <div class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-6 bg-card border border-primary/20 shadow-2xl rounded-full px-6 py-3 animate-in fade-in slide-in-from-bottom-4 duration-300">
+  <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 bg-card border border-primary/20 shadow-2xl rounded-full px-5 py-2.5 animate-in fade-in slide-in-from-bottom-4 duration-300">
     <div class="flex items-center gap-3">
       <div class="size-2 rounded-full bg-amber-500 animate-pulse"></div>
-      <span class="text-xs font-bold uppercase tracking-widest text-foreground">
-        <template v-if="pendingTruncate">Entire Table marked for Truncate</template>
-        <template v-else>{{ pendingChangesCount }} Updates &amp; {{ pendingDeletionsCount }} Deletions Pending</template>
+      <span class="whitespace-nowrap text-xs font-bold uppercase tracking-wide text-foreground">
+        {{ pendingLabel }}
       </span>
     </div>
 
@@ -37,8 +18,8 @@ const emit = defineEmits<{
             @change="emit('update:disableFkChecks', ($event.target as HTMLInputElement).checked)"
             class="size-3.5 rounded border-input accent-primary"
           />
-          <span class="text-[10px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tight">
-            Disable FK Checks
+          <span class="whitespace-nowrap text-[10px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tight">
+            FK Checks
           </span>
         </label>
       </div>
@@ -49,3 +30,36 @@ const emit = defineEmits<{
     </div>
   </div>
 </template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { Button } from '@/components/ui/button'
+
+const props = defineProps<{
+  pendingTruncate: boolean
+  pendingDrop: boolean
+  pendingChangesCount: number
+  pendingDeletionsCount: number
+  pendingInsertionsCount: number
+  disableFkChecks: boolean
+  isSaving: boolean
+}>()
+
+const emit = defineEmits<{
+  'update:disableFkChecks': [val: boolean]
+  'discard': []
+  'apply': []
+}>()
+
+const pendingLabel = computed(() => {
+  if (props.pendingDrop) return 'Drop pending'
+  if (props.pendingTruncate) return 'Truncate pending'
+
+  const parts: string[] = []
+  if (props.pendingChangesCount > 0) parts.push(`${props.pendingChangesCount} update${props.pendingChangesCount === 1 ? '' : 's'}`)
+  if (props.pendingDeletionsCount > 0) parts.push(`${props.pendingDeletionsCount} delete${props.pendingDeletionsCount === 1 ? '' : 's'}`)
+  if (props.pendingInsertionsCount > 0) parts.push(`${props.pendingInsertionsCount} insert${props.pendingInsertionsCount === 1 ? '' : 's'}`)
+  return parts.length ? `Pending: ${parts.join(' · ')}` : 'Pending changes'
+})
+</script>
+

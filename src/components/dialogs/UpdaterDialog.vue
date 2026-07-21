@@ -1,62 +1,5 @@
-<script setup lang="ts">
-import { computed } from 'vue'
-import { DownloadIcon, LoaderCircleIcon, RotateCwIcon, SparklesIcon } from 'lucide-vue-next'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { useUpdater } from '@/composables/useUpdater'
-
-const {
-  availableUpdate,
-  dialogOpen,
-  dismissUpdate,
-  downloadedBytes,
-  downloadPercent,
-  formatBytes,
-  installUpdate,
-  isInstalling,
-  restartToUpdate,
-  status,
-  totalBytes,
-} = useUpdater()
-
-const title = computed(() => {
-  if (status.value === 'downloading') return 'Downloading update'
-  if (status.value === 'installing') return 'Installing update'
-  if (status.value === 'readyToRestart') return 'Update ready'
-  if (status.value === 'restarting') return 'Restarting DB Viewer'
-  return 'Update available'
-})
-
-const description = computed(() => {
-  if (status.value === 'downloading') return 'Keep DB Viewer open while the update is downloaded.'
-  if (status.value === 'installing') return 'The update is being prepared. This should only take a moment.'
-  if (status.value === 'readyToRestart') return 'Restart DB Viewer when you are ready to use the new version.'
-  if (status.value === 'restarting') return 'DB Viewer will reopen with the new version.'
-  return `DB Viewer ${availableUpdate.value?.version ?? ''} is ready to install.`
-})
-
-const progressLabel = computed(() => {
-  if (status.value === 'downloading' && totalBytes.value > 0) {
-    return `${formatBytes(downloadedBytes.value)} / ${formatBytes(totalBytes.value)}`
-  }
-
-  if (status.value === 'downloading') return formatBytes(downloadedBytes.value)
-  if (status.value === 'installing') return 'Preparing update'
-  if (status.value === 'readyToRestart') return 'Ready to restart'
-  if (status.value === 'restarting') return 'Restarting'
-  return 'Ready'
-})
-</script>
-
 <template>
-  <Dialog :open="dialogOpen" @update:open="(open) => !open && dismissUpdate()">
+  <Dialog :open="dialogOpen" @update:open="(open: boolean) => !open && dismissUpdate()">
     <DialogContent
       class="sm:max-w-md"
       :show-close-button="!isInstalling"
@@ -114,3 +57,60 @@ const progressLabel = computed(() => {
     </DialogContent>
   </Dialog>
 </template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { DownloadIcon, LoaderCircleIcon, RotateCwIcon, SparklesIcon } from 'lucide-vue-next'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { useUpdater } from '@/composables/useUpdater'
+
+const {
+  availableUpdate,
+  dialogOpen,
+  dismissUpdate,
+  downloadedBytes,
+  downloadPercent,
+  formatBytes,
+  installUpdate,
+  isInstalling,
+  restartToUpdate,
+  status,
+  totalBytes,
+} = useUpdater()
+
+const title = computed(() => {
+  if (status.value === 'downloading') return 'Downloading update'
+  if (status.value === 'installing') return 'Installing update'
+  if (status.value === 'readyToRestart') return 'Update ready'
+  if (status.value === 'restarting') return 'Restarting TupleDB'
+  return 'Update available'
+})
+
+const description = computed(() => {
+  if (status.value === 'downloading') return 'Keep TupleDB open while the update is downloaded.'
+  if (status.value === 'installing') return 'The update is being prepared. This should only take a moment.'
+  if (status.value === 'readyToRestart') return 'Restart TupleDB when you are ready to use the new version.'
+  if (status.value === 'restarting') return 'TupleDB will reopen with the new version.'
+  return `TupleDB ${availableUpdate.value?.version ?? ''} is ready to install.`
+})
+
+const progressLabel = computed(() => {
+  if (status.value === 'downloading' && totalBytes.value > 0) {
+    return `${formatBytes(downloadedBytes.value)} / ${formatBytes(totalBytes.value)}`
+  }
+
+  if (status.value === 'downloading') return formatBytes(downloadedBytes.value)
+  if (status.value === 'installing') return 'Preparing update'
+  if (status.value === 'readyToRestart') return 'Ready to restart'
+  if (status.value === 'restarting') return 'Restarting'
+  return 'Ready'
+})
+</script>

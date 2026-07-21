@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default permissions for the DB Viewer app",
+  "description": "Default permissions for the TupleDB app",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -20,6 +20,7 @@
     "core:window:allow-close",
     "core:window:allow-set-focus",
     "core:window:allow-start-dragging",
+    "core:window:allow-start-resize-dragging",
     "allow-get-connections",
     "allow-add-connection",
     "allow-remove-connection",
@@ -31,6 +32,7 @@
     "allow-get-table-structure",
     "allow-export-table",
     "allow-export-database",
+    "allow-cancel-export",
     "allow-import-sql",
     "allow-cancel-import",
     "allow-create-database",

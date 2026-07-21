@@ -20,18 +20,32 @@ pub struct AppState {
     pub active_sessions: RwLock<HashMap<Uuid, ActiveConnection>>,
     pub saved_queries: RwLock<HashMap<Uuid, SavedQuery>>,
     pub canceled_imports: RwLock<HashSet<String>>,
+    pub canceled_exports: RwLock<HashSet<String>>,
     pub app_handle: tauri::AppHandle,
     config_dir: PathBuf,
 }
 
 impl AppState {
     pub fn emit_query_log(&self, sql: &str, duration_ms: u64, error: Option<&str>) {
+        self.emit_query_log_context(None, None, sql, duration_ms, error);
+    }
+
+    pub fn emit_query_log_context(
+        &self,
+        connection_id: Option<Uuid>,
+        database: Option<&str>,
+        sql: &str,
+        duration_ms: u64,
+        error: Option<&str>,
+    ) {
         use serde_json::json;
         use tauri::Emitter;
         let now = chrono::Local::now();
         let _ = self.app_handle.emit(
             "query-log",
             json!({
+                "connection_id": connection_id.map(|id| id.to_string()),
+                "database": database,
                 "sql": sql,
                 "timestamp": now.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
                 "duration_ms": duration_ms,
@@ -76,6 +90,7 @@ impl AppState {
             active_sessions: RwLock::new(HashMap::new()),
             saved_queries: RwLock::new(saved_queries),
             canceled_imports: RwLock::new(HashSet::new()),
+            canceled_exports: RwLock::new(HashSet::new()),
             app_handle: app_handle.clone(),
             config_dir,
         }
@@ -124,5 +139,17 @@ impl AppState {
 
     pub fn is_import_canceled(&self, import_id: &str) -> bool {
         self.canceled_imports.read().contains(import_id)
+    }
+
+    pub fn request_export_cancel(&self, export_id: &str) {
+        self.canceled_exports.write().insert(export_id.to_string());
+    }
+
+    pub fn clear_export_cancel(&self, export_id: &str) {
+        self.canceled_exports.write().remove(export_id);
+    }
+
+    pub fn is_export_canceled(&self, export_id: &str) -> bool {
+        self.canceled_exports.read().contains(export_id)
     }
 }

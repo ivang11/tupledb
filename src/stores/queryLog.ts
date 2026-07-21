@@ -4,6 +4,8 @@ import { listen } from '@tauri-apps/api/event'
 
 export interface QueryLogEntry {
   id: number
+  connection_id?: string | null
+  database?: string | null
   sql: string
   timestamp: string
   duration_ms: number
@@ -28,6 +30,18 @@ export const useQueryLogStore = defineStore('queryLog', () => {
     entries.value = []
   }
 
+  function clearContext(connectionId?: string | null, database?: string | null) {
+    if (!connectionId) {
+      clear()
+      return
+    }
+    entries.value = entries.value.filter((entry) => {
+      if (entry.connection_id !== connectionId) return true
+      if (database !== undefined && (entry.database ?? null) !== database) return true
+      return false
+    })
+  }
+
   function toggle() {
     isOpen.value = !isOpen.value
   }
@@ -37,5 +51,5 @@ export const useQueryLogStore = defineStore('queryLog', () => {
     addEntry(event.payload)
   })
 
-  return { entries, isOpen, addEntry, clear, toggle }
+  return { entries, isOpen, addEntry, clear, clearContext, toggle }
 })

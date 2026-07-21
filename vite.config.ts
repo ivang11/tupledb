@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, URL } from 'node:url'
+import packageJson from './package.json'
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -9,6 +10,9 @@ export default defineConfig({
     vue(),
     tailwindcss(),
   ],
+  define: {
+    __APP_VERSION__: JSON.stringify(packageJson.version),
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
@@ -19,7 +23,7 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          'vendor-vue': ['vue', 'vue-router', 'pinia'],
+          'vendor-vue': ['vue', 'pinia'],
           'vendor-editor': ['codemirror', '@codemirror/lang-sql', 'sql-formatter'],
           'vendor-table': ['@tanstack/vue-table', '@tanstack/vue-virtual'],
           'vendor-ui': ['reka-ui', 'lucide-vue-next', '@vueuse/core'],

@@ -3,8 +3,11 @@ use crate::driver::{
 };
 use crate::state::AppState;
 use chrono::Local;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::sync::Arc;
@@ -184,15 +187,18 @@ fn find_top_level_values_keyword(stmt: &str) -> Option<usize> {
             _ => {}
         }
 
-        if !in_single_quote && !in_double_quote && !in_backtick {
-            if i + 6 <= bytes.len() && stmt[i..i + 6].eq_ignore_ascii_case("VALUES") {
-                let prev_ok = i == 0
-                    || !((bytes[i - 1] as char).is_ascii_alphanumeric() || bytes[i - 1] == b'_');
-                let next_ok = i + 6 == bytes.len()
-                    || !((bytes[i + 6] as char).is_ascii_alphanumeric() || bytes[i + 6] == b'_');
-                if prev_ok && next_ok {
-                    return Some(i);
-                }
+        if !in_single_quote
+            && !in_double_quote
+            && !in_backtick
+            && i + 6 <= bytes.len()
+            && stmt[i..i + 6].eq_ignore_ascii_case("VALUES")
+        {
+            let prev_ok = i == 0
+                || !((bytes[i - 1] as char).is_ascii_alphanumeric() || bytes[i - 1] == b'_');
+            let next_ok = i + 6 == bytes.len()
+                || !((bytes[i + 6] as char).is_ascii_alphanumeric() || bytes[i + 6] == b'_');
+            if prev_ok && next_ok {
+                return Some(i);
             }
         }
 
@@ -287,7 +293,9 @@ pub async fn get_databases(
     let t0 = std::time::Instant::now();
     let result = driver.get_databases().await;
     let ms = t0.elapsed().as_millis() as u64;
-    state.emit_query_log(
+    state.emit_query_log_context(
+        Some(connection_id),
+        None,
         "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name ASC",
         ms,
         result.as_ref().err().map(|e| e.as_str()),
@@ -304,6 +312,14 @@ pub async fn create_database(
     if name.is_empty() || name.contains('`') || name.contains(';') {
         return Err("Invalid database name".into());
     }
+    let allow_writes = {
+        let configs = state.connections_config.read();
+        configs
+            .get(&connection_id)
+            .map(|c| c.allow_writes)
+            .unwrap_or(true)
+    };
+    crate::security::ensure_writes_allowed(allow_writes)?;
     let driver = state.get_driver(&connection_id)?;
     driver.create_database(&name).await
 }
@@ -317,6 +333,14 @@ pub async fn drop_database(
     if name.is_empty() || name.contains('`') || name.contains(';') {
         return Err("Invalid database name".into());
     }
+    let allow_writes = {
+        let configs = state.connections_config.read();
+        configs
+            .get(&connection_id)
+            .map(|c| c.allow_writes)
+            .unwrap_or(true)
+    };
+    crate::security::ensure_writes_allowed(allow_writes)?;
     let driver = state.get_driver(&connection_id)?;
     driver.drop_database(&name).await
 }
@@ -333,7 +357,13 @@ pub async fn get_tables(
     let result = driver.get_tables(&database).await;
     let ms = t0.elapsed().as_millis() as u64;
     let sql = format!("SHOW FULL TABLES FROM `{}`", database);
-    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    state.emit_query_log_context(
+        Some(connection_id),
+        Some(&database),
+        &sql,
+        ms,
+        result.as_ref().err().map(|e| e.as_str()),
+    );
     let tables = result?;
     println!("  -> Found {} tables", tables.len());
     Ok(tables)
@@ -351,7 +381,13 @@ pub async fn get_table_structure(
     let t0 = std::time::Instant::now();
     let result = driver.get_table_structure(&database, &table).await;
     let ms = t0.elapsed().as_millis() as u64;
-    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    state.emit_query_log_context(
+        Some(connection_id),
+        Some(&database),
+        &sql,
+        ms,
+        result.as_ref().err().map(|e| e.as_str()),
+    );
     result
 }
 
@@ -372,7 +408,13 @@ pub async fn get_foreign_keys(
     let t0 = std::time::Instant::now();
     let result = driver.get_foreign_keys(&database, &table).await;
     let ms = t0.elapsed().as_millis() as u64;
-    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    state.emit_query_log_context(
+        Some(connection_id),
+        Some(&database),
+        &sql,
+        ms,
+        result.as_ref().err().map(|e| e.as_str()),
+    );
     result
 }
 
@@ -388,7 +430,13 @@ pub async fn get_table_indexes(
     let t0 = std::time::Instant::now();
     let result = driver.get_table_indexes(&database, &table).await;
     let ms = t0.elapsed().as_millis() as u64;
-    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    state.emit_query_log_context(
+        Some(connection_id),
+        Some(&database),
+        &sql,
+        ms,
+        result.as_ref().err().map(|e| e.as_str()),
+    );
     result
 }
 
@@ -404,7 +452,13 @@ pub async fn get_table_ddl(
     let t0 = std::time::Instant::now();
     let result = driver.get_table_ddl(&database, &table).await;
     let ms = t0.elapsed().as_millis() as u64;
-    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    state.emit_query_log_context(
+        Some(connection_id),
+        Some(&database),
+        &sql,
+        ms,
+        result.as_ref().err().map(|e| e.as_str()),
+    );
     result
 }
 
@@ -430,149 +484,485 @@ fn sql_export_value(value: Option<&Value>) -> String {
     }
 }
 
+fn csv_export_value(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::Null) | None => String::new(),
+        Some(Value::String(s)) => {
+            if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
+                format!("\"{}\"", s.replace('"', "\"\""))
+            } else {
+                s.clone()
+            }
+        }
+        Some(Value::Bool(b)) => {
+            if *b {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            }
+        }
+        Some(v) => v.to_string(),
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ExportOptions {
+    pub drop_if_exists: bool,
+    pub include_views: bool,
+    pub use_transactions: bool,
+    pub compress_gzip: bool,
+}
+
+impl Default for ExportOptions {
+    fn default() -> Self {
+        Self {
+            drop_if_exists: true,
+            include_views: true,
+            use_transactions: true,
+            compress_gzip: false,
+        }
+    }
+}
+
+enum ExportWriter {
+    Plain(BufWriter<File>),
+    Gzip(GzEncoder<BufWriter<File>>),
+}
+
+impl ExportWriter {
+    fn new(path: &str, compress_gzip: bool) -> Result<Self, String> {
+        let file = File::create(path).map_err(|e| format!("Failed to create file: {}", e))?;
+        let writer = BufWriter::new(file);
+        if compress_gzip {
+            Ok(Self::Gzip(GzEncoder::new(writer, Compression::default())))
+        } else {
+            Ok(Self::Plain(writer))
+        }
+    }
+
+    fn finish(self) -> Result<(), String> {
+        match self {
+            Self::Plain(mut writer) => writer.flush().map_err(|e| format!("Flush error: {}", e)),
+            Self::Gzip(writer) => {
+                let mut writer = writer
+                    .finish()
+                    .map_err(|e| format!("Gzip finish error: {}", e))?;
+                writer.flush().map_err(|e| format!("Flush error: {}", e))
+            }
+        }
+    }
+}
+
+impl Write for ExportWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            Self::Plain(writer) => writer.write(buf),
+            Self::Gzip(writer) => writer.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            Self::Plain(writer) => writer.flush(),
+            Self::Gzip(writer) => writer.flush(),
+        }
+    }
+}
+
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn export_database(
     window: tauri::Window,
     state: State<'_, AppState>,
     connection_id: Uuid,
     database: String,
-    mode: String, // "structure", "data", "full"
+    mode: String,
     path: String,
     tables: Option<Vec<String>>,
+    export_id: Option<String>,
+    format: Option<String>,
+    drop_if_exists: Option<bool>,
+    include_views: Option<bool>,
+    use_transactions: Option<bool>,
+    compress_gzip: Option<bool>,
 ) -> Result<usize, String> {
     use tauri::Emitter;
 
+    let eid = export_id.unwrap_or_default();
+    let fmt = format.as_deref().unwrap_or("sql");
+    let options = ExportOptions {
+        drop_if_exists: drop_if_exists.unwrap_or(true),
+        include_views: include_views.unwrap_or(true),
+        use_transactions: use_transactions.unwrap_or(true),
+        compress_gzip: compress_gzip.unwrap_or(false),
+    };
+    state.clear_export_cancel(&eid);
+
     let driver = state.get_driver(&connection_id)?;
-    export_database_file(driver, database, mode, path, tables, &|progress| {
-        let _ = window.emit("export-progress", progress);
-    })
-    .await
+    let result = export_database_file(
+        driver,
+        database,
+        mode,
+        path,
+        tables,
+        fmt,
+        options,
+        &|progress| {
+            let _ = window.emit("export-progress", progress);
+        },
+        &|| state.is_export_canceled(&eid),
+    )
+    .await;
+
+    state.clear_export_cancel(&eid);
+    result
 }
 
+#[tauri::command]
+pub async fn cancel_export(state: State<'_, AppState>, export_id: String) -> Result<(), String> {
+    state.request_export_cancel(&export_id);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 pub async fn export_database_file(
     driver: Arc<dyn DatabaseDriver>,
     database: String,
     mode: String,
     path: String,
     tables: Option<Vec<String>>,
+    format: &str,
+    options: ExportOptions,
     emit_progress: &(dyn Fn(Progress) + Send + Sync),
+    is_canceled: &(dyn Fn() -> bool + Send + Sync),
 ) -> Result<usize, String> {
+    use std::path::Path;
     use tokio::sync::mpsc;
 
-    let tables_to_export = match tables {
+    let table_metadata = driver.get_tables(&database).await?;
+    let view_names: HashSet<String> = table_metadata
+        .iter()
+        .filter(|table| table.table_type.to_uppercase().contains("VIEW"))
+        .map(|table| table.name.clone())
+        .collect();
+    let base_table_names: HashSet<String> = table_metadata
+        .iter()
+        .filter(|table| !table.table_type.to_uppercase().contains("VIEW"))
+        .map(|table| table.name.clone())
+        .collect();
+
+    let mut tables_to_export = match tables {
         Some(t) => t,
-        None => driver.get_base_tables(&database).await?,
+        None if options.include_views => table_metadata
+            .iter()
+            .map(|table| table.name.clone())
+            .collect(),
+        None => table_metadata
+            .iter()
+            .filter(|table| base_table_names.contains(&table.name))
+            .map(|table| table.name.clone())
+            .collect(),
     };
+    if !options.include_views {
+        tables_to_export.retain(|table| base_table_names.contains(table));
+    }
 
     let total_tables = tables_to_export.len();
-    let include_structure = mode == "structure" || mode == "full";
-    let include_data = mode == "data" || mode == "full";
-
-    let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let file = File::create(&path).map_err(|e| format!("Failed to create file: {}", e))?;
-    let mut writer = BufWriter::new(file);
-
-    write!(
-        writer,
-        "-- DB Viewer Export\n-- Database: `{}`\n-- Mode: {}\n-- Generated: {}\n\
-         -- --------------------------------------------------------\n\n\
-         SET FOREIGN_KEY_CHECKS=0;\n\n",
-        database, mode, now
-    )
-    .map_err(|e| format!("Failed to write file: {}", e))?;
-
     let mut total_rows = 0usize;
 
-    for (i, table) in tables_to_export.iter().enumerate() {
-        emit_progress(Progress {
-            current: i,
-            total: total_tables,
-            status: format!("Exporting table {} of {} ({})", i + 1, total_tables, table),
-        });
+    match format {
+        // ── CSV: one file per table ──────────────────────────────────────────
+        "csv" => {
+            let base_path = Path::new(&path);
+            let stem = base_path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let dir = base_path.parent().unwrap_or(Path::new("."));
 
-        write!(
-            writer,
-            "-- --------------------------------------------------------\n\
-             -- Table: `{}`\n\
-             -- --------------------------------------------------------\n\n",
-            table
-        )
-        .map_err(|e| format!("Failed to write file: {}", e))?;
-
-        if include_structure {
-            let create_sql = driver.get_table_ddl(&database, table).await?;
-            writeln!(writer, "DROP TABLE IF EXISTS `{}`;", table)
-                .map_err(|e| format!("Failed to write file: {}", e))?;
-            writeln!(writer, "{};\n", create_sql)
-                .map_err(|e| format!("Failed to write file: {}", e))?;
-        }
-
-        if include_data {
-            let (tx, mut rx) = mpsc::channel::<(Option<Vec<ColumnInfo>>, Value)>(512);
-            let db_clone = database.clone();
-            let table_clone = table.clone();
-            let driver_clone = driver.clone();
-            let stream_handle = tokio::spawn(async move {
-                driver_clone
-                    .stream_all_rows(&db_clone, &table_clone, tx)
-                    .await
-            });
-
-            let mut columns: Vec<ColumnInfo> = Vec::new();
-            let mut table_rows = 0usize;
-
-            while let Some((col_opt, row)) = rx.recv().await {
-                if let Some(cols) = col_opt {
-                    columns = cols;
+            for (i, table) in tables_to_export.iter().enumerate() {
+                if is_canceled() {
+                    return Err("Export cancelled".to_string());
                 }
 
-                if let Value::Object(map) = row {
-                    let col_names = columns
-                        .iter()
-                        .map(|c| format!("`{}`", c.name))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    let values = columns
-                        .iter()
-                        .map(|c| sql_export_value(map.get(&c.name)))
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                emit_progress(Progress {
+                    current: i,
+                    total: total_tables,
+                    status: format!("Exporting {}", table),
+                });
 
-                    writeln!(
-                        writer,
-                        "INSERT INTO `{}` ({}) VALUES ({});",
-                        table, col_names, values
-                    )
+                let table_path = dir.join(format!(
+                    "{}_{}.csv{}",
+                    stem,
+                    table,
+                    if options.compress_gzip { ".gz" } else { "" }
+                ));
+                let mut writer = ExportWriter::new(
+                    table_path.to_str().ok_or_else(|| {
+                        format!("Export path is not valid UTF-8: {}", table_path.display())
+                    })?,
+                    options.compress_gzip,
+                )
+                .map_err(|e| format!("Failed to create {}: {}", table_path.display(), e))?;
+
+                let (tx, mut rx) = mpsc::channel::<(Option<Vec<ColumnInfo>>, Value)>(512);
+                let driver_clone = driver.clone();
+                let db_clone = database.clone();
+                let table_clone = table.clone();
+                let stream_handle = tokio::spawn(async move {
+                    driver_clone
+                        .stream_all_rows(&db_clone, &table_clone, tx)
+                        .await
+                });
+
+                let mut columns: Vec<ColumnInfo> = Vec::new();
+                let mut header_written = false;
+                let mut table_rows = 0usize;
+
+                while let Some((col_opt, row)) = rx.recv().await {
+                    if is_canceled() {
+                        stream_handle.abort();
+                        return Err("Export cancelled".to_string());
+                    }
+                    if let Some(cols) = col_opt {
+                        columns = cols;
+                    }
+
+                    if !header_written && !columns.is_empty() {
+                        let header: Vec<String> = columns
+                            .iter()
+                            .map(|c| csv_export_value(Some(&Value::String(c.name.clone()))))
+                            .collect();
+                        writeln!(writer, "{}", header.join(","))
+                            .map_err(|e| format!("Write error: {}", e))?;
+                        header_written = true;
+                    }
+
+                    if let Value::Object(ref map) = row {
+                        let values: Vec<String> = columns
+                            .iter()
+                            .map(|c| csv_export_value(map.get(&c.name)))
+                            .collect();
+                        writeln!(writer, "{}", values.join(","))
+                            .map_err(|e| format!("Write error: {}", e))?;
+                        table_rows += 1;
+                        total_rows += 1;
+                        if table_rows.is_multiple_of(5000) {
+                            emit_progress(Progress {
+                                current: i,
+                                total: total_tables,
+                                status: format!("Exporting {}: {} rows", table, table_rows),
+                            });
+                        }
+                    }
+                }
+
+                stream_handle
+                    .await
+                    .map_err(|e| format!("Stream failed: {}", e))??;
+                writer.finish()?;
+            }
+        }
+
+        // ── JSON: single file, object keyed by table name ────────────────────
+        "json" => {
+            let mut writer = ExportWriter::new(&path, options.compress_gzip)?;
+            write!(writer, "{{").map_err(|e| format!("Write error: {}", e))?;
+
+            for (i, table) in tables_to_export.iter().enumerate() {
+                if is_canceled() {
+                    return Err("Export cancelled".to_string());
+                }
+
+                emit_progress(Progress {
+                    current: i,
+                    total: total_tables,
+                    status: format!("Exporting {}", table),
+                });
+
+                if i > 0 {
+                    write!(writer, ",").map_err(|e| format!("Write error: {}", e))?;
+                }
+                write!(writer, "\n  \"{}\": [", table)
+                    .map_err(|e| format!("Write error: {}", e))?;
+
+                let (tx, mut rx) = mpsc::channel::<(Option<Vec<ColumnInfo>>, Value)>(512);
+                let driver_clone = driver.clone();
+                let db_clone = database.clone();
+                let table_clone = table.clone();
+                let stream_handle = tokio::spawn(async move {
+                    driver_clone
+                        .stream_all_rows(&db_clone, &table_clone, tx)
+                        .await
+                });
+
+                let mut first_row = true;
+                let mut table_rows = 0usize;
+
+                while let Some((_, row)) = rx.recv().await {
+                    if is_canceled() {
+                        stream_handle.abort();
+                        return Err("Export cancelled".to_string());
+                    }
+                    if let Value::Object(_) = &row {
+                        if !first_row {
+                            write!(writer, ",").map_err(|e| format!("Write error: {}", e))?;
+                        }
+                        write!(
+                            writer,
+                            "\n    {}",
+                            serde_json::to_string(&row).unwrap_or_default()
+                        )
+                        .map_err(|e| format!("Write error: {}", e))?;
+                        first_row = false;
+                        table_rows += 1;
+                        total_rows += 1;
+                        if table_rows.is_multiple_of(5000) {
+                            emit_progress(Progress {
+                                current: i,
+                                total: total_tables,
+                                status: format!("Exporting {}: {} rows", table, table_rows),
+                            });
+                        }
+                    }
+                }
+
+                stream_handle
+                    .await
+                    .map_err(|e| format!("Stream failed: {}", e))??;
+                write!(writer, "\n  ]").map_err(|e| format!("Write error: {}", e))?;
+            }
+
+            write!(writer, "\n}}\n").map_err(|e| format!("Write error: {}", e))?;
+            writer.finish()?;
+        }
+
+        // ── SQL (default) ────────────────────────────────────────────────────
+        _ => {
+            let include_structure = mode == "structure" || mode == "full";
+            let include_data = mode == "data" || mode == "full";
+            let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+            let mut writer = ExportWriter::new(&path, options.compress_gzip)?;
+
+            write!(
+                writer,
+                "-- TupleDB Export\n-- Database: `{}`\n-- Mode: {}\n-- Generated: {}\n\
+                 -- --------------------------------------------------------\n\n\
+                 SET FOREIGN_KEY_CHECKS=0;\n\n",
+                database, mode, now
+            )
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+            if options.use_transactions {
+                writeln!(writer, "START TRANSACTION;\n")
                     .map_err(|e| format!("Failed to write file: {}", e))?;
+            }
 
-                    table_rows += 1;
-                    total_rows += 1;
+            for (i, table) in tables_to_export.iter().enumerate() {
+                if is_canceled() {
+                    return Err("Export cancelled".to_string());
+                }
+                let is_view = view_names.contains(table);
 
-                    if table_rows % 5000 == 0 {
-                        emit_progress(Progress {
-                            current: i,
-                            total: total_tables,
-                            status: format!("Exporting {}: {} rows written", table, table_rows),
-                        });
+                emit_progress(Progress {
+                    current: i,
+                    total: total_tables,
+                    status: format!("Exporting table {} of {} ({})", i + 1, total_tables, table),
+                });
+
+                write!(
+                    writer,
+                    "-- --------------------------------------------------------\n\
+                     -- Table: `{}`\n\
+                     -- --------------------------------------------------------\n\n",
+                    table
+                )
+                .map_err(|e| format!("Failed to write file: {}", e))?;
+
+                if include_structure {
+                    let create_sql = driver.get_table_ddl(&database, table).await?;
+                    if options.drop_if_exists {
+                        let object_kind = if is_view { "VIEW" } else { "TABLE" };
+                        writeln!(writer, "DROP {} IF EXISTS `{}`;", object_kind, table)
+                            .map_err(|e| format!("Failed to write file: {}", e))?;
+                    }
+                    writeln!(writer, "{};\n", create_sql)
+                        .map_err(|e| format!("Failed to write file: {}", e))?;
+                }
+
+                if include_data && !is_view {
+                    let (tx, mut rx) = mpsc::channel::<(Option<Vec<ColumnInfo>>, Value)>(512);
+                    let db_clone = database.clone();
+                    let table_clone = table.clone();
+                    let driver_clone = driver.clone();
+                    let stream_handle = tokio::spawn(async move {
+                        driver_clone
+                            .stream_all_rows(&db_clone, &table_clone, tx)
+                            .await
+                    });
+
+                    let mut columns: Vec<ColumnInfo> = Vec::new();
+                    let mut table_rows = 0usize;
+
+                    while let Some((col_opt, row)) = rx.recv().await {
+                        if is_canceled() {
+                            stream_handle.abort();
+                            return Err("Export cancelled".to_string());
+                        }
+                        if let Some(cols) = col_opt {
+                            columns = cols;
+                        }
+
+                        if let Value::Object(map) = row {
+                            let col_names = columns
+                                .iter()
+                                .map(|c| format!("`{}`", c.name))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            let values = columns
+                                .iter()
+                                .map(|c| sql_export_value(map.get(&c.name)))
+                                .collect::<Vec<_>>()
+                                .join(", ");
+                            writeln!(
+                                writer,
+                                "INSERT INTO `{}` ({}) VALUES ({});",
+                                table, col_names, values
+                            )
+                            .map_err(|e| format!("Failed to write file: {}", e))?;
+                            table_rows += 1;
+                            total_rows += 1;
+                            if table_rows.is_multiple_of(5000) {
+                                emit_progress(Progress {
+                                    current: i,
+                                    total: total_tables,
+                                    status: format!(
+                                        "Exporting {}: {} rows written",
+                                        table, table_rows
+                                    ),
+                                });
+                            }
+                        }
+                    }
+
+                    stream_handle
+                        .await
+                        .map_err(|e| format!("Export stream task failed: {}", e))??;
+                    if table_rows > 0 {
+                        writeln!(writer).map_err(|e| format!("Failed to write file: {}", e))?;
                     }
                 }
             }
 
-            stream_handle
-                .await
-                .map_err(|e| format!("Export stream task failed: {}", e))??;
-
-            if table_rows > 0 {
-                writeln!(writer).map_err(|e| format!("Failed to write file: {}", e))?;
+            writeln!(writer, "SET FOREIGN_KEY_CHECKS=1;")
+                .map_err(|e| format!("Failed to write file: {}", e))?;
+            if options.use_transactions {
+                writeln!(writer, "COMMIT;").map_err(|e| format!("Failed to write file: {}", e))?;
             }
+            writer.finish()?;
         }
     }
-
-    writeln!(writer, "SET FOREIGN_KEY_CHECKS=1;")
-        .map_err(|e| format!("Failed to write file: {}", e))?;
-    writer
-        .flush()
-        .map_err(|e| format!("Failed to write file: {}", e))?;
 
     emit_progress(Progress {
         current: total_tables,
@@ -592,17 +982,14 @@ pub async fn import_sql(
     path: String,
     import_id: String,
 ) -> Result<ImportResult, String> {
-    let (env, allow_writes) = {
+    let allow_writes = {
         let configs = state.connections_config.read();
         configs
             .get(&connection_id)
-            .map(|c| (c.environment, c.allow_writes))
-            .unwrap_or((crate::connections::Environment::Local, true))
+            .map(|c| c.allow_writes)
+            .unwrap_or(true)
     };
-
-    if env == crate::connections::Environment::Production && !allow_writes {
-        return Err("Import blocked: Production environment is READ-ONLY. Enable write access in connection settings.".into());
-    }
+    crate::security::ensure_writes_allowed(allow_writes)?;
 
     state.clear_import_cancel(&import_id);
 

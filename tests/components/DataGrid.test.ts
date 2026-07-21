@@ -46,6 +46,7 @@ function defaults() {
     pendingChanges: {},
     pendingDeletions: {},
     pendingTruncate: false,
+    pendingDrop: false,
     selectedRowPk: null,
     selectedRowPks: [],
     inlineEditColumn: null,
@@ -105,7 +106,7 @@ describe('DataGrid — row selection', () => {
       props: { ...defaults(), rows, totalCount: 2, selectedRowPk: '1' },
     })
     const trs = w.findAll('tbody tr')
-    expect(trs[0].classes()).toContain('bg-primary/8')
+    expect(trs[0].classes()).toContain('bg-primary/10')
   })
 
   it('does not apply selected-row class to other rows', () => {
@@ -113,7 +114,7 @@ describe('DataGrid — row selection', () => {
       props: { ...defaults(), rows, totalCount: 2, selectedRowPk: '1' },
     })
     const trs = w.findAll('tbody tr')
-    expect(trs[1].classes()).not.toContain('bg-primary/8')
+    expect(trs[1].classes()).not.toContain('bg-primary/10')
   })
 
   it('applies multi-selected class to rows in selectedRowPks', () => {
@@ -122,7 +123,7 @@ describe('DataGrid — row selection', () => {
     })
     const trs = w.findAll('tbody tr')
     // row 2 is multi-selected but not the primary selection
-    expect(trs[1].classes()).toContain('bg-primary/30')
+    expect(trs[1].classes()).toContain('bg-primary/25')
   })
 })
 
@@ -167,7 +168,7 @@ describe('DataGrid — no-PK table', () => {
       },
     })
     const trs = w.findAll('tbody tr')
-    expect(trs[0].classes()).toContain('bg-primary/8')
+    expect(trs[0].classes()).toContain('bg-primary/10')
   })
 })
 
@@ -193,7 +194,7 @@ describe('DataGrid — sort indicator', () => {
       },
     })
     const headers = w.findAll('th')
-    expect(headers[1].classes()).toContain('bg-primary/5')
-    expect(headers[0].classes()).not.toContain('bg-primary/5')
+    expect(headers[1].classes()).toContain('bg-primary/12')
+    expect(headers[0].classes()).not.toContain('bg-primary/12')
   })
 })

@@ -1,6 +1,130 @@
+<template>
+  <Dialog :open="open" @update:open="(val: boolean) => !val && handleClose()">
+    <DialogContent class="sm:max-w-md max-h-[85vh] flex flex-col p-0 overflow-hidden shadow-2xl border-destructive/10">
+      <DialogHeader class="p-6 pb-4 bg-background border-b relative z-20">
+        <DialogTitle class="flex items-center gap-2">
+          <Trash2Icon class="size-4 text-destructive" />
+          Delete Tables
+        </DialogTitle>
+        <DialogDescription>
+          Select tables to drop from <span class="font-bold text-foreground">`{{ database }}`</span>
+        </DialogDescription>
+      </DialogHeader>
+
+      <ScrollArea class="flex-1 bg-background">
+        <div class="px-6 py-4">
+          <div class="flex items-center justify-between sticky top-0 bg-background pb-1 z-10 border-b">
+            <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Tables</h3>
+            <div class="flex items-center gap-3">
+              <span class="text-[10px] font-bold text-muted-foreground">{{ selectedTables.length }} / {{ tables.length }}</span>
+              <button v-if="!loadingTables && tables.length > 0" @click="toggleAll"
+                class="text-[10px] font-black text-destructive uppercase hover:underline">
+                {{ selectedTables.length === tables.length ? 'None' : `All (${tables.length})` }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Loading skeleton -->
+          <div v-if="loadingTables" class="grid grid-cols-1 gap-1">
+            <div v-for="i in 6" :key="i" class="flex items-center gap-3 p-2">
+              <div class="size-4 rounded bg-muted animate-pulse" />
+              <div class="size-3.5 rounded bg-muted animate-pulse" />
+              <div class="h-3.5 rounded bg-muted animate-pulse" :style="`width: ${50 + (i * 17) % 40}%`" />
+            </div>
+          </div>
+
+          <div v-else class="grid grid-cols-1 gap-0.5">
+            <div
+              v-for="(table, idx) in tables"
+              :key="table.name"
+              @click="handleTableClick(idx, $event)"
+              :class="['flex items-center gap-3 px-2.5 py-2 rounded-lg cursor-pointer select-none transition-all border',
+                selectedTables.includes(table.name)
+                  ? 'bg-destructive/10 border-destructive/30 shadow-sm'
+                  : 'border-transparent hover:bg-muted/50']"
+            >
+              <div :class="['size-4 rounded border-2 flex items-center justify-center shrink-0 transition-all',
+                selectedTables.includes(table.name)
+                  ? 'bg-destructive border-destructive shadow-sm shadow-destructive/20'
+                  : 'border-muted-foreground/25']">
+                <CheckIcon v-if="selectedTables.includes(table.name)" class="size-2.5 text-destructive-foreground stroke-3" />
+              </div>
+              <span :class="['text-sm truncate transition-colors',
+                selectedTables.includes(table.name) ? 'text-destructive font-semibold' : 'font-medium']">
+                {{ table.name }}
+              </span>
+            </div>
+          </div>
+        </div>
+      </ScrollArea>
+
+      <!-- Error banner -->
+      <div
+        v-if="error"
+        class="px-6 py-3 bg-destructive/10 border-t border-destructive/20 flex items-start gap-3"
+      >
+        <XCircleIcon class="size-4 text-destructive shrink-0 mt-0.5" />
+        <span class="text-xs text-destructive font-medium leading-relaxed whitespace-pre-line">{{ error }}</span>
+      </div>
+
+      <!-- Drop DB confirm banner -->
+      <div
+        v-if="confirmDropDb"
+        class="px-6 py-3 bg-destructive/10 border-t border-destructive/20 flex items-center gap-3"
+      >
+        <AlertTriangleIcon class="size-4 text-destructive shrink-0" />
+        <span class="text-xs text-destructive font-semibold flex-1">
+          Drop <code class="font-black">`{{ database }}`</code>? This permanently deletes the database and all its data.
+        </span>
+        <button @click="confirmDropDb = false" class="text-xs text-muted-foreground hover:text-foreground font-medium">Cancel</button>
+      </div>
+
+      <!-- FK checks option -->
+      <div v-if="!loadingTables && tables.length > 0" class="px-8 py-3 border-t bg-muted/10">
+        <button
+          @click="disableFkChecks = !disableFkChecks"
+          class="flex items-center gap-3 cursor-pointer"
+        >
+          <div :class="['shrink-0 flex items-center justify-center size-4 rounded border-2 transition-colors',
+            disableFkChecks ? 'bg-destructive border-destructive' : 'border-muted-foreground/30']">
+            <CheckIcon v-if="disableFkChecks" class="size-3 text-destructive-foreground stroke-3" />
+          </div>
+          <span class="text-xs text-muted-foreground hover:text-foreground transition-colors select-none">Disable Foreign Key Checks</span>
+        </button>
+      </div>
+
+      <div class="p-6 py-4 border-t bg-muted/10 flex flex-row items-center justify-between gap-2">
+        <Button variant="ghost" class="text-xs font-bold uppercase tracking-wider h-9" @click="handleClose" :disabled="isExecuting">
+          Cancel
+        </Button>
+        <div class="flex items-center gap-2">
+          <Button
+            variant="outline"
+            class="text-xs font-bold h-9 border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive"
+            :disabled="isExecuting || loadingTables"
+            @click="handleDropDatabase"
+          >
+            <span v-if="!confirmDropDb">Drop Database</span>
+            <span v-else class="flex items-center gap-1.5"><AlertTriangleIcon class="size-3.5" /> Confirm Drop</span>
+          </Button>
+          <Button
+            variant="destructive"
+            class="font-bold h-9 px-5 shadow-lg shadow-destructive/20"
+            :disabled="isExecuting || loadingTables || selectedTables.length === 0"
+            @click="handleDeleteTables"
+          >
+            <span v-if="!isExecuting">Delete {{ selectedTables.length > 0 ? selectedTables.length : '' }} Table{{ selectedTables.length !== 1 ? 's' : '' }}</span>
+            <span v-else>Deleting…</span>
+          </Button>
+        </div>
+      </div>
+    </DialogContent>
+  </Dialog>
+</template>
+
 <script setup lang="ts">
 import { ref } from 'vue'
-import { CheckIcon, TableIcon, Trash2Icon, AlertTriangleIcon, XCircleIcon } from 'lucide-vue-next'
+import { CheckIcon, Trash2Icon, AlertTriangleIcon, XCircleIcon } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -83,127 +207,3 @@ function handleDropDatabase() {
   emit('drop-database')
 }
 </script>
-
-<template>
-  <Dialog :open="open" @update:open="(val) => !val && handleClose()">
-    <DialogContent class="sm:max-w-md max-h-[85vh] flex flex-col p-0 overflow-hidden shadow-2xl border-destructive/10">
-      <DialogHeader class="p-6 pb-4 bg-background border-b relative z-20">
-        <DialogTitle class="flex items-center gap-2">
-          <Trash2Icon class="size-4 text-destructive" />
-          Delete Tables
-        </DialogTitle>
-        <DialogDescription>
-          Select tables to drop from <span class="font-bold text-foreground">`{{ database }}`</span>
-        </DialogDescription>
-      </DialogHeader>
-
-      <ScrollArea class="flex-1 bg-background">
-        <div class="px-6 py-4">
-          <div class="flex items-center justify-between sticky top-0 bg-background pb-1 z-10 border-b">
-            <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Tables</h3>
-            <div class="flex items-center gap-3">
-              <span class="text-[10px] font-bold text-muted-foreground">{{ selectedTables.length }} / {{ tables.length }}</span>
-              <button v-if="!loadingTables && tables.length > 0" @click="toggleAll"
-                class="text-[10px] font-black text-destructive uppercase hover:underline">
-                {{ selectedTables.length === tables.length ? 'None' : `All (${tables.length})` }}
-              </button>
-            </div>
-          </div>
-
-          <!-- Loading skeleton -->
-          <div v-if="loadingTables" class="grid grid-cols-1 gap-1">
-            <div v-for="i in 6" :key="i" class="flex items-center gap-3 p-2">
-              <div class="size-4 rounded bg-muted animate-pulse" />
-              <div class="size-3.5 rounded bg-muted animate-pulse" />
-              <div class="h-3.5 rounded bg-muted animate-pulse" :style="`width: ${50 + (i * 17) % 40}%`" />
-            </div>
-          </div>
-
-          <div v-else class="grid grid-cols-1 gap-0.5">
-            <div
-              v-for="(table, idx) in tables"
-              :key="table.name"
-              @click="handleTableClick(idx, $event)"
-              :class="['flex items-center gap-3 px-2.5 py-2 rounded-lg cursor-pointer select-none transition-all border',
-                selectedTables.includes(table.name)
-                  ? 'bg-destructive/10 border-destructive/30 shadow-sm'
-                  : 'border-transparent hover:bg-muted/50']"
-            >
-              <div :class="['size-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-all',
-                selectedTables.includes(table.name)
-                  ? 'bg-destructive border-destructive shadow-sm shadow-destructive/20'
-                  : 'border-muted-foreground/25']">
-                <CheckIcon v-if="selectedTables.includes(table.name)" class="size-2.5 text-destructive-foreground stroke-[3]" />
-              </div>
-              <span :class="['text-sm truncate transition-colors',
-                selectedTables.includes(table.name) ? 'text-destructive font-semibold' : 'font-medium']">
-                {{ table.name }}
-              </span>
-            </div>
-          </div>
-        </div>
-      </ScrollArea>
-
-      <!-- Error banner -->
-      <div
-        v-if="error"
-        class="px-6 py-3 bg-destructive/10 border-t border-destructive/20 flex items-start gap-3"
-      >
-        <XCircleIcon class="size-4 text-destructive shrink-0 mt-0.5" />
-        <span class="text-xs text-destructive font-medium leading-relaxed whitespace-pre-line">{{ error }}</span>
-      </div>
-
-      <!-- Drop DB confirm banner -->
-      <div
-        v-if="confirmDropDb"
-        class="px-6 py-3 bg-destructive/10 border-t border-destructive/20 flex items-center gap-3"
-      >
-        <AlertTriangleIcon class="size-4 text-destructive flex-shrink-0" />
-        <span class="text-xs text-destructive font-semibold flex-1">
-          Drop <code class="font-black">`{{ database }}`</code>? This permanently deletes the database and all its data.
-        </span>
-        <button @click="confirmDropDb = false" class="text-xs text-muted-foreground hover:text-foreground font-medium">Cancel</button>
-      </div>
-
-      <!-- FK checks option -->
-      <div v-if="!loadingTables && tables.length > 0" class="px-8 py-3 border-t bg-muted/10">
-        <button
-          @click="disableFkChecks = !disableFkChecks"
-          class="flex items-center gap-3 cursor-pointer"
-        >
-          <div :class="['shrink-0 flex items-center justify-center size-4 rounded border-2 transition-colors',
-            disableFkChecks ? 'bg-destructive border-destructive' : 'border-muted-foreground/30']">
-            <CheckIcon v-if="disableFkChecks" class="size-3 text-destructive-foreground stroke-[3]" />
-          </div>
-          <span class="text-xs text-muted-foreground hover:text-foreground transition-colors select-none">Disable Foreign Key Checks</span>
-        </button>
-      </div>
-
-      <div class="p-6 py-4 border-t bg-muted/10 flex flex-row items-center justify-between gap-2">
-        <Button variant="ghost" class="text-xs font-bold uppercase tracking-wider h-9" @click="handleClose" :disabled="isExecuting">
-          Cancel
-        </Button>
-        <div class="flex items-center gap-2">
-          <Button
-            variant="outline"
-            class="text-xs font-bold h-9 border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive"
-            :disabled="isExecuting || loadingTables"
-            @click="handleDropDatabase"
-          >
-            <span v-if="!confirmDropDb">Drop Database</span>
-            <span v-else class="flex items-center gap-1.5"><AlertTriangleIcon class="size-3.5" /> Confirm Drop</span>
-          </Button>
-          <Button
-            variant="destructive"
-            class="font-bold h-9 px-5 shadow-lg shadow-destructive/20"
-            :disabled="isExecuting || loadingTables || selectedTables.length === 0"
-            @click="handleDeleteTables"
-          >
-            <span v-if="!isExecuting">Delete {{ selectedTables.length > 0 ? selectedTables.length : '' }} Table{{ selectedTables.length !== 1 ? 's' : '' }}</span>
-            <span v-else>Deleting…</span>
-          </Button>
-        </div>
-      </div>
-    </DialogContent>
-  </Dialog>
-</template>

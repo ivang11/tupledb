@@ -1,6 +1,7 @@
 use crate::driver::{
     ColumnInfo, ColumnStructure, DatabaseDriver, ForeignKey, KeysetPage, QueryResult,
-    RawQueryResult, RowChange, RowDeletion, Table, TableChange, TableDataTimings, TableIndex,
+    QueryChunkCallback, RawQueryResult, RowChange, RowDeletion, Table, TableChange,
+    TableDataTimings, TableIndex,
 };
 use crate::filters::FilterSet;
 use crate::state::AppState;
@@ -186,7 +187,7 @@ fn parse_mysql_row(row: &sqlx::mysql::MySqlRow) -> Value {
                     let to_bin =
                         |n: u64| Value::String(format!("{:0>width$b}", n, width = width as usize));
                     row.try_get::<u64, _>(col_name)
-                        .map(|v| to_bin(v))
+                        .map(&to_bin)
                         .or_else(|_| {
                             row.try_get::<Vec<u8>, _>(col_name).map(|b| {
                                 let n = b.iter().fold(0u64, |acc, &x| (acc << 8) | x as u64);
@@ -210,7 +211,7 @@ fn parse_mysql_row(row: &sqlx::mysql::MySqlRow) -> Value {
                 {
                     row.try_get::<f64, _>(col_name)
                         .ok()
-                        .and_then(|v| serde_json::Number::from_f64(v))
+                        .and_then(serde_json::Number::from_f64)
                         .map(Value::Number)
                         .unwrap_or(Value::Null)
                 }
@@ -378,6 +379,14 @@ fn get_str_lossy(row: &sqlx::mysql::MySqlRow, index: usize) -> String {
     "unknown".to_string()
 }
 
+fn is_early_connection_close(error: &sqlx::Error) -> bool {
+    let msg = error.to_string().to_lowercase();
+    msg.contains("got 0 bytes at eof")
+        || msg.contains("early eof")
+        || msg.contains("connection reset")
+        || msg.contains("connection closed")
+}
+
 // --------------------------------------------------------------------------
 // MySqlDriver
 // --------------------------------------------------------------------------
@@ -415,12 +424,21 @@ impl DatabaseDriver for MySqlDriver {
     // --- Schema ---
 
     async fn get_databases(&self) -> Result<Vec<String>, String> {
-        let rows = sqlx::query(
-            "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name ASC",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| format!("Failed to fetch databases: {}", e))?;
+        let query = "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name ASC";
+        let rows = match sqlx::query(query).fetch_all(&self.pool).await {
+            Ok(rows) => rows,
+            Err(first_error) if is_early_connection_close(&first_error) => {
+                println!(
+                    "  -> MySQL closed connection while fetching databases, retrying once: {}",
+                    first_error
+                );
+                sqlx::query(query)
+                    .fetch_all(&self.pool)
+                    .await
+                    .map_err(|e| format!("Failed to fetch databases: {}", e))?
+            }
+            Err(e) => return Err(format!("Failed to fetch databases: {}", e)),
+        };
         Ok(rows.iter().map(|row| get_str_lossy(row, 0)).collect())
     }
 
@@ -544,7 +562,10 @@ impl DatabaseDriver for MySqlDriver {
         Ok(rows
             .iter()
             .map(|row| {
-                let non_unique: bool = get_str_lossy(row, 1) != "0";
+                let non_unique: bool = row.try_get::<i64, _>(1)
+                    .or_else(|_| row.try_get::<u64, _>(1).map(|v| v as i64))
+                    .map(|v| v != 0)
+                    .unwrap_or_else(|_| get_str_lossy(row, 1) != "0");
                 let seq: u64 = get_str_lossy(row, 3).parse().unwrap_or(1);
                 TableIndex {
                     key_name: get_str_lossy(row, 2),
@@ -779,9 +800,7 @@ impl DatabaseDriver for MySqlDriver {
         sql: &str,
         query_id: Option<&str>,
         on_progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
-        on_chunk: Option<
-            Arc<dyn Fn(Option<Vec<ColumnInfo>>, Vec<serde_json::Value>) + Send + Sync>,
-        >,
+        on_chunk: Option<QueryChunkCallback>,
     ) -> Result<RawQueryResult, String> {
         const CHUNK_SIZE: usize = 500;
 
@@ -900,7 +919,7 @@ impl DatabaseDriver for MySqlDriver {
                         result_rows.push(parse_mysql_row(&row));
                         row_count += 1;
                         if let Some(ref cb) = on_progress {
-                            if row_count % 1000 == 0 {
+                            if row_count.is_multiple_of(1000) {
                                 cb(row_count);
                             }
                         }
@@ -1408,6 +1427,7 @@ impl DatabaseDriver for MySqlDriver {
 // --------------------------------------------------------------------------
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn get_table_data(
     state: State<'_, AppState>,
     connection_id: Uuid,
@@ -1446,7 +1466,13 @@ pub async fn get_table_data(
         let t0 = std::time::Instant::now();
         let pk_result = driver.get_primary_key_columns(&database, &table).await;
         let ms = t0.elapsed().as_millis() as u64;
-        state.emit_query_log(&pk_sql, ms, pk_result.as_ref().err().map(|e| e.as_str()));
+        state.emit_query_log_context(
+            Some(connection_id),
+            Some(&database),
+            &pk_sql,
+            ms,
+            pk_result.as_ref().err().map(|e| e.as_str()),
+        );
         pk_result.ok().and_then(|cols| cols.into_iter().next())
     } else {
         sort_column
@@ -1526,9 +1552,23 @@ pub async fn get_table_data(
                 } else {
                     &count_sql
                 };
-                state.emit_query_log(count_log_sql, timings.count_ms, None);
-                state.emit_query_log(&select_sql, timings.select_ms, None);
-                state.emit_query_log(
+                state.emit_query_log_context(
+                    Some(connection_id),
+                    Some(&database),
+                    count_log_sql,
+                    timings.count_ms,
+                    None,
+                );
+                state.emit_query_log_context(
+                    Some(connection_id),
+                    Some(&database),
+                    &select_sql,
+                    timings.select_ms,
+                    None,
+                );
+                state.emit_query_log_context(
+                    Some(connection_id),
+                    Some(&database),
                     &format!(
                         "-- TABLE LOAD `{}`.`{}` page={} page_size={}",
                         database, table, page, page_size
@@ -1537,13 +1577,37 @@ pub async fn get_table_data(
                     None,
                 );
             } else {
-                state.emit_query_log(&count_sql, ms, None);
-                state.emit_query_log(&select_sql, ms, None);
+                state.emit_query_log_context(
+                    Some(connection_id),
+                    Some(&database),
+                    &count_sql,
+                    ms,
+                    None,
+                );
+                state.emit_query_log_context(
+                    Some(connection_id),
+                    Some(&database),
+                    &select_sql,
+                    ms,
+                    None,
+                );
             }
         }
         Err(e) => {
-            state.emit_query_log(&count_sql, ms, Some(e.as_str()));
-            state.emit_query_log(&select_sql, ms, Some(e.as_str()));
+            state.emit_query_log_context(
+                Some(connection_id),
+                Some(&database),
+                &count_sql,
+                ms,
+                Some(e.as_str()),
+            );
+            state.emit_query_log_context(
+                Some(connection_id),
+                Some(&database),
+                &select_sql,
+                ms,
+                Some(e.as_str()),
+            );
         }
     }
 
@@ -1587,13 +1651,7 @@ pub fn execute_query(
 
         let chunk_handle = app_handle.clone();
         let chunk_qid = query_id.clone();
-        let on_chunk: Option<
-            Arc<
-                dyn Fn(Option<Vec<crate::driver::ColumnInfo>>, Vec<serde_json::Value>)
-                    + Send
-                    + Sync,
-            >,
-        > = Some(Arc::new(
+        let on_chunk: Option<QueryChunkCallback> = Some(Arc::new(
             move |columns: Option<Vec<crate::driver::ColumnInfo>>, rows: Vec<serde_json::Value>| {
                 use tauri::Emitter;
                 let _ = chunk_handle.emit(
@@ -1639,6 +1697,8 @@ pub fn execute_query(
         let _ = app_handle.emit(
             "query-log",
             serde_json::json!({
+                "connection_id": connection_id.to_string(),
+                "database": database,
                 "sql": sql,
                 "timestamp": now.format("%Y-%m-%d %H:%M:%S%.3f").to_string(),
                 "duration_ms": ms,
@@ -1712,7 +1772,7 @@ pub async fn export_table_file(
 
         row_count += 1;
 
-        if row_count % 5000 == 0 {
+        if row_count.is_multiple_of(5000) {
             emit_progress(50, 100, format!("Writing row {}...", row_count));
         }
 
@@ -1854,6 +1914,14 @@ pub async fn export_table(
     .await
 }
 
+fn connection_allows_writes(state: &State<'_, AppState>, connection_id: Uuid) -> bool {
+    let configs = state.connections_config.read();
+    configs
+        .get(&connection_id)
+        .map(|c| c.allow_writes)
+        .unwrap_or(true)
+}
+
 #[tauri::command]
 pub async fn apply_table_changes(
     state: State<'_, AppState>,
@@ -1866,6 +1934,9 @@ pub async fn apply_table_changes(
 ) -> Result<(), String> {
     let n_updates = updates.len();
     let n_deletions = deletions.len();
+    if n_updates > 0 || n_deletions > 0 {
+        crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id))?;
+    }
     let driver = state.get_driver(&connection_id)?;
     let t0 = std::time::Instant::now();
     let result = driver
@@ -1877,14 +1948,26 @@ pub async fn apply_table_changes(
             "UPDATE `{}`.`{}` SET ... ({} row(s))",
             database, table, n_updates
         );
-        state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+        state.emit_query_log_context(
+            Some(connection_id),
+            Some(&database),
+            &sql,
+            ms,
+            result.as_ref().err().map(|e| e.as_str()),
+        );
     }
     if n_deletions > 0 {
         let sql = format!(
             "DELETE FROM `{}`.`{}` ({} row(s))",
             database, table, n_deletions
         );
-        state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+        state.emit_query_log_context(
+            Some(connection_id),
+            Some(&database),
+            &sql,
+            ms,
+            result.as_ref().err().map(|e| e.as_str()),
+        );
     }
     result
 }
@@ -1898,6 +1981,7 @@ pub async fn insert_row(
     values: Vec<TableChange>,
     disable_fk_checks: bool,
 ) -> Result<(), String> {
+    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id))?;
     let driver = state.get_driver(&connection_id)?;
     let t0 = std::time::Instant::now();
     let result = driver
@@ -1905,7 +1989,13 @@ pub async fn insert_row(
         .await;
     let ms = t0.elapsed().as_millis() as u64;
     let sql = format!("INSERT INTO `{}`.`{}`", database, table);
-    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    state.emit_query_log_context(
+        Some(connection_id),
+        Some(&database),
+        &sql,
+        ms,
+        result.as_ref().err().map(|e| e.as_str()),
+    );
     result
 }
 
@@ -1917,6 +2007,7 @@ pub async fn drop_table(
     table: String,
     disable_fk_checks: bool,
 ) -> Result<(), String> {
+    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id))?;
     let driver = state.get_driver(&connection_id)?;
     let t0 = std::time::Instant::now();
     let result = driver
@@ -1924,7 +2015,13 @@ pub async fn drop_table(
         .await;
     let ms = t0.elapsed().as_millis() as u64;
     let sql = format!("DROP TABLE `{}`.`{}`", database, table);
-    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    state.emit_query_log_context(
+        Some(connection_id),
+        Some(&database),
+        &sql,
+        ms,
+        result.as_ref().err().map(|e| e.as_str()),
+    );
     result
 }
 
@@ -1936,6 +2033,7 @@ pub async fn drop_tables(
     tables: Vec<String>,
     disable_fk_checks: bool,
 ) -> Result<(), String> {
+    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id))?;
     let driver = state.get_driver(&connection_id)?;
     let t0 = std::time::Instant::now();
     let result = driver
@@ -1943,7 +2041,13 @@ pub async fn drop_tables(
         .await;
     let ms = t0.elapsed().as_millis() as u64;
     let sql = format!("DROP {} TABLE(S) FROM `{}`", tables.len(), database);
-    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    state.emit_query_log_context(
+        Some(connection_id),
+        Some(&database),
+        &sql,
+        ms,
+        result.as_ref().err().map(|e| e.as_str()),
+    );
     result
 }
 
@@ -1955,6 +2059,7 @@ pub async fn truncate_table(
     table: String,
     disable_fk_checks: bool,
 ) -> Result<(), String> {
+    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id))?;
     let driver = state.get_driver(&connection_id)?;
     let t0 = std::time::Instant::now();
     let result = driver
@@ -1962,7 +2067,13 @@ pub async fn truncate_table(
         .await;
     let ms = t0.elapsed().as_millis() as u64;
     let sql = format!("TRUNCATE TABLE `{}`.`{}`", database, table);
-    state.emit_query_log(&sql, ms, result.as_ref().err().map(|e| e.as_str()));
+    state.emit_query_log_context(
+        Some(connection_id),
+        Some(&database),
+        &sql,
+        ms,
+        result.as_ref().err().map(|e| e.as_str()),
+    );
     result
 }
 

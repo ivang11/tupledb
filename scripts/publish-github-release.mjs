@@ -53,8 +53,8 @@ Run this after npm run build:app.
 Options:
   --version <version>  Version to publish. Defaults to package.json version.
   --tag <tag>          Git tag/release name. Defaults to v<version>.
-  --repo <owner/repo>  GitHub repo. Defaults to git remote origin or IvanG11/db-viewer.
-  --notes <text>       Release notes. Defaults to "DB Viewer <version>".
+  --repo <owner/repo>  GitHub repo. Defaults to git remote origin or ivang11/tupledb.
+  --notes <text>       Release notes. Defaults to "TupleDB <version>".
   --draft             Create the release as draft if it does not exist.
   --dry-run           Generate latest.json and print gh commands without uploading.
 `)
@@ -142,8 +142,8 @@ function releaseExists(tag, repo) {
 const args = parseArgs(process.argv.slice(2))
 const version = args.version ?? getPackageVersion()
 const tag = args.tag ?? `v${version}`
-const repo = args.repo ?? getRepoFromGit() ?? 'IvanG11/db-viewer'
-const notes = args.notes ?? `DB Viewer ${version}`
+const repo = args.repo ?? getRepoFromGit() ?? 'ivang11/tupledb'
+const notes = args.notes ?? `TupleDB ${version}`
 const appImagePath = findAppImage(version)
 const signaturePath = `${appImagePath}.sig`
 

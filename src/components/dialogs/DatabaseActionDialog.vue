@@ -1,33 +1,9 @@
-<script setup lang="ts">
-import { Trash2Icon } from "lucide-vue-next";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog";
-
-const props = defineProps<{
-  open: boolean;
-  databaseName: string;
-  isExecuting: boolean;
-}>();
-
-const emit = defineEmits<{
-  "update:open": [val: boolean];
-  confirm: [];
-}>();
-</script>
-
 <template>
   <Dialog
     :open="open"
-    @update:open="(val) => !val && !isExecuting && emit('update:open', val)"
+    @update:open="(val: boolean) => !val && !isExecuting && emit('update:open', val)"
   >
-    <DialogContent class="sm:max-w-[420px]">
+    <DialogContent class="sm:max-w-105">
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2">
           <Trash2Icon class="size-5 text-destructive" />
@@ -67,3 +43,27 @@ const emit = defineEmits<{
     </DialogContent>
   </Dialog>
 </template>
+
+<script setup lang="ts">
+import { Trash2Icon } from "lucide-vue-next";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+
+defineProps<{
+  open: boolean;
+  databaseName: string;
+  isExecuting: boolean;
+}>();
+
+const emit = defineEmits<{
+  "update:open": [val: boolean];
+  confirm: [];
+}>();
+</script>

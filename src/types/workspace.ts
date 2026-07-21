@@ -1,3 +1,8 @@
+export type TableViewMode =
+  | 'content'
+  | 'structure'
+  | 'indexes'
+
 export interface TableTab {
   type: 'table'
   id: string
@@ -15,13 +20,15 @@ export interface TableTab {
   ddl: string | null
   page: number
   pageSize: number
-  viewMode: 'content' | 'structure'
+  viewMode: TableViewMode
   filters: any | null
   sortColumn: string | null
   sortDesc: boolean
   pendingChanges: Record<string, Record<string, any>>
   pendingDeletions: Record<string, boolean>
+  pendingInserts: Array<{ values: Array<{ column: string; value: any }> }>
   pendingTruncate: boolean
+  pendingDrop: boolean
   selectedRowPk: string | null
   selectedRowPks: string[]
   inlineEditColumn: string | null
@@ -33,6 +40,11 @@ export interface QueryTab {
   connectionId: string
   database: string | null
   sql: string
+  queryResult?: any | null
+  queryError?: string | null
+  executionTime?: number | null
+  resultRowsLimited?: boolean
+  resultTotalRows?: number | null
 }
 
 export type AnyTab = TableTab | QueryTab
@@ -41,7 +53,7 @@ export interface PaneState {
   id: string
   tabs: AnyTab[]
   activeTabId: string | null
-  viewMode: 'content' | 'structure'
+  viewMode: TableViewMode
   page: number
   pageSize: number
   showFilters: boolean

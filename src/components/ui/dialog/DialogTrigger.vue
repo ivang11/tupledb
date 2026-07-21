@@ -1,4 +1,10 @@
-<script setup>
+<template>
+  <DialogTrigger data-slot="dialog-trigger" v-bind="props">
+    <slot />
+  </DialogTrigger>
+</template>
+
+<script setup lang="ts">
 import { DialogTrigger } from "reka-ui";
 
 const props = defineProps({
@@ -7,8 +13,3 @@ const props = defineProps({
 });
 </script>
 
-<template>
-  <DialogTrigger data-slot="dialog-trigger" v-bind="props">
-    <slot />
-  </DialogTrigger>
-</template>

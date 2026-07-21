@@ -1,55 +1,3 @@
-<script setup lang="ts">
-import { ref, nextTick } from 'vue'
-import { SearchIcon, XIcon, CopyIcon, CheckIcon, ArrowRightIcon } from 'lucide-vue-next'
-import { Label } from '@/components/ui/label'
-import { ScrollArea } from '@/components/ui/scroll-area'
-
-const props = defineProps<{
-  paneId: string
-  row: Record<string, any>
-  columns: any[]
-  primaryKey: string | null
-  fkMap: Record<string, { table: string; column: string }>
-  pendingDeletions: Record<string, boolean>
-  width: number
-  getCellValue: (row: any, colName: string) => string
-}>()
-
-const emit = defineEmits<{
-  'close': []
-  'cell-input': [colName: string, value: string]
-  'navigate-related': [table: string, column: string, value: any]
-  'start-resize': [e: MouseEvent]
-}>()
-
-const fieldSearch = ref('')
-const copiedField = ref<string | null>(null)
-
-function filteredColumns() {
-  if (!fieldSearch.value) return props.columns
-  return props.columns.filter((c: any) => c.name.toLowerCase().includes(fieldSearch.value.toLowerCase()))
-}
-
-async function copyValue(colName: string, value: any) {
-  const text = value === null || value === undefined ? '' : String(value)
-  await navigator.clipboard.writeText(text)
-  copiedField.value = colName
-  setTimeout(() => { copiedField.value = null }, 1500)
-}
-
-function autoResize(el: HTMLTextAreaElement | null) {
-  if (!el) return
-  nextTick(() => {
-    el.style.height = 'auto'
-    el.style.height = el.scrollHeight + 'px'
-  })
-}
-
-const isReadOnly = () => !props.primaryKey
-const pkVal = () => props.primaryKey ? String(props.row[props.primaryKey]) : ''
-const isPendingDelete = () => !!props.pendingDeletions[pkVal()]
-</script>
-
 <template>
   <aside
     data-row-detail-panel
@@ -115,11 +63,21 @@ const isPendingDelete = () => !!props.pendingDeletions[pkVal()]
               <CopyIcon v-else class="size-3" />
             </button>
           </div>
-          <div class="flex items-start gap-1.5">
+          <div
+            class="rounded-md border border-input bg-background focus-within:ring-1 focus-within:ring-ring"
+            :class="[
+              fkMap[col.name] ? 'flex items-start px-3 py-1.5' : '',
+              isPendingDelete() ? 'opacity-50 cursor-not-allowed' : '',
+            ]"
+          >
             <textarea
               :ref="(el) => autoResize(el as HTMLTextAreaElement)"
               rows="1"
-              class="flex-1 min-w-0 rounded-md border border-input bg-background px-3 py-1.5 text-xs font-mono resize-none overflow-hidden leading-relaxed focus:outline-none focus:ring-1 focus:ring-ring read-only:bg-muted/20 read-only:text-foreground/80 disabled:opacity-50 disabled:cursor-not-allowed"
+              class="min-w-0 text-xs font-mono resize-none overflow-hidden leading-relaxed focus:outline-none read-only:text-foreground/80 disabled:cursor-not-allowed"
+              :class="fkMap[col.name]
+                ? 'shrink p-0'
+                : 'w-full rounded-md border-0 bg-background px-3 py-1.5 focus:ring-1 focus:ring-ring read-only:bg-muted/20 disabled:opacity-50'"
+              :style="fkMap[col.name] ? { width: fieldWidth(row, col.name) } : undefined"
               :readonly="isReadOnly()"
               :disabled="isPendingDelete()"
               :value="getCellValue(row, col.name)"
@@ -135,11 +93,11 @@ const isPendingDelete = () => !!props.pendingDeletions[pkVal()]
             <button
               v-if="fkMap[col.name]"
               type="button"
-              class="mt-1 size-7 shrink-0 flex items-center justify-center rounded-md text-primary/50 hover:text-primary hover:bg-primary/10 transition-colors"
+              class="mt-0.5 ml-1 shrink-0 flex items-center justify-center rounded text-foreground/80 hover:text-foreground transition-colors"
               :title="`Go to ${fkMap[col.name].table}`"
               @click="emit('navigate-related', fkMap[col.name].table, fkMap[col.name].column, row[col.name])"
             >
-              <ArrowRightIcon class="size-3.5" />
+              <ArrowRightIcon class="size-3" />
             </button>
           </div>
           <p class="text-[10px] text-foreground/60 font-mono">{{ col.type_name }}</p>
@@ -148,3 +106,59 @@ const isPendingDelete = () => !!props.pendingDeletions[pkVal()]
     </ScrollArea>
   </aside>
 </template>
+
+<script setup lang="ts">
+import { ref, nextTick } from 'vue'
+import { SearchIcon, XIcon, CopyIcon, CheckIcon, ArrowRightIcon } from 'lucide-vue-next'
+import { Label } from '@/components/ui/label'
+import { ScrollArea } from '@/components/ui/scroll-area'
+
+const props = defineProps<{
+  paneId: string
+  row: Record<string, any>
+  columns: any[]
+  primaryKey: string | null
+  fkMap: Record<string, { table: string; column: string }>
+  pendingDeletions: Record<string, boolean>
+  width: number
+  getCellValue: (row: any, colName: string) => string
+}>()
+
+const emit = defineEmits<{
+  'close': []
+  'cell-input': [colName: string, value: string]
+  'navigate-related': [table: string, column: string, value: any]
+  'start-resize': [e: MouseEvent]
+}>()
+
+const fieldSearch = ref('')
+const copiedField = ref<string | null>(null)
+
+function filteredColumns() {
+  if (!fieldSearch.value) return props.columns
+  return props.columns.filter((c: any) => c.name.toLowerCase().includes(fieldSearch.value.toLowerCase()))
+}
+
+async function copyValue(colName: string, value: any) {
+  const text = value === null || value === undefined ? '' : String(value)
+  await navigator.clipboard.writeText(text)
+  copiedField.value = colName
+  setTimeout(() => { copiedField.value = null }, 1500)
+}
+
+function autoResize(el: HTMLTextAreaElement | null) {
+  if (!el) return
+  nextTick(() => {
+    el.style.height = 'auto'
+    el.style.height = el.scrollHeight + 'px'
+  })
+}
+
+const isReadOnly = () => !props.primaryKey
+const pkVal = () => props.primaryKey ? String(props.row[props.primaryKey]) : ''
+const isPendingDelete = () => !!props.pendingDeletions[pkVal()]
+const fieldWidth = (row: Record<string, any>, colName: string) => {
+  const length = Math.max(props.getCellValue(row, colName).length, 1)
+  return `min(100%, ${length}ch)`
+}
+</script>

@@ -1,13 +1,6 @@
-<script setup lang="ts">
-import { CheckCircleIcon, XCircleIcon, InfoIcon, XIcon } from 'lucide-vue-next'
-import { useToast } from '@/composables/useToast'
-
-const { toasts, dismiss } = useToast()
-</script>
-
 <template>
   <Teleport to="body">
-    <div class="fixed bottom-10 right-4 z-[200] flex flex-col gap-2 pointer-events-none">
+    <div class="fixed bottom-10 right-4 z-200 flex flex-col gap-2 pointer-events-none">
       <TransitionGroup
         enter-active-class="transition-all duration-300 ease-out"
         enter-from-class="opacity-0 translate-x-4 scale-95"
@@ -19,7 +12,7 @@ const { toasts, dismiss } = useToast()
         <div
           v-for="toast in toasts"
           :key="toast.id"
-          class="pointer-events-auto flex items-start gap-3 rounded-lg border shadow-xl px-4 py-3 min-w-[280px] max-w-[400px]"
+          class="pointer-events-auto flex items-start gap-3 rounded-lg border shadow-xl px-4 py-3 min-w-70 max-w-100"
           :class="{
             'bg-card border-green-500/20': toast.type === 'success',
             'bg-card border-destructive/20': toast.type === 'error',
@@ -57,3 +50,11 @@ const { toasts, dismiss } = useToast()
     </div>
   </Teleport>
 </template>
+
+<script setup lang="ts">
+import { CheckCircleIcon, XCircleIcon, InfoIcon, XIcon } from 'lucide-vue-next'
+import { useToast } from '@/composables/useToast'
+
+const { toasts, dismiss } = useToast()
+</script>
+

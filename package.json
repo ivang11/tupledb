@@ -1,7 +1,7 @@
 {
-  "name": "db-viewer",
+  "name": "tupledb",
   "private": true,
-  "version": "0.6.11",
+  "version": "0.7.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,7 @@
     "test:component": "vitest run",
     "preview": "vite preview",
     "dev:app": "node node_modules/@tauri-apps/cli/tauri.js dev",
-    "build:app": "NO_STRIP=true node node_modules/@tauri-apps/cli/tauri.js build",
+    "build:app": "NO_STRIP=true node node_modules/@tauri-apps/cli/tauri.js build --config '{\"bundle\":{\"createUpdaterArtifacts\":false}}'",
     "build:app:ci": "node node_modules/@tauri-apps/cli/tauri.js build",
     "build:app:signed": "node scripts/build-signed-release.mjs",
     "build:app:signed:ci": "TAURI_BUILD_SCRIPT=build:app:ci node scripts/build-signed-release.mjs",
@@ -38,8 +38,7 @@
     "sql-formatter": "^15.7.3",
     "tailwind-merge": "^3.0.1",
     "uuid": "^11.0.5",
-    "vue": "^3.5.13",
-    "vue-router": "^4.5.0"
+    "vue": "^3.5.13"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.3",

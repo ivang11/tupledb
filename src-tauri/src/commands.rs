@@ -2,10 +2,16 @@ use crate::connections::Connection;
 use crate::mysql::MySqlDriver;
 use crate::ssh::SshTunnel;
 use crate::state::{ActiveConnection, AppState};
-use sqlx::{mysql::MySqlConnectOptions, mysql::MySqlSslMode};
+use sqlx::{mysql::MySqlConnectOptions, mysql::MySqlPoolOptions, mysql::MySqlSslMode};
 use std::sync::Arc;
 use tauri::State;
 use uuid::Uuid;
+
+fn non_empty_secret(secret: Option<&String>) -> Option<&str> {
+    secret
+        .map(String::as_str)
+        .filter(|secret| !secret.is_empty())
+}
 
 #[tauri::command]
 pub async fn get_connections(state: State<'_, AppState>) -> Result<Vec<Connection>, String> {
@@ -75,7 +81,7 @@ pub async fn add_connection(
                         },
                     ) => {
                         if new_pp.as_deref().unwrap_or("").is_empty()
-                            && old_pp.as_deref().map_or(false, |p| !p.is_empty())
+                            && old_pp.as_deref().is_some_and(|p| !p.is_empty())
                         {
                             *new_pp = old_pp.clone();
                             println!("  -> Preserving existing SSH key passphrase");
@@ -114,7 +120,7 @@ pub async fn remove_connection(state: State<'_, AppState>, id: Uuid) -> Result<(
 }
 
 #[tauri::command]
-pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Result<(), String> {
+pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Result<String, String> {
     println!(
         "Connecting to {} ({})",
         connection.name, connection.mysql.host
@@ -143,24 +149,40 @@ pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Resu
         .username(&connection.mysql.user)
         .ssl_mode(MySqlSslMode::Disabled);
 
-    if let Some(pw) = &connection.mysql.password {
+    if let Some(pw) = non_empty_secret(connection.mysql.password.as_ref()) {
         opts = opts.password(pw);
     }
 
     println!("  -> Establishing MySQL connection pool...");
-    let pool = sqlx::mysql::MySqlPoolOptions::new()
+    let mut pool_options = MySqlPoolOptions::new()
         .acquire_timeout(std::time::Duration::from_secs(
             connection.timeout_secs.unwrap_or(30),
         ))
-        .test_before_acquire(true)
-        .connect_with(opts)
-        .await
-        .map_err(|e| {
-            println!("  -> Connection failed: {}", e);
-            format!("MySQL Connection failed: {}", e)
-        })?;
+        .test_before_acquire(true);
+
+    if tunnel.is_some() {
+        // SSH forwarding is stable with a single long-lived MySQL connection.
+        // Some servers/bastions close parallel forwarded channels early, which
+        // surfaces from sqlx as "expected to read 4 bytes, got 0 bytes at EOF".
+        pool_options = pool_options
+            .max_connections(1)
+            .min_connections(0)
+            .idle_timeout(std::time::Duration::from_secs(60))
+            .max_lifetime(std::time::Duration::from_secs(15 * 60));
+    }
+
+    let pool = pool_options.connect_with(opts).await.map_err(|e| {
+        println!("  -> Connection failed: {}", e);
+        format!("MySQL Connection failed: {}", e)
+    })?;
 
     println!("  -> Connection successful!");
+
+    let server_version = sqlx::query_scalar::<_, String>("SELECT VERSION()")
+        .fetch_one(&pool)
+        .await
+        .unwrap_or_else(|_| "Unknown".to_string());
+    println!("  -> Server version: {}", server_version);
 
     // Detect if the server enforces ONLY_FULL_GROUP_BY (MySQL 5.7+).
     // We use this to disable it per-session during export reads so that VIEWs
@@ -182,7 +204,7 @@ pub async fn connect(state: State<'_, AppState>, connection: Connection) -> Resu
     }
 
     sessions.insert(connection.id, ActiveConnection { driver, tunnel });
-    Ok(())
+    Ok(server_version)
 }
 
 #[tauri::command]
@@ -190,17 +212,16 @@ pub async fn export_connections(state: State<'_, AppState>, path: String) -> Res
     let connections = state.connections_config.read();
     let content = serde_json::to_string_pretty(&*connections)
         .map_err(|e| format!("Failed to serialize connections: {}", e))?;
-    std::fs::write(&path, content)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
+    std::fs::write(&path, content).map_err(|e| format!("Failed to write file: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn import_connections(state: State<'_, AppState>, path: String) -> Result<usize, String> {
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
-    let imported: std::collections::HashMap<Uuid, Connection> = serde_json::from_str(&content)
-        .map_err(|e| format!("Invalid connections file: {}", e))?;
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?;
+    let imported: std::collections::HashMap<Uuid, Connection> =
+        serde_json::from_str(&content).map_err(|e| format!("Invalid connections file: {}", e))?;
     let count = imported.len();
     let mut connections = state.connections_config.write();
     for (id, conn) in imported {
@@ -245,7 +266,7 @@ pub async fn test_connection(
         .username(&connection.mysql.user)
         .ssl_mode(MySqlSslMode::Disabled);
 
-    if let Some(pw) = &connection.mysql.password {
+    if let Some(pw) = non_empty_secret(connection.mysql.password.as_ref()) {
         opts = opts.password(pw);
     }
 
@@ -253,10 +274,21 @@ pub async fn test_connection(
         opts = opts.database(db);
     }
 
-    let pool = sqlx::mysql::MySqlPoolOptions::new()
+    let mut pool_options = MySqlPoolOptions::new()
         .acquire_timeout(std::time::Duration::from_secs(
             connection.timeout_secs.unwrap_or(30),
         ))
+        .test_before_acquire(true);
+
+    if _tunnel.is_some() {
+        pool_options = pool_options
+            .max_connections(1)
+            .min_connections(0)
+            .idle_timeout(std::time::Duration::from_secs(60))
+            .max_lifetime(std::time::Duration::from_secs(15 * 60));
+    }
+
+    let pool = pool_options
         .connect_with(opts)
         .await
         .map_err(|e| format!("MySQL Connection failed: {}", e))?;

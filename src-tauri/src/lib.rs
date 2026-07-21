@@ -22,6 +22,13 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             app.manage(AppState::new(app.handle()));
+
+            if let (Some(window), Some(icon)) =
+                (app.get_webview_window("main"), app.default_window_icon())
+            {
+                window.set_icon(icon.clone())?;
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -38,6 +45,7 @@ pub fn run() {
             crate::schema::get_tables,
             crate::schema::get_table_structure,
             crate::schema::export_database,
+            crate::schema::cancel_export,
             crate::schema::import_sql,
             crate::schema::cancel_import,
             crate::mysql::get_table_data,

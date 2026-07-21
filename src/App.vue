@@ -1,9 +1,10 @@
-<script setup lang="ts">
-import { RouterView } from 'vue-router'
-</script>
-
 <template>
   <div class="h-screen w-screen overflow-hidden bg-background">
-    <RouterView />
+    <AppLayout />
   </div>
 </template>
+
+<script setup lang="ts">
+import AppLayout from '@/layouts/AppLayout.vue'
+</script>
+

@@ -1,3 +1,9 @@
+<template>
+  <div :class="viewportClass" v-bind="attrs">
+    <slot />
+  </div>
+</template>
+
 <script setup lang="ts">
 import { computed, useAttrs, type HTMLAttributes } from "vue";
 import { cn } from "@/lib/utils";
@@ -18,8 +24,3 @@ const viewportClass = computed(() =>
 );
 </script>
 
-<template>
-  <div :class="viewportClass" v-bind="attrs">
-    <slot />
-  </div>
-</template>

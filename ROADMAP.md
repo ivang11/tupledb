@@ -1,4 +1,4 @@
-# Roadmap: DB Viewer
+# Roadmap: TupleDB
 
 Cliente de bases de datos tipo TablePlus construido con Tauri v2, Rust y Vue 3.
 
@@ -148,7 +148,7 @@ Checklist de cobertura actual y recomendada:
 - [x] **Export SQL helpers** — Formateo de valores `NULL`, strings escapados, booleanos y numeros para exportacion.
 - [x] **Import SQL splitter** — Separacion incremental de statements, flush final, `;` dentro de strings/backticks, comentarios de linea/bloque y tokens tipo comentario dentro de strings.
 - [x] **Compactacion de `INSERT`s** — Parsing de inserts compactables, rechazo de statements no compatibles y merge conservador de inserts con el mismo prefijo.
-- [x] **Integracion MySQL opcional** — Suite ignorada por defecto con `DB_VIEWER_TEST_MYSQL_URL`; cubre lectura real con `sqlx`, `NULL`, string vacio, decimal, boolean, JSON, filtros/sort, keyset, vistas y estructura.
+- [x] **Integracion MySQL opcional** — Suite ignorada por defecto con `TUPLEDB_TEST_MYSQL_URL`; cubre lectura real con `sqlx`, `NULL`, string vacio, decimal, boolean, JSON, filtros/sort, keyset, vistas y estructura.
 - [x] **Import session contra MySQL real** — Ejecutar statements representativos con comments, strings con `;` y multiples batches sobre una sesion persistente; validar filas importadas.
 - [x] **Operaciones destructivas** — Tests de `drop_table`, `drop_tables`, `truncate_table` y `drop_database` contra una DB temporal, incluyendo nombres raros y FK checks.
 - [x] **Aplicacion de cambios** — Tests de `insert_row` y `apply_table_changes` para UPDATE/DELETE transaccional, `NULL`, empty string, booleanos y expresiones SQL permitidas.

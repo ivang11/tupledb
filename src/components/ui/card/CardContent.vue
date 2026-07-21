@@ -1,4 +1,10 @@
-<script setup>
+<template>
+  <div data-slot="card-content" :class="cn('px-6', props.class)">
+    <slot />
+  </div>
+</template>
+
+<script setup lang="ts">
 import { cn } from "@/lib/utils";
 
 const props = defineProps({
@@ -10,8 +16,4 @@ const props = defineProps({
 });
 </script>
 
-<template>
-  <div data-slot="card-content" :class="cn('px-6', props.class)">
-    <slot />
-  </div>
-</template>
+

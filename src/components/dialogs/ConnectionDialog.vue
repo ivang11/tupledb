@@ -1,124 +1,19 @@
-<script setup lang="ts">
-import { ref, watch } from 'vue'
-import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
-import { useConnectionStore } from '@/stores/connections'
-import type { Connection } from '@/types/connection'
-import {
-  ShieldCheckIcon,
-  HardDriveIcon,
-  FolderOpenIcon,
-} from 'lucide-vue-next'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog'
-
-const props = withDefaults(defineProps<{
-  open: boolean
-  connection: Connection
-  isSaving?: boolean
-  showConnectButton?: boolean
-}>(), {
-  isSaving: false,
-  showConnectButton: false,
-})
-
-const emit = defineEmits<{
-  'update:open': [val: boolean]
-  'save': [conn: Connection, andConnect: boolean]
-}>()
-
-const store = useConnectionStore()
-
-const sshEnabled = ref(false)
-const sshAuthType = ref<'password' | 'key'>('password')
-const sshForm = ref({ host: '', port: 22, user: '', password: '', private_key_path: '', passphrase: '' })
-const isTesting = ref(false)
-const testResult = ref<{ ok: boolean; msg: string } | null>(null)
-
-const isEdit = ref(false)
-
-watch(() => [props.open, props.connection] as const, ([open]) => {
-  if (!open) return
-  testResult.value = null
-  isEdit.value = store.connections.some(c => c.id === props.connection.id)
-
-  sshEnabled.value = !!props.connection.ssh
-  if (props.connection.ssh) {
-    const ssh = props.connection.ssh
-    sshForm.value = {
-      host: ssh.host,
-      port: ssh.port,
-      user: ssh.user,
-      password: ssh.auth.type === 'password' ? ssh.auth.password : '',
-      private_key_path: ssh.auth.type === 'key' ? ssh.auth.private_key_path : '',
-      passphrase: ssh.auth.type === 'key' ? (ssh.auth.passphrase ?? '') : '',
-    }
-    sshAuthType.value = ssh.auth.type === 'password' ? 'password' : 'key'
-  } else {
-    sshForm.value = { host: '', port: 22, user: '', password: '', private_key_path: '', passphrase: '' }
-    sshAuthType.value = 'password'
-  }
-}, { immediate: true })
-
-function buildConn(): Connection {
-  const conn = { ...props.connection }
-  if (sshEnabled.value) {
-    conn.ssh = {
-      host: sshForm.value.host,
-      port: sshForm.value.port,
-      user: sshForm.value.user,
-      auth: sshAuthType.value === 'password'
-        ? { type: 'password' as const, password: sshForm.value.password }
-        : { type: 'key' as const, private_key_path: sshForm.value.private_key_path, passphrase: sshForm.value.passphrase || undefined },
-    }
-  } else {
-    conn.ssh = undefined
-  }
-  return conn
-}
-
-async function test() {
-  isTesting.value = true
-  testResult.value = null
-  try {
-    const msg = await store.testConnection(buildConn())
-    testResult.value = { ok: true, msg: msg ?? 'Connection successful' }
-  } catch (e: any) {
-    testResult.value = { ok: false, msg: String(e) }
-  } finally {
-    isTesting.value = false
-  }
-}
-
-async function pickSshKey() {
-  try {
-    const selected = await openFileDialog({
-      multiple: false,
-    })
-    if (selected && typeof selected === 'string') {
-      sshForm.value.private_key_path = selected
-    }
-  } catch (e) {
-    console.error('Error picking SSH key:', e)
-  }
-}
-</script>
-
 <template>
-  <Dialog :open="open" @update:open="(val) => emit('update:open', val)">
+  <Dialog
+    :open="open"
+    @update:open="(val: boolean) => emit('update:open', val)"
+  >
     <DialogContent class="sm:max-w-lg overflow-y-auto max-h-[90vh]">
       <DialogHeader>
-        <DialogTitle>{{ isEdit ? 'Edit Connection' : 'New Connection' }}</DialogTitle>
+        <DialogTitle>{{
+          isEdit ? "Edit Connection" : "New Connection"
+        }}</DialogTitle>
         <DialogDescription>
-          {{ isEdit ? 'Update your connection settings' : 'Configure your MySQL connection settings' }}
+          {{
+            isEdit
+              ? "Update your connection settings"
+              : "Configure your MySQL connection settings"
+          }}
         </DialogDescription>
       </DialogHeader>
 
@@ -142,25 +37,39 @@ async function pickSshKey() {
           </div>
         </div>
 
-        <div v-if="connection.environment === 'PRODUCTION'" class="flex items-center justify-between rounded-md border border-red-500/20 bg-red-500/5 px-3 py-2.5">
+        <div
+          class="flex items-center justify-between rounded-md border border-border bg-muted/20 px-3 py-2.5"
+        >
           <div class="space-y-0.5">
-            <p class="text-xs font-semibold text-red-500">Allow write operations</p>
-            <p class="text-xs text-muted-foreground">By default, production is read-only</p>
+            <p class="text-xs font-semibold text-foreground">Read-only mode</p>
+            <p class="text-xs text-muted-foreground">
+              Block write operations for this connection
+            </p>
           </div>
           <div
-            @click="connection.allow_writes = !connection.allow_writes"
-            :class="['relative w-9 h-5 rounded-full transition-colors cursor-pointer shrink-0', connection.allow_writes ? 'bg-red-500' : 'bg-muted']"
+            @click="toggleReadOnly"
+            :class="[
+              'relative w-9 h-5 rounded-full transition-colors cursor-pointer shrink-0',
+              connection.allow_writes === false ? 'bg-primary' : 'bg-muted',
+            ]"
           >
-            <div :class="['absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform', connection.allow_writes ? 'translate-x-4' : 'translate-x-0']" />
+            <div
+              :class="[
+                'absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform',
+                connection.allow_writes === false
+                  ? 'translate-x-4'
+                  : 'translate-x-0',
+              ]"
+            />
           </div>
         </div>
-
-
 
         <Separator />
 
         <div class="space-y-4">
-          <div class="flex items-center gap-2 text-xs font-bold text-muted-foreground uppercase tracking-wider">
+          <div
+            class="flex items-center gap-2 text-xs font-bold text-muted-foreground uppercase tracking-wider"
+          >
             <HardDriveIcon class="size-3.5" /> MySQL Settings
           </div>
           <div class="grid grid-cols-12 gap-3">
@@ -180,17 +89,41 @@ async function pickSshKey() {
             </div>
             <div class="space-y-2">
               <Label>Password</Label>
-              <Input v-model="connection.mysql.password" type="password" :placeholder="isEdit ? 'Leave blank to keep existing' : '••••••••'" />
+              <Input
+                v-model="connection.mysql.password"
+                type="password"
+                :placeholder="
+                  isEdit ? 'Leave blank to keep existing' : '••••••••'
+                "
+              />
             </div>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div class="space-y-2">
-              <Label>Database <span class="text-muted-foreground font-normal">(optional)</span></Label>
-              <Input v-model="connection.mysql.database" placeholder="Leave blank to pick after connecting" />
+              <Label
+                >Database
+                <span class="text-muted-foreground font-normal"
+                  >(optional)</span
+                ></Label
+              >
+              <Input
+                v-model="connection.mysql.database"
+                placeholder="Leave blank to pick after connecting"
+              />
             </div>
             <div class="space-y-2">
-              <Label>Timeout <span class="text-muted-foreground font-normal">(seconds)</span></Label>
-              <Input v-model.number="connection.timeout_secs" type="number" min="1" placeholder="30" />
+              <Label
+                >Timeout
+                <span class="text-muted-foreground font-normal"
+                  >(seconds)</span
+                ></Label
+              >
+              <Input
+                v-model.number="connection.timeout_secs"
+                type="number"
+                min="1"
+                placeholder="30"
+              />
             </div>
           </div>
         </div>
@@ -202,11 +135,21 @@ async function pickSshKey() {
           <label class="flex items-center gap-3 cursor-pointer select-none">
             <div
               @click="sshEnabled = !sshEnabled"
-              :class="['relative w-9 h-5 rounded-full transition-colors shrink-0', sshEnabled ? 'bg-primary' : 'bg-muted']"
+              :class="[
+                'relative w-9 h-5 rounded-full transition-colors shrink-0',
+                sshEnabled ? 'bg-primary' : 'bg-muted',
+              ]"
             >
-              <div :class="['absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform', sshEnabled ? 'translate-x-4' : 'translate-x-0']" />
+              <div
+                :class="[
+                  'absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow transition-transform',
+                  sshEnabled ? 'translate-x-4' : 'translate-x-0',
+                ]"
+              />
             </div>
-            <div class="flex items-center gap-2 text-xs font-bold text-muted-foreground uppercase tracking-wider">
+            <div
+              class="flex items-center gap-2 text-xs font-bold text-muted-foreground uppercase tracking-wider"
+            >
               <ShieldCheckIcon class="size-3.5" /> SSH Tunnel
             </div>
           </label>
@@ -215,7 +158,10 @@ async function pickSshKey() {
             <div class="grid grid-cols-12 gap-3">
               <div class="col-span-8 space-y-2">
                 <Label>SSH Host</Label>
-                <Input v-model="sshForm.host" placeholder="bastion.example.com" />
+                <Input
+                  v-model="sshForm.host"
+                  placeholder="bastion.example.com"
+                />
               </div>
               <div class="col-span-4 space-y-2">
                 <Label>Port</Label>
@@ -230,17 +176,35 @@ async function pickSshKey() {
             <div class="flex gap-2 pt-1">
               <button
                 @click="sshAuthType = 'password'"
-                :class="['flex-1 h-8 rounded-md text-xs font-bold border transition-all', sshAuthType === 'password' ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-input hover:border-primary/50']"
-              >Password</button>
+                :class="[
+                  'flex-1 h-8 rounded-md text-xs font-bold border transition-all',
+                  sshAuthType === 'password'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'text-muted-foreground border-input hover:border-primary/50',
+                ]"
+              >
+                Password
+              </button>
               <button
                 @click="sshAuthType = 'key'"
-                :class="['flex-1 h-8 rounded-md text-xs font-bold border transition-all', sshAuthType === 'key' ? 'bg-primary text-primary-foreground border-primary' : 'bg-transparent text-muted-foreground border-input hover:border-primary/50']"
-              >SSH Key</button>
+                :class="[
+                  'flex-1 h-8 rounded-md text-xs font-bold border transition-all',
+                  sshAuthType === 'key'
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'text-muted-foreground border-input hover:border-primary/50',
+                ]"
+              >
+                SSH Key
+              </button>
             </div>
 
             <div v-if="sshAuthType === 'password'" class="space-y-2">
               <Label>SSH Password</Label>
-              <Input v-model="sshForm.password" type="password" placeholder="••••••••" />
+              <Input
+                v-model="sshForm.password"
+                type="password"
+                placeholder="••••••••"
+              />
             </div>
 
             <div v-if="sshAuthType === 'key'" class="space-y-3">
@@ -263,8 +227,17 @@ async function pickSshKey() {
                 </div>
               </div>
               <div class="space-y-2">
-                <Label>Passphrase <span class="text-muted-foreground font-normal">(optional)</span></Label>
-                <Input v-model="sshForm.passphrase" type="password" placeholder="••••••••" />
+                <Label
+                  >Passphrase
+                  <span class="text-muted-foreground font-normal"
+                    >(optional)</span
+                  ></Label
+                >
+                <Input
+                  v-model="sshForm.passphrase"
+                  type="password"
+                  placeholder="••••••••"
+                />
               </div>
             </div>
           </div>
@@ -273,25 +246,195 @@ async function pickSshKey() {
 
       <div
         v-if="testResult"
-        :class="['text-xs px-3 py-2 rounded-md font-medium', testResult.ok ? 'bg-green-500/10 text-green-500' : 'bg-destructive/10 text-destructive']"
+        :class="[
+          'text-xs px-3 py-2 rounded-md font-medium',
+          testResult.ok
+            ? 'bg-green-500/10 text-green-500'
+            : 'bg-destructive/10 text-destructive',
+        ]"
       >
         {{ testResult.msg }}
       </div>
 
       <div class="flex items-center justify-between pt-4 border-t">
-        <Button variant="ghost" @click="emit('update:open', false)">Cancel</Button>
+        <Button variant="ghost" @click="emit('update:open', false)"
+          >Cancel</Button
+        >
         <div class="flex gap-2">
-          <Button variant="outline" :disabled="isTesting || isSaving" @click="test">
-            {{ isTesting ? 'Testing...' : 'Test' }}
+          <Button
+            variant="outline"
+            :disabled="isTesting || isSaving"
+            @click="test"
+          >
+            {{ isTesting ? "Testing..." : "Test" }}
           </Button>
-          <Button variant="outline" :disabled="isSaving || !connection.name" @click="emit('save', buildConn(), false)">
-            {{ isEdit ? 'Update' : 'Save only' }}
+          <Button
+            variant="outline"
+            :disabled="isSaving || !connection.name"
+            @click="emit('save', buildConn(), false)"
+          >
+            {{ isEdit ? "Update" : "Save only" }}
           </Button>
-          <Button v-if="showConnectButton" :disabled="isSaving || !connection.name" @click="emit('save', buildConn(), true)">
-            {{ isSaving ? 'Saving...' : 'Save & Connect' }}
+          <Button
+            v-if="showConnectButton"
+            :disabled="isSaving || !connection.name"
+            @click="emit('save', buildConn(), true)"
+          >
+            {{ isSaving ? "Saving..." : "Save & Connect" }}
           </Button>
         </div>
       </div>
     </DialogContent>
   </Dialog>
 </template>
+
+<script setup lang="ts">
+import { ref, watch } from "vue";
+import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
+import { useConnectionStore } from "@/stores/connections";
+import type { Connection } from "@/types/connection";
+import {
+  ShieldCheckIcon,
+  HardDriveIcon,
+  FolderOpenIcon,
+} from "lucide-vue-next";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+
+const props = withDefaults(
+  defineProps<{
+    open: boolean;
+    connection: Connection;
+    isSaving?: boolean;
+    showConnectButton?: boolean;
+  }>(),
+  {
+    isSaving: false,
+    showConnectButton: false,
+  },
+);
+
+const emit = defineEmits<{
+  "update:open": [val: boolean];
+  save: [conn: Connection, andConnect: boolean];
+}>();
+
+const store = useConnectionStore();
+
+const sshEnabled = ref(false);
+const sshAuthType = ref<"password" | "key">("password");
+const sshForm = ref({
+  host: "",
+  port: 22,
+  user: "",
+  password: "",
+  private_key_path: "",
+  passphrase: "",
+});
+const isTesting = ref(false);
+const testResult = ref<{ ok: boolean; msg: string } | null>(null);
+
+const isEdit = ref(false);
+
+watch(
+  () => [props.open, props.connection] as const,
+  ([open]) => {
+    if (!open) return;
+    testResult.value = null;
+    isEdit.value = store.connections.some((c) => c.id === props.connection.id);
+
+    sshEnabled.value = !!props.connection.ssh;
+    if (props.connection.ssh) {
+      const ssh = props.connection.ssh;
+      sshForm.value = {
+        host: ssh.host,
+        port: ssh.port,
+        user: ssh.user,
+        password: ssh.auth.type === "password" ? ssh.auth.password : "",
+        private_key_path:
+          ssh.auth.type === "key" ? ssh.auth.private_key_path : "",
+        passphrase: ssh.auth.type === "key" ? (ssh.auth.passphrase ?? "") : "",
+      };
+      sshAuthType.value = ssh.auth.type === "password" ? "password" : "key";
+    } else {
+      sshForm.value = {
+        host: "",
+        port: 22,
+        user: "",
+        password: "",
+        private_key_path: "",
+        passphrase: "",
+      };
+      sshAuthType.value = "password";
+    }
+  },
+  { immediate: true },
+);
+
+function buildConn(): Connection {
+  const conn = { ...props.connection };
+  conn.mysql = { ...props.connection.mysql };
+  const password = conn.mysql.password?.trim() ?? "";
+  const database = conn.mysql.database?.trim() ?? "";
+  conn.mysql.password = password || undefined;
+  conn.mysql.database = database || undefined;
+
+  if (sshEnabled.value) {
+    conn.ssh = {
+      host: sshForm.value.host,
+      port: sshForm.value.port,
+      user: sshForm.value.user,
+      auth:
+        sshAuthType.value === "password"
+          ? { type: "password" as const, password: sshForm.value.password }
+          : {
+              type: "key" as const,
+              private_key_path: sshForm.value.private_key_path,
+              passphrase: sshForm.value.passphrase || undefined,
+            },
+    };
+  } else {
+    conn.ssh = undefined;
+  }
+  return conn;
+}
+
+function toggleReadOnly() {
+  props.connection.allow_writes = props.connection.allow_writes === false;
+}
+
+async function test() {
+  isTesting.value = true;
+  testResult.value = null;
+  try {
+    const msg = await store.testConnection(buildConn());
+    testResult.value = { ok: true, msg: msg ?? "Connection successful" };
+  } catch (e: any) {
+    testResult.value = { ok: false, msg: String(e) };
+  } finally {
+    isTesting.value = false;
+  }
+}
+
+async function pickSshKey() {
+  try {
+    const selected = await openFileDialog({
+      multiple: false,
+    });
+    if (selected && typeof selected === "string") {
+      sshForm.value.private_key_path = selected;
+    }
+  } catch (e) {
+    console.error("Error picking SSH key:", e);
+  }
+}
+</script>

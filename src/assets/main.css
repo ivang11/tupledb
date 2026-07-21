@@ -25,88 +25,79 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
 }
 
 :root {
-  --radius: 0.75rem;
-  --background: #282c34;
-  --foreground: #d7dce2;
-  --card: #313640;
-  --card-foreground: #dce1e7;
-  --popover: #313640;
-  --popover-foreground: #dce1e7;
-  --primary: #3d6fd4;
-  --primary-foreground: #ffffff;
-  --secondary: #353b45;
-  --secondary-foreground: #d7dce2;
-  --muted: #323843;
-  --muted-foreground: #8b93a1;
-  --accent: #3a404b;
-  --accent-foreground: #e3e7ec;
-  --destructive: #e06c75;
-  --border: #414854;
-  --input: #3d4450;
-  --ring: #7aa2f7;
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: #252932;
-  --sidebar-foreground: #c8cdd5;
-  --sidebar-primary: #7aa2f7;
-  --sidebar-primary-foreground: #16181d;
-  --sidebar-accent: #343a45;
-  --sidebar-accent-foreground: #eef1f5;
-  --sidebar-border: #3d434f;
-  --sidebar-ring: #7aa2f7;
-}
+  --radius: 0.55rem;
 
-.dark {
-  --background: #282c34;
-  --foreground: #d7dce2;
-  --card: #313640;
-  --card-foreground: #dce1e7;
-  --popover: #313640;
-  --popover-foreground: #dce1e7;
-  --primary: #3d6fd4;
-  --primary-foreground: #ffffff;
-  --secondary: #353b45;
-  --secondary-foreground: #d7dce2;
-  --muted: #323843;
-  --muted-foreground: #8b93a1;
-  --accent: #3a404b;
-  --accent-foreground: #e3e7ec;
-  --destructive: #e06c75;
-  --border: #414854;
-  --input: #3d4450;
-  --ring: #7aa2f7;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: #252932;
-  --sidebar-foreground: #c8cdd5;
-  --sidebar-primary: #7aa2f7;
-  --sidebar-primary-foreground: #16181d;
-  --sidebar-accent: #343a45;
-  --sidebar-accent-foreground: #eef1f5;
-  --sidebar-border: #3d434f;
-  --sidebar-ring: #7aa2f7;
+  /* Backgrounds — cool slate, very low chroma */
+  --bg-0: oklch(0.21 0.006 270);
+  --bg-1: oklch(0.245 0.007 270);
+  --bg-2: oklch(0.275 0.008 270);
+  --bg-3: oklch(0.315 0.009 270);
+
+  /* Hairlines */
+  --line-1: oklch(0.30 0.010 270 / 0.55);
+  --line-2: oklch(0.30 0.010 270 / 0.30);
+  --line-faint: oklch(0.30 0.010 270 / 0.15);
+
+  /* Text */
+  --fg-1: oklch(0.965 0.004 270);
+  --fg-2: oklch(0.78 0.006 270);
+  --fg-3: oklch(0.58 0.008 270);
+  --fg-4: oklch(0.42 0.009 270);
+  --fg-5: oklch(0.32 0.010 270);
+
+  /* Mint accent */
+  --acc: oklch(0.58 0.155 158);
+  --acc-fg: oklch(0.98 0.005 158);
+  --acc-soft: oklch(0.58 0.155 158 / 0.12);
+  --acc-line: oklch(0.58 0.155 158 / 0.38);
+
+  /* Environment tints */
+  --env-local: oklch(0.82 0.155 158);
+  --env-prod: oklch(0.74 0.16 25);
+  --env-dev: oklch(0.78 0.14 80);
+  --env-staging: oklch(0.75 0.14 250);
+
+  /* Engine tints */
+  --eng-mysql: #00758f;
+  --eng-postgres: oklch(0.78 0.14 230);
+  --eng-sqlite: oklch(0.78 0.10 290);
+  --eng-mssql: oklch(0.78 0.14 25);
+  --eng-mongo: oklch(0.78 0.14 145);
+
+  /* PK tint (amber, distinct from mint connected state) */
+  --pk: oklch(0.78 0.14 80);
+
+  /* Type system */
+  --font-sans: "Inter Tight", "InterVariable", Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: "JetBrains Mono", "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* shadcn aliases mapped to design tokens */
+  --background: var(--bg-0);
+  --foreground: var(--fg-1);
+  --card: var(--bg-1);
+  --card-foreground: var(--fg-1);
+  --popover: var(--bg-2);
+  --popover-foreground: var(--fg-1);
+  --primary: var(--acc);
+  --primary-foreground: var(--acc-fg);
+  --secondary: var(--bg-2);
+  --secondary-foreground: var(--fg-1);
+  --muted: var(--bg-1);
+  --muted-foreground: var(--fg-3);
+  --accent: var(--bg-3);
+  --accent-foreground: var(--fg-1);
+  --destructive: oklch(0.7 0.18 25);
+  --border: var(--line-2);
+  --input: var(--bg-2);
+  --ring: var(--acc-line);
+  --sidebar: oklch(0.155 0.006 270);
+  --sidebar-foreground: var(--fg-2);
 }
 
 @layer base {
@@ -125,12 +116,85 @@
   }
 
   * {
-    @apply border-border outline-ring/50;
+    border-color: var(--border);
+    outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
   }
 
   body {
-    @apply bg-background text-foreground;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv11", "tnum";
+    font-synthesis: none;
+    -webkit-font-smoothing: antialiased;
+    letter-spacing: -0.005em;
   }
+
+  .font-mono,
+  pre,
+  code,
+  kbd,
+  samp {
+    font-family: var(--font-mono);
+    font-feature-settings: "zero", "ss01";
+  }
+}
+
+/* Engine glyph — 22px square with engine initial */
+.eng-glyph {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  background: var(--bg-2);
+  color: var(--fg-3);
+  border: 1px solid var(--line-2);
+}
+
+.eng-glyph[data-engine="mysql"] {
+  color: var(--eng-mysql);
+  border-color: rgb(0 117 143 / 0.35);
+  background: rgb(0 117 143 / 0.08);
+}
+
+.eng-glyph[data-engine="postgres"] {
+  color: var(--eng-postgres);
+  border-color: oklch(0.78 0.14 230 / 0.35);
+  background: oklch(0.78 0.14 230 / 0.08);
+}
+
+.eng-glyph[data-engine="sqlite"] {
+  color: var(--eng-sqlite);
+  border-color: oklch(0.78 0.10 290 / 0.35);
+  background: oklch(0.78 0.10 290 / 0.08);
+}
+
+.eng-glyph[data-engine="mssql"] {
+  color: var(--eng-mssql);
+  border-color: oklch(0.78 0.14 25 / 0.35);
+  background: oklch(0.78 0.14 25 / 0.08);
+}
+
+.eng-glyph[data-engine="mongo"] {
+  color: var(--eng-mongo);
+  border-color: oklch(0.78 0.14 145 / 0.35);
+  background: oklch(0.78 0.14 145 / 0.08);
+}
+
+/* Wordmark */
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--fg-1);
+}
+
+.wordmark .wordmark-accent {
+  color: var(--acc);
 }
 
 /* Scrollbars: colores válidos con variables hex + refuerzo al hover del panel (estilo TablePlus) */
@@ -188,4 +252,3 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:active {
   background-color: color-mix(in srgb, var(--primary) 55%, transparent);
 }
-

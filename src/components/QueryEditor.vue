@@ -1,6 +1,388 @@
+<template>
+  <div class="flex h-full flex-1 flex-col min-h-0 overflow-hidden">
+    <!-- Toolbar -->
+    <div class="h-12 border-b flex items-center gap-3 px-4 bg-background/50 backdrop-blur-sm shrink-0 relative z-10">
+      <div class="flex-1" />
+
+      <!-- Execution time badge -->
+      <div v-if="executionTime !== null" class="flex items-center gap-1 text-[10px] font-bold text-muted-foreground">
+        <ClockIcon class="size-3" />
+        {{ formatDuration(executionTime) }}
+      </div>
+
+      <!-- Beautify button -->
+      <button
+        @click="beautify"
+        :disabled="!sql.trim()"
+        class="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        title="Beautify SQL (⌘⇧F)"
+      >
+        <WandSparklesIcon class="size-3.5" />
+        <span class="hidden sm:inline">Format</span>
+      </button>
+
+      <!-- Save query button -->
+      <button
+        @click="openSaveDialog(null)"
+        :disabled="!sql.trim()"
+        class="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        title="Guardar query"
+      >
+        <BookmarkPlusIcon class="size-3.5" />
+        <span class="hidden sm:inline">Guardar</span>
+      </button>
+
+      <!-- Saved queries toggle -->
+      <button
+        @click="toggleSaved"
+        :class="[
+          'flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold transition-colors',
+          showSaved
+            ? 'bg-primary/10 text-primary'
+            : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+        ]"
+        title="Queries guardadas"
+      >
+        <BookmarkIcon class="size-3.5" />
+        <span class="hidden sm:inline">Guardadas</span>
+        <span v-if="savedStore.queries.length > 0" class="text-[9px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-black">{{ savedStore.queries.length }}</span>
+      </button>
+
+      <!-- History toggle -->
+      <button
+        @click="toggleHistory"
+        :class="[
+          'flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold transition-colors',
+          showHistory
+            ? 'bg-primary/10 text-primary'
+            : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
+        ]"
+        title="Query History"
+      >
+        <HistoryIcon class="size-3.5" />
+        <span class="hidden sm:inline">History</span>
+        <span v-if="history.length > 0" class="text-[9px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-black">{{ history.length }}</span>
+      </button>
+
+      <!-- Live row counter (while running and rows are coming in) -->
+      <span
+        v-if="isRunning && rowsFetched !== null"
+        class="text-[10px] font-bold text-muted-foreground tabular-nums"
+      >
+        {{ rowsFetched.toLocaleString() }} rows…
+        <span v-if="resultRowsLimited" class="text-amber-500">
+          showing {{ QUERY_RESULT_ROW_LIMIT.toLocaleString() }}
+        </span>
+      </span>
+
+      <!-- Cancel button (only while running) -->
+      <button
+        v-if="isRunning"
+        @click="cancelQuery"
+        :disabled="cancelButtonState.disabled"
+        class="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-bold bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-destructive/20"
+        title="Cancel query"
+      >
+        <Square class="size-3" />
+        {{ cancelButtonState.label }}
+      </button>
+
+      <!-- Run button -->
+      <button
+        v-else
+        @click="runQuery"
+        :disabled="!sql.trim()"
+        class="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+      >
+        <PlayIcon class="size-3.5" />
+        Run
+        <span class="text-[9px] opacity-60 hidden sm:inline">Ctrl/⌘ ↵</span>
+      </button>
+    </div>
+
+    <!-- Content area: editor + results + optional history panel -->
+    <div class="flex flex-1 h-0 min-h-0 items-stretch overflow-hidden">
+      <!-- Left: SQL editor + results -->
+      <div class="flex-1 flex flex-col min-w-0 min-h-0">
+        <!-- SQL editor (CodeMirror) -->
+        <div class="h-44 shrink-0 border-b bg-[#0d1117] overflow-hidden">
+          <div ref="editorEl" class="h-full overflow-auto" />
+        </div>
+
+        <!-- Results -->
+        <div class="flex flex-1 min-h-0 min-w-0 flex-col bg-muted/5">
+
+          <!-- Error state -->
+          <div v-if="queryError" class="m-4 p-4 rounded-lg bg-destructive/10 border border-destructive/20 flex items-start gap-3">
+            <AlertCircleIcon class="size-4 text-destructive shrink-0 mt-0.5" />
+            <div>
+              <p class="text-xs font-bold text-destructive mb-1 uppercase tracking-widest">Query Error</p>
+              <p class="text-xs font-mono text-destructive/80 whitespace-pre-wrap break-all">{{ queryError }}</p>
+            </div>
+          </div>
+
+          <!-- DML result -->
+          <div v-else-if="result && !result.is_select" class="flex flex-col items-center justify-center min-h-full gap-3 text-center p-8">
+            <div class="size-12 rounded-full bg-green-500/10 flex items-center justify-center">
+              <CheckCircleIcon class="size-6 text-green-500" />
+            </div>
+            <p class="text-sm font-bold text-foreground">Query executed successfully</p>
+            <p class="text-xs text-muted-foreground">
+              <span class="font-black text-primary">{{ result.rows_affected }}</span>
+              {{ result.rows_affected === 1 ? 'row' : 'rows' }} affected
+              <span v-if="executionTime !== null" class="ml-2 opacity-60">· {{ formatDuration(executionTime) }}</span>
+            </p>
+          </div>
+
+          <!-- SELECT results table (virtualized) -->
+          <template v-else-if="result && result.is_select">
+            <div v-if="result.rows.length === 0" class="flex flex-col items-center justify-center min-h-full gap-2 text-center p-8">
+              <p class="text-sm font-bold text-muted-foreground">No rows returned</p>
+              <p class="text-xs text-muted-foreground/50">Query completed in {{ formatDuration(executionTime!) }}</p>
+            </div>
+            <div v-else class="flex flex-1 min-h-0 min-w-0 flex-col">
+              <div
+                v-if="resultRowsLimited"
+                class="shrink-0 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs font-semibold text-amber-200"
+              >
+                Showing first {{ result.rows.length.toLocaleString() }} rows
+                <span v-if="resultTotalRows !== null">
+                  of {{ resultTotalRows.toLocaleString() }}
+                </span>. Add a LIMIT/OFFSET or export the source table for the full dataset.
+              </div>
+              <DataGrid
+                :columns="result.columns"
+                :rows="result.rows"
+                :primary-key="null"
+                :total-count="result.rows_affected"
+                :pending-changes="{}"
+                :pending-deletions="{}"
+                :pending-truncate="false"
+                :pending-drop="false"
+                :selected-row-pk="null"
+                :selected-row-pks="[]"
+                :inline-edit-column="null"
+                :sort-column="null"
+                :sort-desc="false"
+                :inserting-row="false"
+                :insert-row-values="{}"
+                :column-widths="queryColumnWidths"
+                :fk-map="{}"
+                :is-col-auto-increment="() => false"
+                :is-boolean-col="() => false"
+                :get-cell-value="queryCellValue"
+                @row-click="() => {}"
+                @cell-dblclick="() => {}"
+                @cell-blur="() => {}"
+                @cell-input="() => {}"
+                @sort="() => {}"
+                @start-col-resize="startQueryColResize"
+                @navigate-related="() => {}"
+                @insert-row-input="() => {}"
+                @insert-row-submit="() => {}"
+                @insert-row-cancel="() => {}"
+                @row-contextmenu="() => {}"
+                @delete-key-pressed="() => {}"
+              />
+            </div>
+          </template>
+
+<!-- Empty state -->
+          <div v-else class="flex flex-col items-center justify-center h-full gap-3 text-center p-8 text-muted-foreground/40">
+            <p class="text-xs font-bold uppercase tracking-widest">Results will appear here</p>
+          </div>
+
+        </div>
+
+        <!-- Result count footer -->
+        <div v-if="result && result.is_select && result.rows_affected > 0" class="h-9 border-t flex items-center justify-between px-4 bg-background shrink-0">
+          <span class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+            <template v-if="resultRowsLimited">
+              Showing {{ result.rows.length.toLocaleString() }} of {{ result.rows_affected.toLocaleString() }} rows
+            </template>
+            <template v-else>
+              {{ result.rows_affected }} {{ result.rows_affected === 1 ? 'row' : 'rows' }}
+            </template>
+          </span>
+          <span v-if="executionTime !== null" class="text-[11px] font-bold text-muted-foreground">
+            {{ formatDuration(executionTime) }}
+          </span>
+        </div>
+      </div>
+
+      <!-- Saved queries panel -->
+      <div
+        v-if="showSaved"
+        class="border-l flex h-full min-h-0 flex-col self-stretch bg-muted/5 shrink-0 overflow-hidden relative"
+        :style="{ width: savedPanelWidth + 'px' }"
+      >
+        <!-- Resize handle -->
+        <div
+          class="group absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-10 flex items-stretch"
+          @mousedown.prevent="startPanelResize($event, 'saved')"
+        >
+          <div class="w-px bg-border group-hover:bg-primary/50 transition-colors" />
+        </div>
+
+        <div class="h-10 border-b flex items-center justify-between px-3 shrink-0">
+          <span class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Queries Guardadas</span>
+          <button
+            @click="showSaved = false"
+            class="size-6 flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
+          >
+            <XIcon class="size-3.5" />
+          </button>
+        </div>
+        <div class="px-2 pt-2 pb-1 shrink-0">
+          <input
+            v-model="savedSearch"
+            type="text"
+            placeholder="Buscar..."
+            class="w-full h-7 text-xs bg-muted/40 rounded-md px-2 border border-border/50 focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+        </div>
+        <ScrollArea class="flex-1 min-h-0">
+          <div v-if="filteredSaved.length === 0" class="flex items-center justify-center p-4 text-muted-foreground/30 text-xs text-center">
+            {{ savedStore.queries.length === 0 ? 'Aún no hay queries guardadas' : 'Sin resultados' }}
+          </div>
+          <div
+            v-for="sq in filteredSaved"
+            :key="sq.id"
+            class="group border-b border-muted/40 last:border-0 hover:bg-muted/30 transition-colors"
+          >
+            <div class="flex items-start gap-2 p-3 pr-2">
+              <button @click="loadFromSaved(sq)" class="min-w-0 flex-1 text-left">
+                <div class="flex items-center gap-1.5 mb-1">
+                  <BookmarkIcon class="size-3 text-primary/70 shrink-0" />
+                  <span class="text-[11px] font-semibold text-foreground truncate flex-1">{{ sq.name }}</span>
+                </div>
+                <p v-if="sq.description" class="text-[10px] text-muted-foreground/60 mb-1 truncate">{{ sq.description }}</p>
+                <p class="text-[11px] font-mono text-foreground/50 truncate">{{ sq.sql }}</p>
+                <div class="flex items-center gap-2 mt-1.5">
+                  <span v-if="sq.database" class="text-[9px] text-muted-foreground/40 font-mono truncate">{{ sq.database }}</span>
+                  <span v-if="sq.connection_id" class="text-[9px] text-muted-foreground/40 truncate ml-auto">
+                    {{ connStore.connections.find(c => c.id === sq.connection_id)?.name ?? sq.connection_id }}
+                  </span>
+                </div>
+              </button>
+              <div class="flex items-center gap-1 shrink-0 pt-0.5 opacity-0 group-hover:opacity-100 transition-all">
+                <button
+                  @click.stop="openSaveDialog(sq)"
+                  class="size-5 flex items-center justify-center rounded text-muted-foreground/30 hover:text-foreground hover:bg-muted/60"
+                  title="Editar"
+                >
+                  <PencilIcon class="size-3" />
+                </button>
+                <button
+                  @click.stop="deleteSaved(sq.id)"
+                  class="size-5 flex items-center justify-center rounded text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10"
+                  title="Eliminar"
+                >
+                  <XIcon class="size-3" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </ScrollArea>
+      </div>
+
+      <!-- History panel -->
+      <div
+        v-if="showHistory"
+        class="border-l flex h-full min-h-0 flex-col self-stretch bg-muted/5 shrink-0 overflow-hidden relative"
+        :style="{ width: historyPanelWidth + 'px' }"
+      >
+        <!-- Resize handle -->
+        <div
+          class="group absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-10 flex items-stretch"
+          @mousedown.prevent="startPanelResize($event, 'history')"
+        >
+          <div class="w-px bg-border group-hover:bg-primary/50 transition-colors" />
+        </div>
+
+        <div class="h-10 border-b flex items-center justify-between px-3 shrink-0">
+          <span class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Query History</span>
+          <div class="flex items-center gap-1">
+            <button
+              v-if="history.length > 0"
+              @click="clearHistory"
+              class="size-6 flex items-center justify-center rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+              title="Clear history"
+            >
+              <TrashIcon class="size-3.5" />
+            </button>
+            <button
+              @click="showHistory = false"
+              class="size-6 flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
+            >
+              <XIcon class="size-3.5" />
+            </button>
+          </div>
+        </div>
+
+        <ScrollArea class="flex-1 min-h-0">
+          <div v-if="history.length === 0" class="flex items-center justify-center h-full text-muted-foreground/30 text-xs p-4 text-center">
+            No history yet
+          </div>
+          <div
+            v-for="entry in history"
+            :key="entry.id"
+            class="group border-b border-muted/40 last:border-0 hover:bg-muted/30 transition-colors"
+          >
+            <button
+              @click="loadFromHistory(entry)"
+              class="w-full text-left p-3 pr-2"
+            >
+              <div class="flex items-center gap-2 mb-1.5">
+                <span :class="[
+                  'text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded',
+                  entry.error
+                    ? 'bg-destructive/10 text-destructive'
+                    : 'bg-green-500/10 text-green-500'
+                ]">
+                  {{ entry.error ? 'ERR' : (entry.isSelect ? 'SEL' : 'DML') }}
+                </span>
+                <span class="text-[9px] text-muted-foreground/50 ml-auto">{{ formatTimeAgo(entry.executedAt) }}</span>
+                <button
+                  @click.stop="() => { sql = entry.sql; openSaveDialog(null) }"
+                  class="size-4 flex items-center justify-center rounded text-muted-foreground/30 hover:text-primary opacity-0 group-hover:opacity-100 transition-all"
+                  title="Guardar como favorita"
+                >
+                  <BookmarkPlusIcon class="size-3" />
+                </button>
+                <button
+                  @click.stop="removeHistoryEntry(entry.id)"
+                  class="size-4 flex items-center justify-center rounded text-muted-foreground/30 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
+                >
+                  <XIcon class="size-3" />
+                </button>
+              </div>
+              <p class="text-[11px] font-mono text-foreground/70 truncate leading-relaxed">{{ entry.sql }}</p>
+              <div class="flex items-center gap-2 mt-1.5">
+                <span v-if="entry.database" class="text-[9px] text-muted-foreground/40 font-mono truncate">{{ entry.database }}</span>
+                <span class="text-[9px] text-muted-foreground/40 ml-auto shrink-0">{{ formatDuration(entry.durationMs) }}</span>
+                <span v-if="!entry.error" class="text-[9px] text-muted-foreground/40 shrink-0">{{ entry.rowCount }} rows</span>
+              </div>
+            </button>
+          </div>
+        </ScrollArea>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save Query Dialog -->
+  <SaveQueryDialog
+    v-model:open="saveDialogOpen"
+    :sql="sql"
+    :database="selectedDb"
+    :connection-id="connectionId"
+    :editing="editingQuery"
+    @saved="savedStore.fetch()"
+  />
+</template>
+
 <script setup lang="ts">
-import { ref, shallowRef, triggerRef, computed, markRaw, nextTick, onMounted, onBeforeUnmount, watch } from 'vue'
-import { useVirtualizer } from '@tanstack/vue-virtual'
+import { ref, shallowRef, triggerRef, computed, markRaw, onMounted, onBeforeUnmount, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { format as formatSql } from 'sql-formatter'
@@ -9,7 +391,6 @@ import {
   HistoryIcon,
   XIcon,
   ClockIcon,
-  DatabaseIcon,
   CheckCircleIcon,
   AlertCircleIcon,
   TrashIcon,
@@ -23,6 +404,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useConnectionStore } from '@/stores/connections'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
 import SaveQueryDialog from '@/components/dialogs/SaveQueryDialog.vue'
+import DataGrid from '@/components/DataGrid.vue'
 import type { SavedQuery } from '@/types/savedQuery'
 import { EditorView, basicSetup } from 'codemirror'
 import { placeholder, keymap } from '@codemirror/view'
@@ -45,13 +427,24 @@ import { getQueryCancelButtonState, shouldSurfaceQueryError } from '@/lib/queryE
 const props = defineProps<{
   connectionId: string
   database: string | null
-  availableDatabases: string[]
   initialSql?: string
+  initialResult?: RawQueryResult | null
+  initialError?: string | null
+  initialExecutionTime?: number | null
+  initialRowsLimited?: boolean
+  initialTotalRows?: number | null
   // columns per table for databases already loaded in open tabs
   openTabsSchema?: Record<string, string[]>
 }>()
 
-const emit = defineEmits<{ 'update:sql': [string] }>()
+const emit = defineEmits<{
+  'update:sql': [string]
+  'update:result': [RawQueryResult | null]
+  'update:error': [string | null]
+  'update:execution-time': [number | null]
+  'update:rows-limited': [boolean]
+  'update:total-rows': [number | null]
+}>()
 
 interface HistoryEntry {
   id: string
@@ -64,9 +457,9 @@ interface HistoryEntry {
   error?: string
 }
 
-const HISTORY_KEY = 'db-viewer:query-history'
-const SAVED_PANEL_WIDTH_KEY = 'db-viewer:saved-panel-width'
-const HISTORY_PANEL_WIDTH_KEY = 'db-viewer:history-panel-width'
+const HISTORY_KEY = 'tupledb:query-history'
+const SAVED_PANEL_WIDTH_KEY = 'tupledb:saved-panel-width'
+const HISTORY_PANEL_WIDTH_KEY = 'tupledb:history-panel-width'
 const MAX_HISTORY = 100
 
 const connStore = useConnectionStore()
@@ -76,99 +469,17 @@ const savedStore = useSavedQueriesStore()
 const columnCache = ref<Record<string, string[]>>({})
 
 const sql = ref(props.initialSql ?? '')
-const selectedDb = ref<string | null>(props.database)
-const dbSearch = ref('')
-const showDbDropdown = ref(false)
-const dbSelectorEl = ref<HTMLElement | null>(null)
-const focusedDbIndex = ref(-1)
-
-const filteredDbs = computed(() => {
-  const q = dbSearch.value.trim().toLowerCase()
-  if (!q) return props.availableDatabases
-  return props.availableDatabases.filter(db => db.toLowerCase().includes(q))
-})
-
-watch(filteredDbs, () => {
-  focusedDbIndex.value = -1
-})
-
-function openDbDropdown() {
-  dbSearch.value = ''
-  showDbDropdown.value = true
-  focusedDbIndex.value = -1
-  nextTick(() => {
-    dbSelectorEl.value?.querySelector('input')?.focus()
-  })
-}
-
-function selectDb(db: string | null) {
-  selectedDb.value = db
-  showDbDropdown.value = false
-  dbSearch.value = ''
-}
-
-function handleDbClickOutside(e: MouseEvent) {
-  if (!dbSelectorEl.value?.contains(e.target as Node)) {
-    showDbDropdown.value = false
-    dbSearch.value = ''
-  }
-}
-
-function navigateDb(dir: number) {
-  const total = filteredDbs.value.length + 1
-  if (total === 0) return
-  
-  if (focusedDbIndex.value === -1) {
-    focusedDbIndex.value = dir > 0 ? 0 : total - 1
-  } else {
-    focusedDbIndex.value = (focusedDbIndex.value + dir + total) % total
-  }
-  
-  nextTick(() => {
-    if (!dbSelectorEl.value) return
-    const container = dbSelectorEl.value.querySelector('.overflow-y-auto')
-    if (!container) return
-    const items = container.querySelectorAll('button')
-    const activeItem = items[focusedDbIndex.value] as HTMLElement | undefined
-    if (activeItem) {
-      activeItem.scrollIntoView({ block: 'nearest' })
-    }
-  })
-}
-
-function selectFocusedDb() {
-  if (focusedDbIndex.value === -1) return
-  if (focusedDbIndex.value === 0) {
-    selectDb(null)
-  } else {
-    selectDb(filteredDbs.value[focusedDbIndex.value - 1])
-  }
-}
-
-function handleDbKeydown(e: KeyboardEvent) {
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    navigateDb(1)
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    navigateDb(-1)
-  } else if (e.key === 'Enter') {
-    e.preventDefault()
-    selectFocusedDb()
-  } else if (e.key === 'Escape') {
-    showDbDropdown.value = false
-  }
-}
+const selectedDb = computed(() => props.database)
 // shallowRef + markRaw: Vue tracks the reference but never wraps row objects in Proxies.
 // triggerRef() forces the virtualizer to re-read count after chunk appends.
-const result = shallowRef<RawQueryResult | null>(null)
-const queryError = ref<string | null>(null)
+const result = shallowRef<RawQueryResult | null>(props.initialResult ?? null)
+const queryError = ref<string | null>(props.initialError ?? null)
 const isRunning = ref(false)
 const isCancelling = ref(false)
-const executionTime = ref<number | null>(null)
+const executionTime = ref<number | null>(props.initialExecutionTime ?? null)
 const rowsFetched = ref<number | null>(null)
-const resultRowsLimited = ref(false)
-const resultTotalRows = ref<number | null>(null)
+const resultRowsLimited = ref(props.initialRowsLimited ?? false)
+const resultTotalRows = ref<number | null>(props.initialTotalRows ?? null)
 const showHistory = ref(false)
 const showSaved = ref(false)
 const history = ref<HistoryEntry[]>([])
@@ -178,6 +489,14 @@ const cancelButtonState = computed(() => getQueryCancelButtonState(
   isCancelling.value,
   activeQueryId.value,
 ))
+
+function syncResultState() {
+  emit('update:result', result.value)
+  emit('update:error', queryError.value)
+  emit('update:execution-time', executionTime.value)
+  emit('update:rows-limited', resultRowsLimited.value)
+  emit('update:total-rows', resultTotalRows.value)
+}
 
 // ── Side panel resize ─────────────────────────────────────────────────────────
 
@@ -244,37 +563,37 @@ function toggleHistory() {
 
 function loadFromSaved(sq: SavedQuery) {
   sql.value = sq.sql
-  if (sq.database) selectedDb.value = sq.database
 }
 
 async function deleteSaved(id: string) {
   await savedStore.remove(id)
 }
 
-// ---- Result table virtualizer ----
-const resultScrollEl = ref<HTMLElement | null>(null)
+const queryColumnWidths = ref<Record<string, number>>({})
 
-const resultVirtualizer = useVirtualizer(computed(() => ({
-  count: result.value?.rows.length ?? 0,
-  getScrollElement: () => resultScrollEl.value,
-  estimateSize: () => 40,
-  overscan: 8,
-})))
+function queryCellValue(row: Record<string, unknown>, colName: string): string {
+  const value = row[colName]
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
 
-const virtualResultRows = computed(() => resultVirtualizer.value.getVirtualItems())
-const resultTotalSize = computed(() => resultVirtualizer.value.getTotalSize())
-const resultPaddingTop = computed(() => virtualResultRows.value[0]?.start ?? 0)
-const resultPaddingBottom = computed(() =>
-  virtualResultRows.value.length > 0
-    ? resultTotalSize.value - virtualResultRows.value[virtualResultRows.value.length - 1].end
-    : 0
-)
+function startQueryColResize(e: MouseEvent, colName: string) {
+  e.preventDefault()
+  const startX = e.clientX
+  const startWidth = queryColumnWidths.value[colName] ?? 160
+  const onMove = (ev: MouseEvent) => {
+    queryColumnWidths.value[colName] = Math.max(80, startWidth + ev.clientX - startX)
+  }
+  const onUp = () => {
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
 
-watch(() => props.database, (val) => {
-  if (val && !selectedDb.value) selectedDb.value = val
-})
-
-watch(selectedDb, () => {
+watch(() => props.database, () => {
   columnCache.value = {}
 })
 
@@ -320,6 +639,8 @@ async function runQuery() {
   resultRowsLimited.value = false
   resultTotalRows.value = null
   rowsFetched.value = null
+  executionTime.value = null
+  syncResultState()
   const start = Date.now()
   let streamedRowsSeen = 0
 
@@ -354,10 +675,10 @@ async function runQuery() {
         streamedRowsSeen = nextState.streamedRowsSeen
         resultRowsLimited.value = nextState.rowsLimited
         result.value = nextState.result ? markRaw(nextState.result) : null
+        syncResultState()
 
         if (wasEmpty && result.value) {
-          // First chunk — create the result object and scroll to top
-          nextTick(() => resultScrollEl.value?.scrollTo(0, 0))
+          // First chunk creates the result object; DataGrid owns scrolling.
         } else {
           // Subsequent chunks — append rows and force virtualizer to re-count
           triggerRef(result)
@@ -377,11 +698,13 @@ async function runQuery() {
     // Wait for the backend to signal completion
     const payload = await payloadPromise
     executionTime.value = payload.duration_ms as number
+    syncResultState()
 
     if (payload.error) {
       if (shouldSurfaceQueryError(isCancelling.value)) {
         // Clear any partial streamed result on error
         result.value = null
+        syncResultState()
         throw new Error(payload.error)
       }
     } else {
@@ -392,6 +715,7 @@ async function runQuery() {
         result.value = finalized.result ? markRaw(finalized.result) : null
         resultRowsLimited.value = finalized.rowsLimited
         resultTotalRows.value = finalized.totalRows
+        syncResultState()
         triggerRef(result)
       } else {
         // Non-SELECT or legacy buffered result
@@ -399,7 +723,7 @@ async function runQuery() {
         resultRowsLimited.value = limited.rowsLimited
         resultTotalRows.value = limited.totalRows
         result.value = markRaw(limited.result)
-        nextTick(() => resultScrollEl.value?.scrollTo(0, 0))
+        syncResultState()
       }
       addToHistory({
         id: crypto.randomUUID(),
@@ -415,6 +739,7 @@ async function runQuery() {
     if (shouldSurfaceQueryError(isCancelling.value)) {
       queryError.value = String(e)
       executionTime.value = executionTime.value ?? Date.now() - start
+      syncResultState()
       addToHistory({
         id: crypto.randomUUID(),
         sql: q,
@@ -463,7 +788,6 @@ function beautify() {
 
 function loadFromHistory(entry: HistoryEntry) {
   sql.value = entry.sql
-  if (entry.database) selectedDb.value = entry.database
   showHistory.value = false
 }
 
@@ -695,448 +1019,5 @@ onBeforeUnmount(() => {
   editorView = null
 })
 
-watch(showDbDropdown, (val) => {
-  if (val) window.addEventListener('mousedown', handleDbClickOutside)
-  else window.removeEventListener('mousedown', handleDbClickOutside)
-})
 </script>
 
-<template>
-  <div class="flex h-full flex-1 flex-col min-h-0 overflow-hidden">
-    <!-- Toolbar -->
-    <div class="h-12 border-b flex items-center gap-3 px-4 bg-background/50 backdrop-blur-sm shrink-0 relative z-10">
-      <!-- Database selector -->
-      <div ref="dbSelectorEl" class="flex items-center gap-1.5 relative">
-        <DatabaseIcon class="size-3.5 text-muted-foreground shrink-0" />
-        <button
-          @click="openDbDropdown"
-          class="h-7 text-xs bg-muted/40 border border-input rounded-md px-2 pr-2 focus:outline-none focus:ring-1 focus:ring-ring text-foreground cursor-pointer min-w-35 text-left truncate"
-          :class="showDbDropdown ? 'ring-1 ring-ring border-ring' : ''"
-        >
-          {{ selectedDb ?? '— no database —' }}
-        </button>
-
-        <!-- Dropdown -->
-        <div
-          v-if="showDbDropdown"
-          class="absolute top-8 left-6 z-50 min-w-45 bg-popover text-popover-foreground border border-border rounded-lg shadow-xl overflow-hidden"
-        >
-          <div class="p-1.5 border-b">
-            <input
-              v-model="dbSearch"
-              type="text"
-              placeholder="Filter..."
-              class="w-full h-7 text-xs bg-muted/40 rounded-md px-2 focus:outline-none focus:ring-1 focus:ring-ring"
-              @keydown="handleDbKeydown"
-            />
-          </div>
-          <div class="max-h-52 overflow-y-auto py-1">
-            <button
-              class="w-full text-left px-3 py-1.5 text-xs text-muted-foreground transition-colors"
-              :class="[
-                selectedDb === null ? 'font-bold text-foreground' : '',
-                focusedDbIndex === 0 ? 'bg-primary/20 text-foreground ring-inset ring-1 ring-primary/30' : 'hover:bg-muted/50'
-              ]"
-              @click="selectDb(null)"
-              @mousemove="focusedDbIndex = 0"
-            >— no database —</button>
-            <button
-              v-for="(db, index) in filteredDbs"
-              :key="db"
-              class="w-full text-left px-3 py-1.5 text-xs transition-colors"
-              :class="[
-                selectedDb === db ? 'font-bold text-primary' : 'text-foreground',
-                focusedDbIndex === index + 1 ? 'bg-primary/20 text-primary ring-inset ring-1 ring-primary/30' : 'hover:bg-muted/50'
-              ]"
-              @click="selectDb(db)"
-              @mousemove="focusedDbIndex = index + 1"
-            >{{ db }}</button>
-            <div v-if="filteredDbs.length === 0" class="px-3 py-2 text-xs text-muted-foreground/50">No results</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="flex-1" />
-
-      <!-- Execution time badge -->
-      <div v-if="executionTime !== null" class="flex items-center gap-1 text-[10px] font-bold text-muted-foreground">
-        <ClockIcon class="size-3" />
-        {{ formatDuration(executionTime) }}
-      </div>
-
-      <!-- Beautify button -->
-      <button
-        @click="beautify"
-        :disabled="!sql.trim()"
-        class="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-        title="Beautify SQL (⌘⇧F)"
-      >
-        <WandSparklesIcon class="size-3.5" />
-        <span class="hidden sm:inline">Format</span>
-      </button>
-
-      <!-- Save query button -->
-      <button
-        @click="openSaveDialog(null)"
-        :disabled="!sql.trim()"
-        class="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-        title="Guardar query"
-      >
-        <BookmarkPlusIcon class="size-3.5" />
-        <span class="hidden sm:inline">Guardar</span>
-      </button>
-
-      <!-- Saved queries toggle -->
-      <button
-        @click="toggleSaved"
-        :class="[
-          'flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold transition-colors',
-          showSaved
-            ? 'bg-primary/10 text-primary'
-            : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
-        ]"
-        title="Queries guardadas"
-      >
-        <BookmarkIcon class="size-3.5" />
-        <span class="hidden sm:inline">Guardadas</span>
-        <span v-if="savedStore.queries.length > 0" class="text-[9px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-black">{{ savedStore.queries.length }}</span>
-      </button>
-
-      <!-- History toggle -->
-      <button
-        @click="toggleHistory"
-        :class="[
-          'flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold transition-colors',
-          showHistory
-            ? 'bg-primary/10 text-primary'
-            : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
-        ]"
-        title="Query History"
-      >
-        <HistoryIcon class="size-3.5" />
-        <span class="hidden sm:inline">History</span>
-        <span v-if="history.length > 0" class="text-[9px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-black">{{ history.length }}</span>
-      </button>
-
-      <!-- Live row counter (while running and rows are coming in) -->
-      <span
-        v-if="isRunning && rowsFetched !== null"
-        class="text-[10px] font-bold text-muted-foreground tabular-nums"
-      >
-        {{ rowsFetched.toLocaleString() }} rows…
-        <span v-if="resultRowsLimited" class="text-amber-500">
-          showing {{ QUERY_RESULT_ROW_LIMIT.toLocaleString() }}
-        </span>
-      </span>
-
-      <!-- Cancel button (only while running) -->
-      <button
-        v-if="isRunning"
-        @click="cancelQuery"
-        :disabled="cancelButtonState.disabled"
-        class="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-bold bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-destructive/20"
-        title="Cancel query"
-      >
-        <Square class="size-3" />
-        {{ cancelButtonState.label }}
-      </button>
-
-      <!-- Run button -->
-      <button
-        v-else
-        @click="runQuery"
-        :disabled="!sql.trim()"
-        class="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-      >
-        <PlayIcon class="size-3.5" />
-        Run
-        <span class="text-[9px] opacity-60 hidden sm:inline">Ctrl/⌘ ↵</span>
-      </button>
-    </div>
-
-    <!-- Content area: editor + results + optional history panel -->
-    <div class="flex flex-1 h-0 min-h-0 items-stretch overflow-hidden">
-      <!-- Left: SQL editor + results -->
-      <div class="flex-1 flex flex-col min-w-0 min-h-0">
-        <!-- SQL editor (CodeMirror) -->
-        <div class="h-44 shrink-0 border-b bg-[#0d1117] overflow-hidden">
-          <div ref="editorEl" class="h-full overflow-auto" />
-        </div>
-
-        <!-- Results -->
-        <div ref="resultScrollEl" class="flex-1 min-h-0 min-w-0 overflow-auto bg-muted/5">
-
-          <!-- Error state -->
-          <div v-if="queryError" class="m-4 p-4 rounded-lg bg-destructive/10 border border-destructive/20 flex items-start gap-3">
-            <AlertCircleIcon class="size-4 text-destructive shrink-0 mt-0.5" />
-            <div>
-              <p class="text-xs font-bold text-destructive mb-1 uppercase tracking-widest">Query Error</p>
-              <p class="text-xs font-mono text-destructive/80 whitespace-pre-wrap break-all">{{ queryError }}</p>
-            </div>
-          </div>
-
-          <!-- DML result -->
-          <div v-else-if="result && !result.is_select" class="flex flex-col items-center justify-center min-h-full gap-3 text-center p-8">
-            <div class="size-12 rounded-full bg-green-500/10 flex items-center justify-center">
-              <CheckCircleIcon class="size-6 text-green-500" />
-            </div>
-            <p class="text-sm font-bold text-foreground">Query executed successfully</p>
-            <p class="text-xs text-muted-foreground">
-              <span class="font-black text-primary">{{ result.rows_affected }}</span>
-              {{ result.rows_affected === 1 ? 'row' : 'rows' }} affected
-              <span v-if="executionTime !== null" class="ml-2 opacity-60">· {{ formatDuration(executionTime) }}</span>
-            </p>
-          </div>
-
-          <!-- SELECT results table (virtualized) -->
-          <template v-else-if="result && result.is_select">
-            <div v-if="result.rows.length === 0" class="flex flex-col items-center justify-center min-h-full gap-2 text-center p-8">
-              <p class="text-sm font-bold text-muted-foreground">No rows returned</p>
-              <p class="text-xs text-muted-foreground/50">Query completed in {{ formatDuration(executionTime!) }}</p>
-            </div>
-            <div v-else>
-              <div
-                v-if="resultRowsLimited"
-                class="sticky top-0 z-30 border-b border-amber-500/20 bg-amber-500/10 px-4 py-2 text-xs font-semibold text-amber-200"
-              >
-                Showing first {{ result.rows.length.toLocaleString() }} rows
-                <span v-if="resultTotalRows !== null">
-                  of {{ resultTotalRows.toLocaleString() }}
-                </span>. Add a LIMIT/OFFSET or export the source table for the full dataset.
-              </div>
-              <table class="border-collapse" style="min-width: 100%;">
-                <thead>
-                  <tr>
-                    <th
-                      v-for="col in result.columns"
-                      :key="col.name"
-                      class="sticky z-20 bg-background backdrop-blur-md px-4 py-3 border-b border-r last:border-r-0 text-left whitespace-nowrap"
-                      :class="resultRowsLimited ? 'top-[33px]' : 'top-0'"
-                      style="min-width: 140px;"
-                    >
-                      <div class="text-xs font-semibold font-mono tracking-normal text-foreground">{{ col.name }}</div>
-                      <div class="text-[9px] font-medium font-mono tracking-normal text-muted-foreground opacity-70">{{ col.type_name }}</div>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-if="resultPaddingTop > 0">
-                    <td :colspan="result.columns.length" :style="{ height: resultPaddingTop + 'px', padding: 0, border: 'none' }" />
-                  </tr>
-                  <tr
-                    v-for="vRow in virtualResultRows"
-                    :key="vRow.index"
-                    class="hover:bg-primary/5 transition-colors"
-                    :class="vRow.index % 2 === 0 ? 'bg-background/30' : 'bg-transparent'"
-                  >
-                    <td
-                      v-for="col in result.columns"
-                      :key="col.name"
-                      class="px-4 py-2.5 text-sm border-b border-r last:border-r-0"
-                      style="max-width: 320px;"
-                    >
-                      <span v-if="result.rows[vRow.index][col.name] === null" class="text-[10px] italic font-normal uppercase tracking-widest text-muted-foreground/30">NULL</span>
-                      <span v-else class="font-medium text-foreground/80 truncate block">{{ result.rows[vRow.index][col.name] }}</span>
-                    </td>
-                  </tr>
-                  <tr v-if="resultPaddingBottom > 0">
-                    <td :colspan="result.columns.length" :style="{ height: resultPaddingBottom + 'px', padding: 0, border: 'none' }" />
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </template>
-
-          <!-- Empty state -->
-          <div v-else class="flex flex-col items-center justify-center h-full gap-3 text-center p-8 text-muted-foreground/40">
-            <p class="text-xs font-bold uppercase tracking-widest">Results will appear here</p>
-          </div>
-
-        </div>
-
-        <!-- Result count footer -->
-        <div v-if="result && result.is_select && result.rows_affected > 0" class="h-9 border-t flex items-center justify-between px-4 bg-background shrink-0">
-          <span class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
-            <template v-if="resultRowsLimited">
-              Showing {{ result.rows.length.toLocaleString() }} of {{ result.rows_affected.toLocaleString() }} rows
-            </template>
-            <template v-else>
-              {{ result.rows_affected }} {{ result.rows_affected === 1 ? 'row' : 'rows' }}
-            </template>
-          </span>
-          <span v-if="executionTime !== null" class="text-[11px] font-bold text-muted-foreground">
-            {{ formatDuration(executionTime) }}
-          </span>
-        </div>
-      </div>
-
-      <!-- Saved queries panel -->
-      <div
-        v-if="showSaved"
-        class="border-l flex h-full min-h-0 flex-col self-stretch bg-muted/5 shrink-0 overflow-hidden relative"
-        :style="{ width: savedPanelWidth + 'px' }"
-      >
-        <!-- Resize handle -->
-        <div
-          class="group absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-10 flex items-stretch"
-          @mousedown.prevent="startPanelResize($event, 'saved')"
-        >
-          <div class="w-px bg-border group-hover:bg-primary/50 transition-colors" />
-        </div>
-
-        <div class="h-10 border-b flex items-center justify-between px-3 shrink-0">
-          <span class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Queries Guardadas</span>
-          <button
-            @click="showSaved = false"
-            class="size-6 flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
-          >
-            <XIcon class="size-3.5" />
-          </button>
-        </div>
-        <div class="px-2 pt-2 pb-1 shrink-0">
-          <input
-            v-model="savedSearch"
-            type="text"
-            placeholder="Buscar..."
-            class="w-full h-7 text-xs bg-muted/40 rounded-md px-2 border border-border/50 focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-        </div>
-        <ScrollArea class="flex-1 min-h-0">
-          <div v-if="filteredSaved.length === 0" class="flex items-center justify-center p-4 text-muted-foreground/30 text-xs text-center">
-            {{ savedStore.queries.length === 0 ? 'Aún no hay queries guardadas' : 'Sin resultados' }}
-          </div>
-          <div
-            v-for="sq in filteredSaved"
-            :key="sq.id"
-            class="group border-b border-muted/40 last:border-0 hover:bg-muted/30 transition-colors"
-          >
-            <div class="flex items-start gap-2 p-3 pr-2">
-              <button @click="loadFromSaved(sq)" class="min-w-0 flex-1 text-left">
-                <div class="flex items-center gap-1.5 mb-1">
-                  <BookmarkIcon class="size-3 text-primary/70 shrink-0" />
-                  <span class="text-[11px] font-semibold text-foreground truncate flex-1">{{ sq.name }}</span>
-                </div>
-                <p v-if="sq.description" class="text-[10px] text-muted-foreground/60 mb-1 truncate">{{ sq.description }}</p>
-                <p class="text-[11px] font-mono text-foreground/50 truncate">{{ sq.sql }}</p>
-                <div class="flex items-center gap-2 mt-1.5">
-                  <span v-if="sq.database" class="text-[9px] text-muted-foreground/40 font-mono truncate">{{ sq.database }}</span>
-                  <span v-if="sq.connection_id" class="text-[9px] text-muted-foreground/40 truncate ml-auto">
-                    {{ connStore.connections.find(c => c.id === sq.connection_id)?.name ?? sq.connection_id }}
-                  </span>
-                </div>
-              </button>
-              <div class="flex items-center gap-1 shrink-0 pt-0.5 opacity-0 group-hover:opacity-100 transition-all">
-                <button
-                  @click.stop="openSaveDialog(sq)"
-                  class="size-5 flex items-center justify-center rounded text-muted-foreground/30 hover:text-foreground hover:bg-muted/60"
-                  title="Editar"
-                >
-                  <PencilIcon class="size-3" />
-                </button>
-                <button
-                  @click.stop="deleteSaved(sq.id)"
-                  class="size-5 flex items-center justify-center rounded text-muted-foreground/30 hover:text-destructive hover:bg-destructive/10"
-                  title="Eliminar"
-                >
-                  <XIcon class="size-3" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </ScrollArea>
-      </div>
-
-      <!-- History panel -->
-      <div
-        v-if="showHistory"
-        class="border-l flex h-full min-h-0 flex-col self-stretch bg-muted/5 shrink-0 overflow-hidden relative"
-        :style="{ width: historyPanelWidth + 'px' }"
-      >
-        <!-- Resize handle -->
-        <div
-          class="group absolute left-0 top-0 bottom-0 w-2 cursor-col-resize z-10 flex items-stretch"
-          @mousedown.prevent="startPanelResize($event, 'history')"
-        >
-          <div class="w-px bg-border group-hover:bg-primary/50 transition-colors" />
-        </div>
-
-        <div class="h-10 border-b flex items-center justify-between px-3 shrink-0">
-          <span class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Query History</span>
-          <div class="flex items-center gap-1">
-            <button
-              v-if="history.length > 0"
-              @click="clearHistory"
-              class="size-6 flex items-center justify-center rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
-              title="Clear history"
-            >
-              <TrashIcon class="size-3.5" />
-            </button>
-            <button
-              @click="showHistory = false"
-              class="size-6 flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
-            >
-              <XIcon class="size-3.5" />
-            </button>
-          </div>
-        </div>
-
-        <ScrollArea class="flex-1 min-h-0">
-          <div v-if="history.length === 0" class="flex items-center justify-center h-full text-muted-foreground/30 text-xs p-4 text-center">
-            No history yet
-          </div>
-          <div
-            v-for="entry in history"
-            :key="entry.id"
-            class="group border-b border-muted/40 last:border-0 hover:bg-muted/30 transition-colors"
-          >
-            <button
-              @click="loadFromHistory(entry)"
-              class="w-full text-left p-3 pr-2"
-            >
-              <div class="flex items-center gap-2 mb-1.5">
-                <span :class="[
-                  'text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded',
-                  entry.error
-                    ? 'bg-destructive/10 text-destructive'
-                    : 'bg-green-500/10 text-green-500'
-                ]">
-                  {{ entry.error ? 'ERR' : (entry.isSelect ? 'SEL' : 'DML') }}
-                </span>
-                <span class="text-[9px] text-muted-foreground/50 ml-auto">{{ formatTimeAgo(entry.executedAt) }}</span>
-                <button
-                  @click.stop="() => { sql = entry.sql; if (entry.database) selectedDb = entry.database; openSaveDialog(null) }"
-                  class="size-4 flex items-center justify-center rounded text-muted-foreground/30 hover:text-primary opacity-0 group-hover:opacity-100 transition-all"
-                  title="Guardar como favorita"
-                >
-                  <BookmarkPlusIcon class="size-3" />
-                </button>
-                <button
-                  @click.stop="removeHistoryEntry(entry.id)"
-                  class="size-4 flex items-center justify-center rounded text-muted-foreground/30 hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"
-                >
-                  <XIcon class="size-3" />
-                </button>
-              </div>
-              <p class="text-[11px] font-mono text-foreground/70 truncate leading-relaxed">{{ entry.sql }}</p>
-              <div class="flex items-center gap-2 mt-1.5">
-                <span v-if="entry.database" class="text-[9px] text-muted-foreground/40 font-mono truncate">{{ entry.database }}</span>
-                <span class="text-[9px] text-muted-foreground/40 ml-auto shrink-0">{{ formatDuration(entry.durationMs) }}</span>
-                <span v-if="!entry.error" class="text-[9px] text-muted-foreground/40 shrink-0">{{ entry.rowCount }} rows</span>
-              </div>
-            </button>
-          </div>
-        </ScrollArea>
-      </div>
-    </div>
-  </div>
-
-  <!-- Save Query Dialog -->
-  <SaveQueryDialog
-    v-model:open="saveDialogOpen"
-    :sql="sql"
-    :database="selectedDb"
-    :connection-id="connectionId"
-    :editing="editingQuery"
-    @saved="savedStore.fetch()"
-  />
-</template>

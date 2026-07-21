@@ -1,6 +1,5 @@
 import { computed, ref, shallowRef } from 'vue'
-import { check, type Update } from '@tauri-apps/plugin-updater'
-import { relaunch } from '@tauri-apps/plugin-process'
+import type { Update } from '@tauri-apps/plugin-updater'
 import { useToast } from '@/composables/useToast'
 
 const isChecking = ref(false)
@@ -39,13 +38,14 @@ export function useUpdater() {
     isChecking.value = true
 
     try {
+      const { check } = await import('@tauri-apps/plugin-updater')
       const update = await check()
 
       if (!update) {
         if (!options.silent) {
           toast.show({
             type: 'info',
-            title: 'DB Viewer is up to date',
+            title: 'TupleDB is up to date',
             message: 'You are already using the latest version.',
           })
         }
@@ -105,7 +105,7 @@ export function useUpdater() {
       status.value = 'readyToRestart'
     } catch (error) {
       toast.error(
-        'Could not update DB Viewer',
+        'Could not update TupleDB',
         error instanceof Error ? error.message : String(error),
       )
       status.value = availableUpdate.value ? 'available' : 'idle'
@@ -119,6 +119,7 @@ export function useUpdater() {
 
     status.value = 'restarting'
     isInstalling.value = true
+    const { relaunch } = await import('@tauri-apps/plugin-process')
     await relaunch()
   }
 

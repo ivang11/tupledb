@@ -5,7 +5,7 @@ import {
   type KeybindingAction,
 } from '@/config/keybindingActions'
 
-const STORAGE_KEY = 'db-viewer:keybindings'
+const STORAGE_KEY = 'tupledb:keybindings'
 
 // Singleton state shared across all component instances
 const _overrides = ref<Partial<Record<KeybindingAction, string>>>({})

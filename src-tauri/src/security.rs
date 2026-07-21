@@ -2,7 +2,7 @@ use crate::connections::Environment;
 use keyring::Entry;
 use uuid::Uuid;
 
-const APP_NAME: &str = "com.db-viewer.app";
+const APP_NAME: &str = "tupledb";
 
 pub enum SecretType {
     MySql,
@@ -46,10 +46,10 @@ pub fn is_safe_sort_column(name: &str) -> bool {
 
 pub fn is_query_safe(
     query: &str,
-    environment: Environment,
+    _environment: Environment,
     allow_writes: bool,
 ) -> Result<(), String> {
-    if environment == Environment::Production && !allow_writes {
+    if !allow_writes {
         let q = query.trim().to_uppercase();
         let allowed_keywords = ["SELECT", "SHOW", "DESCRIBE", "EXPLAIN"];
 
@@ -58,10 +58,22 @@ pub fn is_query_safe(
             .any(|&keyword| q.starts_with(keyword));
 
         if !is_allowed {
-            return Err("Operation blocked: Production environment is READ-ONLY. Enable write access in connection settings.".into());
+            return Err(read_only_error());
         }
     }
     Ok(())
+}
+
+pub fn ensure_writes_allowed(allow_writes: bool) -> Result<(), String> {
+    if allow_writes {
+        Ok(())
+    } else {
+        Err(read_only_error())
+    }
+}
+
+fn read_only_error() -> String {
+    "Operation blocked: Connection is READ-ONLY. Disable read-only mode in connection settings to allow writes.".into()
 }
 
 #[cfg(test)]
@@ -91,7 +103,7 @@ mod tests {
     }
 
     #[test]
-    fn allows_read_queries_in_production_read_only_mode() {
+    fn allows_read_queries_in_read_only_mode() {
         for query in [
             "SELECT * FROM users",
             " show tables",
@@ -103,7 +115,7 @@ mod tests {
     }
 
     #[test]
-    fn blocks_write_queries_in_production_read_only_mode() {
+    fn blocks_write_queries_in_read_only_mode() {
         for query in [
             "INSERT INTO users(id) VALUES (1)",
             "update users set name = 'Ada'",
@@ -111,14 +123,21 @@ mod tests {
             "DROP TABLE users",
             "TRUNCATE TABLE users",
         ] {
+            assert!(is_query_safe(query, Environment::Local, false).is_err());
             assert!(is_query_safe(query, Environment::Production, false).is_err());
         }
     }
 
     #[test]
-    fn allows_writes_outside_production_or_when_explicitly_enabled() {
-        assert!(is_query_safe("DROP TABLE users", Environment::Local, false).is_ok());
-        assert!(is_query_safe("DROP TABLE users", Environment::Dev, false).is_ok());
+    fn allows_writes_when_explicitly_enabled() {
+        assert!(is_query_safe("DROP TABLE users", Environment::Local, true).is_ok());
+        assert!(is_query_safe("DROP TABLE users", Environment::Dev, true).is_ok());
         assert!(is_query_safe("DROP TABLE users", Environment::Production, true).is_ok());
+    }
+
+    #[test]
+    fn blocks_non_query_writes_in_read_only_mode() {
+        assert!(ensure_writes_allowed(false).is_err());
+        assert!(ensure_writes_allowed(true).is_ok());
     }
 }

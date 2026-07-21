@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+fn default_allow_writes() -> bool { true }
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Connection {
     pub id: Uuid,
@@ -10,7 +12,7 @@ pub struct Connection {
     pub ssh: Option<SshSettings>,
     #[serde(default)]
     pub timeout_secs: Option<u64>,
-    #[serde(default)]
+    #[serde(default = "default_allow_writes")]
     pub allow_writes: bool,
 }
 

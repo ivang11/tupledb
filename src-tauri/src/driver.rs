@@ -117,10 +117,13 @@ pub struct ImportResult {
     pub metrics: ImportMetrics,
 }
 
+pub type QueryChunkCallback = Arc<dyn Fn(Option<Vec<ColumnInfo>>, Vec<Value>) + Send + Sync>;
+
 // --------------------------------------------------------------------------
 // DatabaseDriver trait
 // --------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 #[async_trait]
 pub trait DatabaseDriver: Send + Sync {
     // Schema
@@ -203,9 +206,7 @@ pub trait DatabaseDriver: Send + Sync {
         sql: &str,
         query_id: Option<&str>,
         on_progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
-        on_chunk: Option<
-            Arc<dyn Fn(Option<Vec<ColumnInfo>>, Vec<serde_json::Value>) + Send + Sync>,
-        >,
+        on_chunk: Option<QueryChunkCallback>,
     ) -> Result<RawQueryResult, String>;
 
     /// Returns the MySQL thread id of a currently-running query, if tracked.

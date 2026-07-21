@@ -13,6 +13,7 @@ src-tauri/gen/
 .env
 .env.*
 !.env.example
+.codex
 
 # Editor & OS
 .DS_Store

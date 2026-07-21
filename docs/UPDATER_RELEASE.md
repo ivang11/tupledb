@@ -1,6 +1,6 @@
 # Guia de releases y updater
 
-Esta guia explica como preparar una release de DB Viewer para que el updater de
+Esta guia explica como preparar una release de TupleDB para que el updater de
 Tauri pueda descargarla desde GitHub Releases.
 
 ## Resumen rapido
@@ -11,7 +11,7 @@ El updater funciona asi:
 2. Tauri descarga `latest.json` desde GitHub:
 
    ```text
-   https://github.com/IvanG11/db-viewer/releases/latest/download/latest.json
+   https://github.com/ivang11/tupledb/releases/latest/download/latest.json
    ```
 
 3. Si `latest.json` contiene una version mayor que la version instalada, Tauri
@@ -44,8 +44,8 @@ un build de release, Tauri exige una clave privada para firmar los artifacts.
 Para desarrollo local, se puede usar una clave guardada fuera del repo:
 
 ```bash
-mkdir -p "$HOME/.config/db-viewer"
-cp /tmp/db-viewer-updater.key "$HOME/.config/db-viewer/updater.key"
+mkdir -p "$HOME/.config/tupledb"
+cp /tmp/tupledb-updater.key "$HOME/.config/tupledb/updater.key"
 ```
 
 Luego compila asi:
@@ -57,7 +57,7 @@ npm run build:app:signed
 Ese comando usa por defecto:
 
 ```text
-~/.config/db-viewer/updater.key
+~/.config/tupledb/updater.key
 ```
 
 Si la clave esta en otro sitio, puedes seguir usando
@@ -109,8 +109,8 @@ src-tauri/target/release/bundle/appimage/
 Los archivos importantes seran parecidos a:
 
 ```text
-db-viewer_0.6.4_amd64.AppImage
-db-viewer_0.6.4_amd64.AppImage.sig
+tupledb_0.6.4_amd64.AppImage
+tupledb_0.6.4_amd64.AppImage.sig
 ```
 
 Si aparece este error:
@@ -165,7 +165,7 @@ npm run release:github -- --version 0.6.4 --tag v0.6.4 --notes "Test updater"
 Si necesitas publicar en otro repo:
 
 ```bash
-npm run release:github -- --repo IvanG11/db-viewer
+npm run release:github -- --repo ivang11/tupledb
 ```
 
 El comando usa GitHub CLI, asi que antes debes iniciar sesion:
@@ -186,7 +186,7 @@ Para Linux x86_64, usa este formato:
   "platforms": {
     "linux-x86_64": {
       "signature": "CONTENIDO_DEL_ARCHIVO_SIG",
-      "url": "https://github.com/IvanG11/db-viewer/releases/download/v0.6.4/db-viewer_0.6.4_amd64.AppImage"
+      "url": "https://github.com/ivang11/tupledb/releases/download/v0.6.4/tupledb_0.6.4_amd64.AppImage"
     }
   }
 }
@@ -198,7 +198,7 @@ La propiedad `signature` no es una ruta. Debe ser el contenido del archivo
 Para obtenerlo:
 
 ```bash
-cat src-tauri/target/release/bundle/appimage/db-viewer_0.6.4_amd64.AppImage.sig
+cat src-tauri/target/release/bundle/appimage/tupledb_0.6.4_amd64.AppImage.sig
 ```
 
 Copia ese contenido en `latest.json`.
@@ -214,7 +214,7 @@ src-tauri/target/release/bundle/appimage/latest.json
 1. Entra en:
 
    ```text
-   https://github.com/IvanG11/db-viewer
+   https://github.com/ivang11/tupledb
    ```
 
 2. Abre la seccion **Releases**.
@@ -234,8 +234,8 @@ src-tauri/target/release/bundle/appimage/latest.json
 6. En assets, sube:
 
    ```text
-   db-viewer_0.6.4_amd64.AppImage
-   db-viewer_0.6.4_amd64.AppImage.sig
+   tupledb_0.6.4_amd64.AppImage
+   tupledb_0.6.4_amd64.AppImage.sig
    latest.json
    ```
 
@@ -244,7 +244,7 @@ src-tauri/target/release/bundle/appimage/latest.json
 Cuando esta release sea la ultima publicada, GitHub servira el JSON en:
 
 ```text
-https://github.com/IvanG11/db-viewer/releases/latest/download/latest.json
+https://github.com/ivang11/tupledb/releases/latest/download/latest.json
 ```
 
 ## Subir la release con GitHub CLI
@@ -259,8 +259,8 @@ Luego:
 
 ```bash
 gh release create v0.6.4 \
-  src-tauri/target/release/bundle/appimage/db-viewer_0.6.4_amd64.AppImage \
-  src-tauri/target/release/bundle/appimage/db-viewer_0.6.4_amd64.AppImage.sig \
+  src-tauri/target/release/bundle/appimage/tupledb_0.6.4_amd64.AppImage \
+  src-tauri/target/release/bundle/appimage/tupledb_0.6.4_amd64.AppImage.sig \
   latest.json \
   --title "v0.6.4" \
   --notes "Test updater"
@@ -299,7 +299,7 @@ TAURI_SIGNING_PRIVATE_KEY
 Debe contener el contenido completo de la clave privada:
 
 ```bash
-cat "$HOME/.config/db-viewer/updater.key"
+cat "$HOME/.config/tupledb/updater.key"
 ```
 
 Si tu clave tiene password, crea tambien:

@@ -1,15 +1,3 @@
-<script setup>
-import { cn } from "@/lib/utils";
-
-const props = defineProps({
-  class: {
-    type: [Boolean, null, String, Object, Array],
-    required: false,
-    skipCheck: true,
-  },
-});
-</script>
-
 <template>
   <div
     data-slot="card-header"
@@ -23,3 +11,17 @@ const props = defineProps({
     <slot />
   </div>
 </template>
+
+<script setup lang="ts">
+import { cn } from "@/lib/utils";
+
+const props = defineProps({
+  class: {
+    type: [Boolean, null, String, Object, Array],
+    required: false,
+    skipCheck: true,
+  },
+});
+</script>
+
+

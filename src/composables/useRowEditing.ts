@@ -1,7 +1,8 @@
 import { ref, nextTick, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useToast } from '@/composables/useToast'
-import type { PaneState, TableTab } from '@/types/workspace'
+import { useConnectionStore } from '@/stores/connections'
+import type { PaneState, TableTab, TableViewMode } from '@/types/workspace'
 import {
   normalizeInsertValue,
   normalizeChangeValue,
@@ -22,8 +23,17 @@ interface RowEditingContext {
   loadTableData: (tableName: string, connectionId: string, database: string, initialFilter?: any, paneId?: string) => Promise<void>
 }
 
+function tabHasPendingChanges(tab: TableTab): boolean {
+  return tab.pendingDrop ||
+    tab.pendingTruncate ||
+    tab.pendingInserts.length > 0 ||
+    Object.keys(tab.pendingChanges).length > 0 ||
+    Object.keys(tab.pendingDeletions).length > 0
+}
+
 export function useRowEditing(ctx: RowEditingContext) {
-  const { getPaneTab, getPrimaryKey, getPaneConnection, refreshActiveTab, loadTableData } = ctx
+  const { getPaneTab, getPrimaryKey, loadTableData } = ctx
+  const store = useConnectionStore()
 
   // ── Core state ──────────────────────────────────────────────────────────────
 
@@ -36,8 +46,23 @@ export function useRowEditing(ctx: RowEditingContext) {
   const insertingRowPaneId = ref<string | null>(null)
   const insertingRowTabId = ref<string | null>(null)
   const insertRowValues = ref<Record<string, string>>({})
-  const insertRowLoading = ref(false)
   const insertRowError = ref<string | null>(null)
+  const pendingInsertDraft = ref<{ tabId: string; index: number } | null>(null)
+
+  function buildInsertValues() {
+    return Object.entries(insertRowValues.value).map(([column, value]) => ({
+      column,
+      value: normalizeInsertValue(value),
+    }))
+  }
+
+  function updatePendingInsertDraft(tab: TableTab) {
+    const draft = pendingInsertDraft.value
+    if (!draft || draft.tabId !== tab.id) return
+    const pendingInsert = tab.pendingInserts[draft.index]
+    if (!pendingInsert) return
+    pendingInsert.values = buildInsertValues()
+  }
 
   function isColAutoIncrement(pane: PaneState, colName: string): boolean {
     const tab = getPaneTab(pane)
@@ -57,8 +82,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     const tab = getPaneTab(pane)
     if (!tab) return
     if (insertingRowPaneId.value === pane.id && insertingRowTabId.value === tab.id) {
-      insertingRowPaneId.value = null
-      insertingRowTabId.value = null
+      nextTick(() => document.querySelector<HTMLInputElement>('.insert-row-input')?.focus())
       return
     }
     insertRowValues.value = Object.fromEntries(
@@ -66,6 +90,8 @@ export function useRowEditing(ctx: RowEditingContext) {
         .filter((col: any) => col.extra !== 'auto_increment')
         .map((col: any) => [col.field, col.default ?? '']),
     )
+    tab.pendingInserts.push({ values: buildInsertValues() })
+    pendingInsertDraft.value = { tabId: tab.id, index: tab.pendingInserts.length - 1 }
     insertRowError.value = null
     insertingRowPaneId.value = pane.id
     insertingRowTabId.value = tab.id
@@ -73,36 +99,23 @@ export function useRowEditing(ctx: RowEditingContext) {
   }
 
   function cancelInsertRow() {
+    const tab = ctx.panes.value
+      .flatMap(pane => pane.tabs)
+      .find((t): t is TableTab => t.type === 'table' && t.id === pendingInsertDraft.value?.tabId)
+    if (tab && pendingInsertDraft.value) {
+      tab.pendingInserts.splice(pendingInsertDraft.value.index, 1)
+    }
+    pendingInsertDraft.value = null
     insertingRowPaneId.value = null
     insertingRowTabId.value = null
     insertRowError.value = null
   }
 
-  async function submitInsertRow(pane: PaneState) {
+  function updateInsertRowValue(pane: PaneState, column: string, value: string) {
     const tab = getPaneTab(pane)
-    const conn = getPaneConnection(pane)
-    if (!tab || !conn) return
-    insertRowLoading.value = true
-    insertRowError.value = null
-    try {
-      const values = Object.entries(insertRowValues.value).map(([column, value]) => ({
-        column,
-        value: normalizeInsertValue(value),
-      }))
-      await invoke('insert_row', {
-        connectionId: conn.id, database: tab.database, table: tab.tableName,
-        values, disableFkChecks: disableFkChecks.value,
-      })
-      insertingRowPaneId.value = null
-      insertingRowTabId.value = null
-      await refreshActiveTab(pane.id)
-    } catch (e: any) {
-      const msg = String(e)
-      const match = msg.match(/: (\d{4} \(.+?\): .+)$/)
-      insertRowError.value = match ? match[1] : msg
-    } finally {
-      insertRowLoading.value = false
-    }
+    if (!tab) return
+    insertRowValues.value[column] = value
+    updatePendingInsertDraft(tab)
   }
 
   function duplicateRow(pane: PaneState, row: any) {
@@ -122,32 +135,34 @@ export function useRowEditing(ctx: RowEditingContext) {
     nextTick(() => document.querySelector<HTMLInputElement>('.insert-row-input')?.focus())
   }
 
-  // ── Delete row (immediate, no pending changes) ──────────────────────────────
-
-  async function deleteRowImmediate(pane: PaneState, row: any) {
+  async function duplicateSelectedRows(pane: PaneState) {
     const tab = getPaneTab(pane)
-    const conn = getPaneConnection(pane)
     const pk = getPrimaryKey(pane)
-    if (!tab || !conn || !pk) return
-    const pkVal = String(row[pk])
-    isSaving.value = true
+    if (!tab || !pk || !tab.queryResult?.rows) return
+    const selectedPks = tab.selectedRowPks
+    if (selectedPks.length === 0) return
+
+    const rows = tab.queryResult.rows.filter((r: any) =>
+      selectedPks.includes(String(r[pk]))
+    )
+    const cols = (tab.tableStructure as any[]).filter(
+      (col: any) => col.extra !== 'auto_increment'
+    )
+
     try {
-      await invoke('apply_table_changes', {
-        connectionId: conn.id, database: tab.database, table: tab.tableName,
-        updates: [],
-        deletions: [{ pk_column: pk, pk_value: coercePkValue(pkVal) }],
-        disableFkChecks: disableFkChecks.value,
-      })
-      if (tab.selectedRowPk === pkVal) {
-        tab.selectedRowPk = null
-        tab.inlineEditColumn = null
+      for (const row of rows) {
+        const values = cols.map((col: any) => ({
+          column: col.field,
+          value: normalizeInsertValue(
+            row[col.field] === null || row[col.field] === undefined
+              ? ''
+              : String(row[col.field])
+          ),
+        }))
+        tab.pendingInserts.push({ values })
       }
-      tab.selectedRowPks = tab.selectedRowPks.filter(p => p !== pkVal)
-      await refreshActiveTab(pane.id)
     } catch (e: any) {
-      toastError('Failed to delete row', String(e))
-    } finally {
-      isSaving.value = false
+      toastError('Failed to stage duplicated rows', String(e))
     }
   }
 
@@ -196,7 +211,15 @@ export function useRowEditing(ctx: RowEditingContext) {
     if (!tab) return
     tab.pendingChanges = {}
     tab.pendingDeletions = {}
+    tab.pendingInserts = []
     tab.pendingTruncate = false
+    tab.pendingDrop = false
+    if (insertingRowTabId.value === tab.id) {
+      pendingInsertDraft.value = null
+      insertingRowPaneId.value = null
+      insertingRowTabId.value = null
+      insertRowError.value = null
+    }
     tab.selectedRowPk = null
     tab.selectedRowPks = []
     tab.inlineEditColumn = null
@@ -283,7 +306,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     return computeCellEditValue(tab.pendingChanges, getPrimaryKey(pane), row, colName)
   }
 
-  function setViewMode(pane: PaneState, mode: 'content' | 'structure') {
+  function setViewMode(pane: PaneState, mode: TableViewMode) {
     pane.viewMode = mode
     const tab = getPaneTab(pane)
     if (tab) tab.viewMode = mode
@@ -292,44 +315,136 @@ export function useRowEditing(ctx: RowEditingContext) {
 
   // ── Apply changes ───────────────────────────────────────────────────────────
 
-  async function applyChanges(pane: PaneState) {
-    const tab = getPaneTab(pane)
-    const conn = getPaneConnection(pane)
-    if (!tab || !conn) return
-    isSaving.value = true
-    try {
-      if (tab.pendingTruncate) {
-        await invoke('truncate_table', {
-          connectionId: conn.id, database: tab.database,
-          table: tab.tableName, disableFkChecks: disableFkChecks.value,
-        })
-      } else {
-        const pk = getPrimaryKey(pane)
-        if (!pk) throw new Error('Table has no Primary Key')
-        const updates = Object.entries(tab.pendingChanges).map(([pkValue, changes]) => ({
-          pk_column: pk,
-          pk_value: coercePkValue(pkValue),
-          changes: Object.entries(changes).map(([column, value]) => ({
-            column,
-            value: normalizeChangeValue(value),
-          })),
-        }))
-        const deletions = Object.keys(tab.pendingDeletions).map(pkValue => ({
-          pk_column: pk,
-          pk_value: coercePkValue(pkValue),
-        }))
+  function getTabPrimaryKey(tab: TableTab): string | null {
+    return (tab.tableStructure as any[]).find(c => c.key === 'PRI')?.field || null
+  }
+
+  function clearTabPendingState(tab: TableTab) {
+    tab.pendingChanges = {}
+    tab.pendingDeletions = {}
+    tab.pendingInserts = []
+    tab.pendingTruncate = false
+    tab.pendingDrop = false
+    tab.selectedRowPk = null
+    tab.selectedRowPks = []
+    tab.inlineEditColumn = null
+  }
+
+  function closeMatchingTableTabs(target: TableTab) {
+    for (const p of ctx.panes.value) {
+      const related = p.tabs.filter(t =>
+        t.type === 'table' &&
+        (t as TableTab).connectionId === target.connectionId &&
+        (t as TableTab).database === target.database &&
+        (t as TableTab).tableName === target.tableName,
+      )
+      for (const relatedTab of related) {
+        const idx = p.tabs.findIndex(t => t.id === relatedTab.id)
+        if (idx !== -1) p.tabs.splice(idx, 1)
+        if (p.activeTabId === relatedTab.id) p.activeTabId = p.tabs[0]?.id ?? null
+      }
+    }
+  }
+
+  function matchingOpenTableTabs(target: TableTab): TableTab[] {
+    return ctx.panes.value.flatMap(p =>
+      p.tabs.filter((t): t is TableTab =>
+        t.type === 'table' &&
+        t.connectionId === target.connectionId &&
+        t.database === target.database &&
+        t.tableName === target.tableName,
+      ),
+    )
+  }
+
+  async function refreshMatchingTableTabs(target: TableTab) {
+    for (const tab of matchingOpenTableTabs(target)) {
+      tab.queryResult = await store.fetchTableData(
+        tab.connectionId,
+        tab.database,
+        tab.tableName,
+        tab.page,
+        tab.pageSize,
+        tab.filters ?? null,
+        tab.sortColumn ? { column: tab.sortColumn, desc: tab.sortDesc } : null,
+      )
+    }
+  }
+
+  async function applyTabChanges(tab: TableTab): Promise<'dropped' | 'changed'> {
+    if (tab.pendingDrop) {
+      await invoke('drop_table', {
+        connectionId: tab.connectionId, database: tab.database,
+        table: tab.tableName, disableFkChecks: disableFkChecks.value,
+      })
+      closeMatchingTableTabs(tab)
+      await store.fetchTablesForConnection(tab.connectionId, tab.database)
+      return 'dropped'
+    }
+
+    if (tab.pendingTruncate) {
+      await invoke('truncate_table', {
+        connectionId: tab.connectionId, database: tab.database,
+        table: tab.tableName, disableFkChecks: disableFkChecks.value,
+      })
+    }
+
+    if (!tab.pendingTruncate || tab.pendingInserts.length > 0) {
+      const pk = getTabPrimaryKey(tab)
+      const hasRowMutations = Object.keys(tab.pendingChanges).length > 0 || Object.keys(tab.pendingDeletions).length > 0
+      if (hasRowMutations && !pk) throw new Error(`Table \`${tab.tableName}\` has no Primary Key`)
+      const updates = Object.entries(tab.pendingChanges).map(([pkValue, changes]) => ({
+        pk_column: pk!,
+        pk_value: coercePkValue(pkValue),
+        changes: Object.entries(changes).map(([column, value]) => ({
+          column,
+          value: normalizeChangeValue(value),
+        })),
+      }))
+      const deletions = Object.keys(tab.pendingDeletions).map(pkValue => ({
+        pk_column: pk!,
+        pk_value: coercePkValue(pkValue),
+      }))
+      if (updates.length > 0 || deletions.length > 0) {
         await invoke('apply_table_changes', {
-          connectionId: conn.id, database: tab.database, table: tab.tableName,
+          connectionId: tab.connectionId, database: tab.database, table: tab.tableName,
           updates, deletions, disableFkChecks: disableFkChecks.value,
         })
       }
-      tab.pendingChanges = {}
-      tab.pendingDeletions = {}
-      tab.pendingTruncate = false
-      tab.selectedRowPk = null
-      tab.selectedRowPks = []
-      tab.inlineEditColumn = null
-      await refreshActiveTab(pane.id)
+    }
+
+    for (const insert of tab.pendingInserts) {
+      await invoke('insert_row', {
+        connectionId: tab.connectionId,
+        database: tab.database,
+        table: tab.tableName,
+        values: insert.values,
+        disableFkChecks: disableFkChecks.value,
+      })
+    }
+
+    clearTabPendingState(tab)
+    return 'changed'
+  }
+
+  async function applyChanges(_pane: PaneState) {
+    const pendingTabs = ctx.panes.value.flatMap(p =>
+      p.tabs.filter((t): t is TableTab => t.type === 'table' && tabHasPendingChanges(t)),
+    )
+    if (pendingTabs.length === 0) return
+
+    isSaving.value = true
+    try {
+      const changedTabs: TableTab[] = []
+      for (const tab of [...pendingTabs]) {
+        const result = await applyTabChanges(tab)
+        if (result === 'changed') {
+          changedTabs.push(tab)
+        }
+      }
+      for (const tab of changedTabs) {
+        await refreshMatchingTableTabs(tab)
+      }
     } catch (e: any) {
       toastError('Failed to apply changes', String(e))
     } finally {
@@ -354,15 +469,14 @@ export function useRowEditing(ctx: RowEditingContext) {
     insertingRowPaneId,
     insertingRowTabId,
     insertRowValues,
-    insertRowLoading,
     insertRowError,
     isColAutoIncrement,
     isBooleanCol,
     openInsertRowDialog,
     cancelInsertRow,
-    submitInsertRow,
+    updateInsertRowValue,
     duplicateRow,
-    deleteRowImmediate,
+    duplicateSelectedRows,
     updatePendingChange,
     toggleDeletion,
     toggleDeletionSelected,

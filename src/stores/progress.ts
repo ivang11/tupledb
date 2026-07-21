@@ -12,6 +12,12 @@ export const useProgressStore = defineStore('progress', () => {
   const isExporting = ref(false)
   const exportProgress = ref({ current: 0, total: 0, status: '' })
   const exportExpanded = ref(false)
+  const exportTables = ref<string[]>([])
+  const exportDoneCount = ref(0)
+  const exportStartTime = ref<number | null>(null)
+  const exportConnectionId = ref<string | null>(null)
+  const exportId = ref<string | null>(null)
+  const isCancellingExport = ref(false)
 
   return {
     isImporting,
@@ -23,5 +29,11 @@ export const useProgressStore = defineStore('progress', () => {
     isExporting,
     exportProgress,
     exportExpanded,
+    exportTables,
+    exportDoneCount,
+    exportStartTime,
+    exportConnectionId,
+    exportId,
+    isCancellingExport,
   }
 })

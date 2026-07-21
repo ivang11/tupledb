@@ -1,14 +1,3 @@
-<script setup lang="ts">
-defineProps<{
-  paneIdx: number
-  draggingPaneIdx: number | null
-}>()
-
-const emit = defineEmits<{
-  (e: 'resize-start', event: MouseEvent, idx: number): void
-}>()
-</script>
-
 <template>
   <!-- Wider grab zone (8px) with a thin visual line in the center -->
   <div
@@ -26,3 +15,15 @@ const emit = defineEmits<{
     />
   </div>
 </template>
+
+<script setup lang="ts">
+defineProps<{
+  paneIdx: number
+  draggingPaneIdx: number | null
+}>()
+
+const emit = defineEmits<{
+  (e: 'resize-start', event: MouseEvent, idx: number): void
+}>()
+</script>
+

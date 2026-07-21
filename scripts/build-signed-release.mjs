@@ -4,17 +4,17 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
-const defaultKeyPath = join(homedir(), '.config/db-viewer/updater.key')
+const defaultKeyPath = join(homedir(), '.config/tupledb/updater.key')
 const keyPath = process.env.TAURI_SIGNING_PRIVATE_KEY_PATH || defaultKeyPath
 const password = process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ?? ''
-const buildScript = process.env.TAURI_BUILD_SCRIPT || 'build:app'
+const buildScript = process.env.TAURI_BUILD_SCRIPT || 'build:app:ci'
 
 if (!existsSync(keyPath) && !process.env.TAURI_SIGNING_PRIVATE_KEY) {
   console.error(`Error: updater signing key not found at ${keyPath}`)
   console.error('')
   console.error('Create it once with:')
-  console.error('  mkdir -p "$HOME/.config/db-viewer"')
-  console.error('  cp /tmp/db-viewer-updater.key "$HOME/.config/db-viewer/updater.key"')
+  console.error('  mkdir -p "$HOME/.config/tupledb"')
+  console.error('  cp /tmp/tupledb-updater.key "$HOME/.config/tupledb/updater.key"')
   console.error('')
   console.error('Or set TAURI_SIGNING_PRIVATE_KEY_PATH to another key path.')
   process.exit(1)

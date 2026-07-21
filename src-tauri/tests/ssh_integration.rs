@@ -5,17 +5,16 @@
 /// the standard CI run (`cargo test`) is unaffected.
 ///
 /// To run:
-///   export DB_VIEWER_TEST_SSH_HOST=bastion.example.com
-///   export DB_VIEWER_TEST_SSH_PORT=22          # optional, default 22
-///   export DB_VIEWER_TEST_SSH_USER=ubuntu
-///   export DB_VIEWER_TEST_SSH_KEY_PATH=/path/to/id_ed25519
-///   export DB_VIEWER_TEST_MYSQL_VIA_SSH_HOST=127.0.0.1   # MySQL host as seen from SSH server
-///   export DB_VIEWER_TEST_MYSQL_VIA_SSH_PORT=3306
-///   export DB_VIEWER_TEST_MYSQL_VIA_SSH_USER=root
-///   export DB_VIEWER_TEST_MYSQL_VIA_SSH_PASS=secret
+///   export TUPLEDB_TEST_SSH_HOST=bastion.example.com
+///   export TUPLEDB_TEST_SSH_PORT=22          # optional, default 22
+///   export TUPLEDB_TEST_SSH_USER=ubuntu
+///   export TUPLEDB_TEST_SSH_KEY_PATH=/path/to/id_ed25519
+///   export TUPLEDB_TEST_MYSQL_VIA_SSH_HOST=127.0.0.1   # MySQL host as seen from SSH server
+///   export TUPLEDB_TEST_MYSQL_VIA_SSH_PORT=3306
+///   export TUPLEDB_TEST_MYSQL_VIA_SSH_USER=root
+///   export TUPLEDB_TEST_MYSQL_VIA_SSH_PASS=secret
 ///   cargo test --test ssh_integration -- --nocapture
 use app_lib::connections::{SshAuth, SshSettings};
-use app_lib::driver::DatabaseDriver;
 use app_lib::mysql::MySqlDriver;
 use app_lib::schema::import_sql_file;
 use app_lib::ssh::SshTunnel;
@@ -34,20 +33,20 @@ struct SshConfig {
 }
 
 fn read_config() -> Option<SshConfig> {
-    let ssh_host = std::env::var("DB_VIEWER_TEST_SSH_HOST").ok()?;
-    let ssh_port = std::env::var("DB_VIEWER_TEST_SSH_PORT")
+    let ssh_host = std::env::var("TUPLEDB_TEST_SSH_HOST").ok()?;
+    let ssh_port = std::env::var("TUPLEDB_TEST_SSH_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(22u16);
-    let ssh_user = std::env::var("DB_VIEWER_TEST_SSH_USER").ok()?;
-    let key_path = std::env::var("DB_VIEWER_TEST_SSH_KEY_PATH").ok()?;
-    let mysql_host = std::env::var("DB_VIEWER_TEST_MYSQL_VIA_SSH_HOST").ok()?;
-    let mysql_port = std::env::var("DB_VIEWER_TEST_MYSQL_VIA_SSH_PORT")
+    let ssh_user = std::env::var("TUPLEDB_TEST_SSH_USER").ok()?;
+    let key_path = std::env::var("TUPLEDB_TEST_SSH_KEY_PATH").ok()?;
+    let mysql_host = std::env::var("TUPLEDB_TEST_MYSQL_VIA_SSH_HOST").ok()?;
+    let mysql_port = std::env::var("TUPLEDB_TEST_MYSQL_VIA_SSH_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(3306u16);
-    let mysql_user = std::env::var("DB_VIEWER_TEST_MYSQL_VIA_SSH_USER").ok()?;
-    let mysql_pass = std::env::var("DB_VIEWER_TEST_MYSQL_VIA_SSH_PASS").unwrap_or_default();
+    let mysql_user = std::env::var("TUPLEDB_TEST_MYSQL_VIA_SSH_USER").ok()?;
+    let mysql_pass = std::env::var("TUPLEDB_TEST_MYSQL_VIA_SSH_PASS").unwrap_or_default();
 
     Some(SshConfig {
         settings: SshSettings {
@@ -77,7 +76,7 @@ async fn pool_through_tunnel(tunnel: &SshTunnel, cfg: &SshConfig) -> MySqlPool {
 }
 
 async fn create_db(pool: &MySqlPool) -> String {
-    let db = format!("db_viewer_ssh_{}", Uuid::new_v4().simple());
+    let db = format!("tupledb_ssh_{}", Uuid::new_v4().simple());
     sqlx::query(&format!("CREATE DATABASE `{}`", db))
         .execute(pool)
         .await
@@ -98,25 +97,27 @@ async fn drop_db(pool: &MySqlPool, db: &str) {
 #[tokio::test]
 async fn ssh_tunnel_connects_and_reads_mysql() {
     let Some(cfg) = read_config() else {
-        eprintln!("ssh_tunnel_connects_and_reads_mysql: skipped (DB_VIEWER_TEST_SSH_HOST not set)");
+        eprintln!("ssh_tunnel_connects_and_reads_mysql: skipped (TUPLEDB_TEST_SSH_HOST not set)");
         return;
     };
 
-    let tunnel = SshTunnel::new(&cfg.settings, &cfg.mysql_host, cfg.mysql_port)
-        .expect("open SSH tunnel");
+    let tunnel =
+        SshTunnel::new(&cfg.settings, &cfg.mysql_host, cfg.mysql_port).expect("open SSH tunnel");
 
     let pool = pool_through_tunnel(&tunnel, &cfg).await;
     let db = create_db(&pool).await;
 
     sqlx::query(&format!(
-        "CREATE TABLE `{}`.`ping` (id INT PRIMARY KEY, val VARCHAR(50))", db
+        "CREATE TABLE `{}`.`ping` (id INT PRIMARY KEY, val VARCHAR(50))",
+        db
     ))
     .execute(&pool)
     .await
     .expect("create table");
 
     sqlx::query(&format!(
-        "INSERT INTO `{}`.`ping` VALUES (1, 'hello-via-ssh')", db
+        "INSERT INTO `{}`.`ping` VALUES (1, 'hello-via-ssh')",
+        db
     ))
     .execute(&pool)
     .await
@@ -137,12 +138,14 @@ async fn ssh_tunnel_connects_and_reads_mysql() {
 #[tokio::test]
 async fn ssh_import_validates_batching_and_metrics() {
     let Some(cfg) = read_config() else {
-        eprintln!("ssh_import_validates_batching_and_metrics: skipped (DB_VIEWER_TEST_SSH_HOST not set)");
+        eprintln!(
+            "ssh_import_validates_batching_and_metrics: skipped (TUPLEDB_TEST_SSH_HOST not set)"
+        );
         return;
     };
 
-    let tunnel = SshTunnel::new(&cfg.settings, &cfg.mysql_host, cfg.mysql_port)
-        .expect("open SSH tunnel");
+    let tunnel =
+        SshTunnel::new(&cfg.settings, &cfg.mysql_host, cfg.mysql_port).expect("open SSH tunnel");
 
     let pool = pool_through_tunnel(&tunnel, &cfg).await;
     let db = create_db(&pool).await;
@@ -175,7 +178,7 @@ async fn ssh_import_validates_batching_and_metrics() {
     let dump_path = std::env::temp_dir().join(format!("ssh_test_{}.sql", Uuid::new_v4().simple()));
     std::fs::write(&dump_path, &sql).expect("write dump file");
 
-    let progress_log: Arc<Mutex<Vec<(u64, u64)>>> = Arc::new(Mutex::new(Vec::new()));
+    let progress_log: Arc<Mutex<Vec<(usize, usize)>>> = Arc::new(Mutex::new(Vec::new()));
     let log_clone = progress_log.clone();
     let import_id = Uuid::new_v4().to_string();
 
@@ -184,9 +187,13 @@ async fn ssh_import_validates_batching_and_metrics() {
         &db,
         dump_path.to_str().unwrap(),
         &import_id,
-        Arc::new(move |current, total| {
-            log_clone.lock().unwrap().push((current, total));
-        }),
+        &|| false,
+        &move |progress| {
+            log_clone
+                .lock()
+                .unwrap()
+                .push((progress.current, progress.total));
+        },
     )
     .await
     .expect("import succeeded");
@@ -212,7 +219,10 @@ async fn ssh_import_validates_batching_and_metrics() {
     assert!(result.metrics.execute_ms <= result.metrics.total_ms + 1);
 
     // Progress callbacks were called
-    assert!(!progress_log.lock().unwrap().is_empty(), "progress should fire");
+    assert!(
+        !progress_log.lock().unwrap().is_empty(),
+        "progress should fire"
+    );
 
     // Validate rows reached the DB
     let count: (i64,) = sqlx::query_as(&format!("SELECT COUNT(*) FROM `{}`.`items`", db))

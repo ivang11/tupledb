@@ -91,7 +91,7 @@ export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
   function hasPendingChangesInPane(pane: PaneState): boolean {
     const tab = getPaneTab(pane)
     if (!tab) return false
-    return tab.pendingTruncate || Object.keys(tab.pendingChanges).length > 0 || Object.keys(tab.pendingDeletions).length > 0
+    return tab.pendingDrop || tab.pendingTruncate || tab.pendingInserts.length > 0 || Object.keys(tab.pendingChanges).length > 0 || Object.keys(tab.pendingDeletions).length > 0
   }
 
   function getFkMap(pane: PaneState): Record<string, { table: string; column: string }> {

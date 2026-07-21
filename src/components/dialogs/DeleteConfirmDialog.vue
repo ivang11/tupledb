@@ -1,32 +1,6 @@
-<script setup lang="ts">
-import { Button } from '@/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog'
-
-defineProps<{
-  open: boolean
-  title?: string
-  description?: string
-  showFkOption?: boolean
-  disableFkChecks?: boolean
-}>()
-
-const emit = defineEmits<{
-  'update:open': [val: boolean]
-  'update:disableFkChecks': [val: boolean]
-  'confirm': []
-}>()
-</script>
-
 <template>
-  <Dialog :open="open" @update:open="(val) => emit('update:open', val)">
-    <DialogContent class="sm:max-w-[400px]">
+  <Dialog :open="open" @update:open="(val: boolean) => emit('update:open', val)">
+    <DialogContent class="sm:max-w-100">
       <DialogHeader>
         <DialogTitle>{{ title ?? 'Delete' }}</DialogTitle>
         <DialogDescription>
@@ -58,3 +32,29 @@ const emit = defineEmits<{
     </DialogContent>
   </Dialog>
 </template>
+
+<script setup lang="ts">
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
+
+defineProps<{
+  open: boolean
+  title?: string
+  description?: string
+  showFkOption?: boolean
+  disableFkChecks?: boolean
+}>()
+
+const emit = defineEmits<{
+  'update:open': [val: boolean]
+  'update:disableFkChecks': [val: boolean]
+  'confirm': []
+}>()
+</script>

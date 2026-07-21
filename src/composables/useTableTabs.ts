@@ -13,6 +13,7 @@ interface WorkspaceContext {
   getPrimaryKey: (pane: PaneState) => string | null
   getPaneConnection: (pane: PaneState) => any
   addPane: () => string
+  removePane: (paneId: string) => void
 }
 
 export function useTableTabs(ctx: WorkspaceContext) {
@@ -51,8 +52,12 @@ export function useTableTabs(ctx: WorkspaceContext) {
     pane.tabs.splice(idx, 1)
     if (pane.activeTabId === tabId) {
       const nextIdx = findNextActiveIndex(pane.tabs.length, idx)
-      if (nextIdx === -1) pane.activeTabId = null
-      else switchToTab(pane.tabs[nextIdx].id, pane.id)
+      if (nextIdx === -1) {
+        pane.activeTabId = null
+        if (ctx.panes.value.length > 1) {
+          ctx.removePane(pane.id)
+        }
+      } else switchToTab(pane.tabs[nextIdx].id, pane.id)
     }
   }
 
@@ -96,9 +101,6 @@ export function useTableTabs(ctx: WorkspaceContext) {
   }
 
   async function loadStructureViewMetadata(pane: PaneState) {
-    pane.viewMode = 'structure'
-    const tab = getPaneTab(pane)
-    if (tab) tab.viewMode = 'structure'
     await ensureTableMetadata(pane)
   }
 
@@ -109,29 +111,11 @@ export function useTableTabs(ctx: WorkspaceContext) {
     initialFilter?: any,
     paneId?: string,
   ) {
-    // Smart routing: keep tabs from the same connection+database together.
     let pane = getPane(paneId)
     if (!paneId) {
-      const tabDb = (t: { type: string; database: string | null } & { database?: string | null }) =>
-        t.type === 'table' ? (t as TableTab).database : t.database
-
-      // 1. If another pane already has tabs from this connection+db, route there
-      const sameConnDb = ctx.panes.value.find(p =>
-        p.tabs.some(t => t.connectionId === connectionId && tabDb(t) === database)
-      )
-      if (sameConnDb) {
-        pane = sameConnDb
-      } else {
-        // 2. If the active pane has tabs from a DIFFERENT connection/database,
-        //    auto-split so tables don't mix — but never during focus mode to
-        //    avoid creating ghost panes that confuse the layout on unpin.
-        const activePaneHasOtherDb = pane.tabs.length > 0 &&
-          !pane.tabs.some(t => t.connectionId === connectionId && tabDb(t) === database)
-        if (activePaneHasOtherDb && !ctx.focusedPaneId.value) {
-          const newPaneId = ctx.addPane()
-          pane = ctx.panes.value.find(p => p.id === newPaneId) ?? pane
-        }
-      }
+      // TablePlus-like default: opening a table uses the active pane.
+      // Comparing DBs/tables is still possible through explicit splits.
+      pane = getPane(ctx.activePaneId.value)
     }
     if (!initialFilter) {
       const existing = pane.tabs.find(t =>
@@ -148,7 +132,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
       queryResult: null, exactCountLoading: false, metadataLoading: false, metadataLoaded: false, tableStructure: [], tableIndexes: [], foreignKeys: [], ddl: null,
       page: 0, pageSize: pane.pageSize, viewMode: 'content',
       filters: initialFilter ?? null, sortColumn: null, sortDesc: false,
-      pendingChanges: {}, pendingDeletions: {}, pendingTruncate: false,
+      pendingChanges: {}, pendingDeletions: {}, pendingInserts: [], pendingTruncate: false, pendingDrop: false,
       selectedRowPk: null, selectedRowPks: [], inlineEditColumn: null,
     }
     const insertIndex = findTabInsertIndex(pane.tabs, connectionId, database)
@@ -170,7 +154,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     if (!tab) return
     try {
       await _fetchInitialTabData(pane, pane.page, pane.pageSize, tab.filters ?? null, sortPayload(tab))
-      if (pane.viewMode === 'structure') await ensureTableMetadata(pane)
+      if (pane.viewMode !== 'content') await ensureTableMetadata(pane)
     } catch (e: any) {
       if (String(e).includes('No active session')) store.disconnectConnection(tab.connectionId)
     }

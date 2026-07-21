@@ -38,7 +38,7 @@ impl SshTunnel {
                 private_key_path,
                 passphrase,
             } => {
-                let has_passphrase = passphrase.as_ref().map_or(false, |p| !p.is_empty());
+                let has_passphrase = passphrase.as_ref().is_some_and(|p| !p.is_empty());
 
                 let mut cmd = Command::new("ssh");
                 cmd.args(["-N", "-L", &forward])

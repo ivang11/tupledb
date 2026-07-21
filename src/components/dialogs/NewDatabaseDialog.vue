@@ -1,38 +1,9 @@
-<script setup lang="ts">
-import { DatabaseIcon, PlusIcon } from "lucide-vue-next";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-
-defineProps<{
-  open: boolean;
-  connectionName: string;
-  name: string;
-  isCreating: boolean;
-}>();
-
-const emit = defineEmits<{
-  "update:open": [val: boolean];
-  "update:name": [val: string];
-  create: [];
-}>();
-
-</script>
-
 <template>
   <Dialog
     :open="open"
     @update:open="(val: boolean) => !val && !isCreating && emit('update:open', val)"
   >
-    <DialogContent class="sm:max-w-[420px]">
+    <DialogContent class="sm:max-w-105">
       <form
         class="space-y-4"
         @submit.prevent="emit('create')"
@@ -84,3 +55,33 @@ const emit = defineEmits<{
     </DialogContent>
   </Dialog>
 </template>
+
+<script setup lang="ts">
+import { DatabaseIcon, PlusIcon } from "lucide-vue-next";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+defineProps<{
+  open: boolean;
+  connectionName: string;
+  name: string;
+  isCreating: boolean;
+}>();
+
+const emit = defineEmits<{
+  "update:open": [val: boolean];
+  "update:name": [val: string];
+  create: [];
+}>();
+
+</script>
+

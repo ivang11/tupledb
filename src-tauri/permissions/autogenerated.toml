@@ -1,149 +1,154 @@
 [[permission]]
 identifier = "allow-get-connections"
-description = "Permite obtener la lista de conexiones"
+description = "Allows retrieving the list of connections"
 commands.allow = ["get_connections"]
 
 [[permission]]
 identifier = "allow-add-connection"
-description = "Permite añadir una nueva conexión"
+description = "Allows adding a new connection"
 commands.allow = ["add_connection"]
 
 [[permission]]
 identifier = "allow-remove-connection"
-description = "Permite eliminar una conexión"
+description = "Allows removing a connection"
 commands.allow = ["remove_connection"]
 
 [[permission]]
 identifier = "allow-test-connection"
-description = "Permite probar una conexión"
+description = "Allows testing a connection"
 commands.allow = ["test_connection"]
 
 [[permission]]
 identifier = "allow-connect"
-description = "Permite establecer una conexión activa"
+description = "Allows establishing an active connection"
 commands.allow = ["connect"]
 
 [[permission]]
 identifier = "allow-export-connections"
-description = "Permite exportar conexiones a un archivo JSON"
+description = "Allows exporting connections to a JSON file"
 commands.allow = ["export_connections"]
 
 [[permission]]
 identifier = "allow-import-connections"
-description = "Permite importar conexiones desde un archivo JSON"
+description = "Allows importing connections from a JSON file"
 commands.allow = ["import_connections"]
 
 [[permission]]
 identifier = "allow-get-databases"
-description = "Permite listar las bases de datos"
+description = "Allows listing databases"
 commands.allow = ["get_databases"]
 
 [[permission]]
 identifier = "allow-get-tables"
-description = "Permite listar las tablas"
+description = "Allows listing tables"
 commands.allow = ["get_tables"]
 
 [[permission]]
 identifier = "allow-get-table-data"
-description = "Permite obtener los datos de una tabla"
+description = "Allows retrieving data from a table"
 commands.allow = ["get_table_data"]
 
 [[permission]]
 identifier = "allow-get-table-structure"
-description = "Permite obtener la estructura de una tabla"
+description = "Allows retrieving the structure of a table"
 commands.allow = ["get_table_structure"]
 
 [[permission]]
 identifier = "allow-export-table"
-description = "Permite exportar los datos de una tabla a un archivo"
+description = "Allows exporting table data to a file"
 commands.allow = ["export_table"]
 
 [[permission]]
 identifier = "allow-export-database"
-description = "Permite exportar una base de datos completa a un archivo SQL"
+description = "Allows exporting a full database to a SQL file"
 commands.allow = ["export_database"]
 
 [[permission]]
 identifier = "allow-create-database"
-description = "Permite crear una nueva base de datos"
+description = "Allows creating a new database"
 commands.allow = ["create_database"]
 
 [[permission]]
 identifier = "allow-drop-database"
-description = "Permite borrar una base de datos físicamente"
+description = "Allows permanently dropping a database"
 commands.allow = ["drop_database"]
 
 [[permission]]
 identifier = "allow-import-sql"
-description = "Permite importar un archivo SQL en una base de datos"
+description = "Allows importing a SQL file into a database"
 commands.allow = ["import_sql"]
 
 [[permission]]
 identifier = "allow-cancel-import"
-description = "Permite cancelar una importación SQL en curso"
+description = "Allows cancelling an ongoing SQL import"
 commands.allow = ["cancel_import"]
 
 [[permission]]
+identifier = "allow-cancel-export"
+description = "Allows cancelling an ongoing export"
+commands.allow = ["cancel_export"]
+
+[[permission]]
 identifier = "allow-apply-table-changes"
-description = "Permite aplicar cambios (updates/deletes) a una tabla"
+description = "Allows applying changes (updates/deletes) to a table"
 commands.allow = ["apply_table_changes"]
 
 [[permission]]
 identifier = "allow-drop-table"
-description = "Permite borrar una tabla físicamente"
+description = "Allows permanently dropping a table"
 commands.allow = ["drop_table"]
 
 [[permission]]
 identifier = "allow-drop-tables"
-description = "Permite borrar varias tablas en una sola operación"
+description = "Allows dropping multiple tables in a single operation"
 commands.allow = ["drop_tables"]
 
 [[permission]]
 identifier = "allow-truncate-table"
-description = "Permite vaciar una tabla"
+description = "Allows truncating a table"
 commands.allow = ["truncate_table"]
 
 [[permission]]
 identifier = "allow-get-foreign-keys"
-description = "Permite obtener las claves foráneas de una tabla"
+description = "Allows retrieving the foreign keys of a table"
 commands.allow = ["get_foreign_keys"]
 
 [[permission]]
 identifier = "allow-get-table-indexes"
-description = "Permite obtener los índices de una tabla"
+description = "Allows retrieving the indexes of a table"
 commands.allow = ["get_table_indexes"]
 
 [[permission]]
 identifier = "allow-execute-query"
-description = "Permite ejecutar una consulta SQL arbitraria"
+description = "Allows executing an arbitrary SQL query"
 commands.allow = ["execute_query"]
 
 [[permission]]
 identifier = "allow-cancel-query"
-description = "Permite cancelar una consulta SQL en curso"
+description = "Allows cancelling an ongoing SQL query"
 commands.allow = ["cancel_query"]
 
 [[permission]]
 identifier = "allow-insert-row"
-description = "Permite insertar una nueva fila en una tabla"
+description = "Allows inserting a new row into a table"
 commands.allow = ["insert_row"]
 
 [[permission]]
 identifier = "allow-get-table-ddl"
-description = "Permite obtener el DDL (CREATE TABLE) de una tabla"
+description = "Allows retrieving the DDL (CREATE TABLE) of a table"
 commands.allow = ["get_table_ddl"]
 
 [[permission]]
 identifier = "allow-get-saved-queries"
-description = "Permite obtener la lista de consultas guardadas"
+description = "Allows retrieving the list of saved queries"
 commands.allow = ["get_saved_queries"]
 
 [[permission]]
 identifier = "allow-upsert-saved-query"
-description = "Permite crear o actualizar una consulta guardada"
+description = "Allows creating or updating a saved query"
 commands.allow = ["upsert_saved_query"]
 
 [[permission]]
 identifier = "allow-delete-saved-query"
-description = "Permite eliminar una consulta guardada"
+description = "Allows deleting a saved query"
 commands.allow = ["delete_saved_query"]

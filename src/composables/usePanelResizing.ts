@@ -1,7 +1,7 @@
 import { ref, nextTick } from 'vue'
 import type { TableTab } from '@/types/workspace'
 
-const SIDEBAR_WIDTH_KEY = 'db-viewer:sidebar-width'
+const SIDEBAR_WIDTH_KEY = 'tupledb:sidebar-width'
 
 function loadSidebarWidth(): number {
   try {
@@ -45,7 +45,7 @@ export function usePanelResizing() {
     window.addEventListener('mouseup', onUp)
   }
 
-  const LS_KEY = 'db-viewer:column-widths'
+  const LS_KEY = 'tupledb:column-widths'
 
   function tableColKey(tab: TableTab): string {
     return `${tab.connectionId}:${tab.database}:${tab.tableName}`
