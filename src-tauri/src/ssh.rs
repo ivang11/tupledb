@@ -1,8 +1,69 @@
 use crate::connections::{SshAuth, SshSettings};
 use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::Duration;
+
+struct AskpassFiles {
+    script_path: PathBuf,
+    secret_path: PathBuf,
+}
+
+impl AskpassFiles {
+    fn new(secret: &str) -> Result<Self, String> {
+        let id = uuid::Uuid::new_v4();
+        let files = Self {
+            script_path: std::env::temp_dir().join(format!(".tupledb_ssh_askpass_{id}.sh")),
+            secret_path: std::env::temp_dir().join(format!(".tupledb_ssh_askpass_{id}.dat")),
+        };
+
+        std::fs::write(&files.secret_path, secret)
+            .map_err(|e| format!("Failed to write SSH credential file: {e}"))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&files.secret_path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|e| format!("Failed to protect SSH credential file: {e}"))?;
+        }
+
+        // Pass the data file path through the environment so paths never need shell escaping.
+        std::fs::write(
+            &files.script_path,
+            "#!/bin/sh\ncat -- \"$TUPLEDB_SSH_SECRET_FILE\"\n",
+        )
+        .map_err(|e| format!("Failed to write SSH askpass helper: {e}"))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&files.script_path, std::fs::Permissions::from_mode(0o700))
+                .map_err(|e| format!("Failed to make SSH askpass helper executable: {e}"))?;
+        }
+
+        Ok(files)
+    }
+
+    fn configure(&self, command: &mut Command) {
+        command
+            .env("SSH_ASKPASS", &self.script_path)
+            .env("SSH_ASKPASS_REQUIRE", "force")
+            .env("TUPLEDB_SSH_SECRET_FILE", &self.secret_path)
+            // DISPLAY is needed on older OpenSSH versions to trigger askpass.
+            .env(
+                "DISPLAY",
+                std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into()),
+            );
+    }
+}
+
+impl Drop for AskpassFiles {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.script_path);
+        let _ = std::fs::remove_file(&self.secret_path);
+    }
+}
 
 pub struct SshTunnel {
     pub local_port: u16,
@@ -31,7 +92,7 @@ impl SshTunnel {
         let forward = format!("{}:{}:{}", local_port, remote_host, remote_port);
         let dest = format!("{}@{}", settings.user, settings.host);
 
-        let mut askpass_script: Option<std::path::PathBuf> = None;
+        let mut askpass_files: Option<AskpassFiles> = None;
 
         let mut child = match &settings.auth {
             SshAuth::Key {
@@ -50,51 +111,9 @@ impl SshTunnel {
                     .args(["-o", "ServerAliveCountMax=3"]);
 
                 if has_passphrase {
-                    // Write a temporary askpass script that echoes the passphrase.
-                    // SSH_ASKPASS_REQUIRE=force tells OpenSSH to use it instead of the TTY.
-                    let script_path = std::env::temp_dir()
-                        .join(format!(".ssh_askpass_{}.sh", std::process::id()));
-
-                    // Write the passphrase to a separate data file to avoid any shell escaping issues
-                    let data_path = std::env::temp_dir()
-                        .join(format!(".ssh_askpass_{}.dat", std::process::id()));
-
-                    std::fs::write(&data_path, passphrase.as_deref().unwrap())
-                        .map_err(|e| format!("Failed to write passphrase file: {}", e))?;
-
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        std::fs::set_permissions(
-                            &data_path,
-                            std::fs::Permissions::from_mode(0o600),
-                        )
-                        .map_err(|e| format!("Failed to set passphrase file permissions: {}", e))?;
-                    }
-
-                    let script_content = format!("#!/bin/sh\ncat '{}'\n", data_path.display());
-                    std::fs::write(&script_path, &script_content)
-                        .map_err(|e| format!("Failed to write askpass script: {}", e))?;
-
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        std::fs::set_permissions(
-                            &script_path,
-                            std::fs::Permissions::from_mode(0o700),
-                        )
-                        .map_err(|e| format!("Failed to set askpass script permissions: {}", e))?;
-                    }
-
-                    cmd.env("SSH_ASKPASS", &script_path)
-                        .env("SSH_ASKPASS_REQUIRE", "force")
-                        // DISPLAY is needed on older OpenSSH versions to trigger askpass
-                        .env(
-                            "DISPLAY",
-                            std::env::var("DISPLAY").unwrap_or_else(|_| ":0".into()),
-                        );
-
-                    askpass_script = Some(script_path);
+                    let files = AskpassFiles::new(passphrase.as_deref().unwrap())?;
+                    files.configure(&mut cmd);
+                    askpass_files = Some(files);
                 } else {
                     cmd.args(["-o", "BatchMode=yes"]);
                 }
@@ -120,35 +139,41 @@ impl SshTunnel {
             }
 
             SshAuth::Password { password } => {
-                // sshpass is required for password-based SSH
-                let has_sshpass = Command::new("sh")
-                    .args(["-c", "command -v sshpass"])
-                    .output()
-                    .map(|o| o.status.success())
-                    .unwrap_or(false);
-
-                if !has_sshpass {
-                    return Err("SSH password authentication requires 'sshpass'.\n\
-                         Install it with: sudo apt install sshpass\n\
-                         Or use key-based authentication instead."
-                        .into());
-                }
-
-                Command::new("sshpass")
-                    .args(["-p", password])
-                    .arg("ssh")
-                    .args(["-N", "-L", &forward])
+                let files = AskpassFiles::new(password)?;
+                let mut cmd = Command::new("ssh");
+                cmd.args(["-N", "-L", &forward])
                     .args(["-p", &settings.port.to_string()])
                     .args(["-o", "StrictHostKeyChecking=accept-new"])
                     .args(["-o", "ExitOnForwardFailure=yes"])
                     .args(["-o", "ServerAliveInterval=30"])
                     .args(["-o", "ServerAliveCountMax=3"])
+                    .args([
+                        "-o",
+                        "PreferredAuthentications=password,keyboard-interactive",
+                    ])
+                    .args(["-o", "NumberOfPasswordPrompts=1"])
                     .arg(&dest)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
-                    .stderr(Stdio::null())
+                    .stderr(Stdio::piped());
+
+                files.configure(&mut cmd);
+
+                // Detach from the controlling terminal so SSH always uses SSH_ASKPASS.
+                #[cfg(unix)]
+                unsafe {
+                    use std::os::unix::process::CommandExt;
+                    cmd.pre_exec(|| {
+                        libc::setsid();
+                        Ok(())
+                    });
+                }
+
+                let child = cmd
                     .spawn()
-                    .map_err(|e| format!("Failed to start sshpass: {}", e))?
+                    .map_err(|e| format!("Failed to start ssh: {e}"))?;
+                askpass_files = Some(files);
+                child
             }
         };
 
@@ -162,12 +187,8 @@ impl SshTunnel {
             }
         }
 
-        // Clean up temp askpass files now that SSH has read the passphrase
-        if let Some(ref script_path) = askpass_script {
-            let data_path = script_path.with_extension("dat");
-            let _ = std::fs::remove_file(script_path);
-            let _ = std::fs::remove_file(data_path);
-        }
+        // SSH has completed authentication, so its temporary credential files can go away.
+        drop(askpass_files.take());
 
         if !ready {
             // Collect SSH stderr to surface the real error
