@@ -312,14 +312,19 @@ pub fn escape_csv(s: &str) -> String {
 
 fn parse_mysql_row(row: &sqlx::mysql::MySqlRow) -> Value {
     let mut map = Map::new();
-    for col in row.columns() {
+    // Decode by ordinal, not by column name. MySQL can return fresh column
+    // metadata while a pooled/prepared statement still has a stale name index
+    // after a schema change. Mixing `row.columns()` with name-based lookups can
+    // then read a value from a different column until another connection is
+    // used. The ordinal and its metadata always come from the same result row.
+    for (index, col) in row.columns().iter().enumerate() {
         let col_name = col.name();
         let type_name = col.type_info().name().to_uppercase();
-        let value: Value = match row.try_get_raw(col_name) {
+        let value: Value = match row.try_get_raw(index) {
             Ok(raw) if raw.is_null() => Value::Null,
             _ => match type_name.as_str() {
                 "TINYINT(1)" | "BOOLEAN" | "BOOL" => row
-                    .try_get::<i8, _>(col_name)
+                    .try_get::<i8, _>(index)
                     .map(|v| Value::Bool(v != 0))
                     .unwrap_or(Value::Null),
                 t if t == "BIT" || t.starts_with("BIT(") => {
@@ -330,10 +335,10 @@ fn parse_mysql_row(row: &sqlx::mysql::MySqlRow) -> Value {
                         .unwrap_or(1);
                     let to_bin =
                         |n: u64| Value::String(format!("{:0>width$b}", n, width = width as usize));
-                    row.try_get::<u64, _>(col_name)
+                    row.try_get::<u64, _>(index)
                         .map(&to_bin)
                         .or_else(|_| {
-                            row.try_get::<Vec<u8>, _>(col_name).map(|b| {
+                            row.try_get::<Vec<u8>, _>(index).map(|b| {
                                 let n = b.iter().fold(0u64, |acc, &x| (acc << 8) | x as u64);
                                 to_bin(n)
                             })
@@ -341,10 +346,10 @@ fn parse_mysql_row(row: &sqlx::mysql::MySqlRow) -> Value {
                         .unwrap_or(Value::Null)
                 }
                 t if t.contains("INT") => row
-                    .try_get::<i64, _>(col_name)
+                    .try_get::<i64, _>(index)
                     .map(|v| Value::Number(v.into()))
                     .or_else(|_| {
-                        row.try_get::<u64, _>(col_name)
+                        row.try_get::<u64, _>(index)
                             .map(|v| Value::Number(v.into()))
                     })
                     .unwrap_or(Value::Null),
@@ -353,30 +358,30 @@ fn parse_mysql_row(row: &sqlx::mysql::MySqlRow) -> Value {
                     || t.starts_with("DOUBLE")
                     || t.starts_with("FLOAT") =>
                 {
-                    row.try_get::<f64, _>(col_name)
+                    row.try_get::<f64, _>(index)
                         .ok()
                         .and_then(serde_json::Number::from_f64)
                         .map(Value::Number)
                         .unwrap_or(Value::Null)
                 }
                 t if t.starts_with("DECIMAL") || t.starts_with("NUMERIC") || t == "NEWDECIMAL" => {
-                    row.try_get::<rust_decimal::Decimal, _>(col_name)
+                    row.try_get::<rust_decimal::Decimal, _>(index)
                         .map(|d| Value::String(d.to_string()))
-                        .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
+                        .or_else(|_| row.try_get::<String, _>(index).map(Value::String))
                         .unwrap_or(Value::Null)
                 }
                 "YEAR" => row
-                    .try_get::<u16, _>(col_name)
+                    .try_get::<u16, _>(index)
                     .map(|v| Value::Number(v.into()))
-                    .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
+                    .or_else(|_| row.try_get::<String, _>(index).map(Value::String))
                     .unwrap_or(Value::Null),
                 "DATE" => row
-                    .try_get::<chrono::NaiveDate, _>(col_name)
+                    .try_get::<chrono::NaiveDate, _>(index)
                     .map(|d| Value::String(d.to_string()))
-                    .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
+                    .or_else(|_| row.try_get::<String, _>(index).map(Value::String))
                     .unwrap_or(Value::Null),
                 t if t == "TIME" || t.starts_with("TIME(") => row
-                    .try_get::<chrono::NaiveTime, _>(col_name)
+                    .try_get::<chrono::NaiveTime, _>(index)
                     .map(|t| {
                         let base = t.format("%H:%M:%S").to_string();
                         if t.nanosecond() == 0 {
@@ -391,10 +396,10 @@ fn parse_mysql_row(row: &sqlx::mysql::MySqlRow) -> Value {
                         }
                     })
                     .map(Value::String)
-                    .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
+                    .or_else(|_| row.try_get::<String, _>(index).map(Value::String))
                     .unwrap_or(Value::Null),
                 t if t == "DATETIME" || t.starts_with("DATETIME(") => row
-                    .try_get::<chrono::NaiveDateTime, _>(col_name)
+                    .try_get::<chrono::NaiveDateTime, _>(index)
                     .map(|dt| {
                         let base = dt.format("%Y-%m-%d %H:%M:%S").to_string();
                         if dt.nanosecond() == 0 {
@@ -409,11 +414,11 @@ fn parse_mysql_row(row: &sqlx::mysql::MySqlRow) -> Value {
                         }
                     })
                     .map(Value::String)
-                    .or_else(|_| row.try_get::<String, _>(col_name).map(Value::String))
+                    .or_else(|_| row.try_get::<String, _>(index).map(Value::String))
                     .unwrap_or(Value::Null),
                 t if t == "TIMESTAMP" || t.starts_with("TIMESTAMP(") => {
                     let s = row
-                        .try_get::<chrono::NaiveDateTime, _>(col_name)
+                        .try_get::<chrono::NaiveDateTime, _>(index)
                         .map(|dt| {
                             let base = dt.format("%Y-%m-%d %H:%M:%S").to_string();
                             if dt.nanosecond() == 0 {
@@ -429,14 +434,14 @@ fn parse_mysql_row(row: &sqlx::mysql::MySqlRow) -> Value {
                             }
                         })
                         .or_else(|_| {
-                            row.try_get::<chrono::DateTime<chrono::Utc>, _>(col_name)
+                            row.try_get::<chrono::DateTime<chrono::Utc>, _>(index)
                                 .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
                         })
-                        .or_else(|_| row.try_get::<String, _>(col_name));
+                        .or_else(|_| row.try_get::<String, _>(index));
                     s.map(Value::String).unwrap_or(Value::Null)
                 }
                 t if t.contains("BLOB") || t == "BINARY" || t.starts_with("VARBINARY") => row
-                    .try_get::<Vec<u8>, _>(col_name)
+                    .try_get::<Vec<u8>, _>(index)
                     .map(|b| {
                         let trimmed: Vec<u8> = b
                             .iter()
@@ -464,27 +469,24 @@ fn parse_mysql_row(row: &sqlx::mysql::MySqlRow) -> Value {
                     || t.starts_with("MULTI")
                     || t == "GEOMETRYCOLLECTION" =>
                 {
-                    row.try_get_unchecked::<Vec<u8>, _>(col_name)
+                    row.try_get_unchecked::<Vec<u8>, _>(index)
                         .map(|b| Value::String(mysql_wkb_to_wkt(&b)))
-                        .or_else(|_| {
-                            row.try_get_unchecked::<String, _>(col_name)
-                                .map(Value::String)
-                        })
+                        .or_else(|_| row.try_get_unchecked::<String, _>(index).map(Value::String))
                         .unwrap_or_else(|_| Value::String(format!("<{}>", type_name)))
                 }
                 t if t == "JSON" || t.contains("JSON") => row
-                    .try_get_unchecked::<String, _>(col_name)
+                    .try_get_unchecked::<String, _>(index)
                     .or_else(|_| {
-                        row.try_get_unchecked::<Vec<u8>, _>(col_name)
+                        row.try_get_unchecked::<Vec<u8>, _>(index)
                             .map(|b| String::from_utf8_lossy(&b).to_string())
                     })
                     .map(Value::String)
                     .unwrap_or_else(|_| Value::String(format!("<{}>", type_name))),
                 _ => row
-                    .try_get::<String, _>(col_name)
+                    .try_get::<String, _>(index)
                     .map(Value::String)
                     .or_else(|_| {
-                        row.try_get::<Vec<u8>, _>(col_name)
+                        row.try_get::<Vec<u8>, _>(index)
                             .map(|b| Value::String(String::from_utf8_lossy(&b).to_string()))
                     })
                     .unwrap_or_else(|_| Value::String(format!("<{}>", type_name))),
