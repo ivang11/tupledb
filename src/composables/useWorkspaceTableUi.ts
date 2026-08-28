@@ -81,6 +81,7 @@ export function useWorkspaceTableUi(ctx: WorkspaceTableUiContext) {
     let pendingDrop = false;
     let pendingTruncate = false;
     let pendingChangesCount = 0;
+    let pendingStructureChangesCount = 0;
     let pendingDeletionsCount = 0;
     let pendingInsertionsCount = 0;
 
@@ -90,6 +91,7 @@ export function useWorkspaceTableUi(ctx: WorkspaceTableUiContext) {
         pendingDrop ||= tab.pendingDrop;
         pendingTruncate ||= tab.pendingTruncate;
         pendingChangesCount += Object.keys(tab.pendingChanges).length;
+        pendingStructureChangesCount += Object.keys(tab.pendingStructureChanges ?? {}).length;
         pendingDeletionsCount += Object.keys(tab.pendingDeletions).length;
         pendingInsertionsCount += tab.pendingInserts.length;
       }
@@ -99,6 +101,7 @@ export function useWorkspaceTableUi(ctx: WorkspaceTableUiContext) {
       pendingDrop,
       pendingTruncate,
       pendingChangesCount,
+      pendingStructureChangesCount,
       pendingDeletionsCount,
       pendingInsertionsCount,
     };

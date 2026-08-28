@@ -53,6 +53,7 @@ pub fn run() {
             crate::mysql::export_table,
             crate::mysql::apply_table_changes,
             crate::mysql::insert_row,
+            crate::mysql::alter_table_column,
             crate::mysql::drop_table,
             crate::mysql::drop_tables,
             crate::mysql::truncate_table,

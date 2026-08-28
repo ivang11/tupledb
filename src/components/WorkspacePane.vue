@@ -97,6 +97,11 @@
         :metadata-loaded="getPaneTab(pane)?.metadataLoaded ?? false"
         :pane-id="pane.id"
         :index-panel-height="structureIndexHeights[pane.id]"
+        :can-edit="getPaneConnection(pane)?.allow_writes !== false"
+        :edit-disabled-reason="'This connection is read-only'"
+        :pending-column-changes="getPaneTab(pane)?.pendingStructureChanges ?? {}"
+        :has-pending-changes="hasPendingChangesInPane(pane)"
+        :update-column="(oldName, newName, newType) => updatePendingStructureColumn(pane, oldName, newName, newType)"
         @start-index-resize="startStructureResize"
       />
 
@@ -168,6 +173,7 @@
         :pending-truncate="globalPendingSummary.pendingTruncate"
         :pending-drop="globalPendingSummary.pendingDrop"
         :pending-changes-count="globalPendingSummary.pendingChangesCount"
+        :pending-structure-changes-count="globalPendingSummary.pendingStructureChangesCount"
         :pending-deletions-count="globalPendingSummary.pendingDeletionsCount"
         :pending-insertions-count="globalPendingSummary.pendingInsertionsCount"
         :disable-fk-checks="disableFkChecks"
@@ -226,6 +232,7 @@ const {
   paneWorkspaceLabel,
   getSchema,
   getPaneTab,
+  getPaneConnection,
   tableGridColumns,
   getPrimaryKey,
   getFkMap,
@@ -251,6 +258,7 @@ const {
   activatePane,
   setViewMode,
   loadStructureViewMetadata,
+  updatePendingStructureColumn,
   openInsertRowDialog,
   toggleRowDetailOnClick,
   applyFilters,
@@ -278,4 +286,3 @@ const {
   applyChanges,
 } = useWorkspacePaneContext();
 </script>
-

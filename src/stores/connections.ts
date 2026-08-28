@@ -245,6 +245,30 @@ export const useConnectionStore = defineStore('connections', () => {
     }
   }
 
+  async function alterTableColumn(
+    connectionId: string,
+    database: string,
+    tableName: string,
+    oldName: string,
+    newName: string,
+    newType: string,
+  ) {
+    try {
+      await invoke('alter_table_column', {
+        connectionId,
+        database,
+        table: tableName,
+        oldName,
+        newName,
+        newType,
+      })
+      markConnectionConnected(connectionId)
+    } catch (error) {
+      markConnectionError(connectionId, error)
+      throw error
+    }
+  }
+
   return {
     connections,
     openConnections,
@@ -263,6 +287,7 @@ export const useConnectionStore = defineStore('connections', () => {
     fetchTableIndexes,
     fetchForeignKeys,
     fetchTableDdl,
+    alterTableColumn,
     exportConnections,
     importConnections,
   }

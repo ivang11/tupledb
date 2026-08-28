@@ -25,6 +25,7 @@ export interface TableTab {
   sortColumn: string | null
   sortDesc: boolean
   pendingChanges: Record<string, Record<string, any>>
+  pendingStructureChanges: Record<string, { newName: string; newType: string }>
   pendingDeletions: Record<string, boolean>
   pendingInserts: Array<{ values: Array<{ column: string; value: any }> }>
   pendingTruncate: boolean

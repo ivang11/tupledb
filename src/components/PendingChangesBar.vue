@@ -10,7 +10,7 @@
     <div class="h-4 w-px bg-border"></div>
 
     <div class="flex items-center gap-2">
-      <div class="flex items-center gap-2 mr-2">
+      <div v-if="hasDataChanges" class="flex items-center gap-2 mr-2">
         <label class="flex items-center gap-2 cursor-pointer group">
           <input
             type="checkbox"
@@ -39,6 +39,7 @@ const props = defineProps<{
   pendingTruncate: boolean
   pendingDrop: boolean
   pendingChangesCount: number
+  pendingStructureChangesCount: number
   pendingDeletionsCount: number
   pendingInsertionsCount: number
   disableFkChecks: boolean
@@ -56,10 +57,18 @@ const pendingLabel = computed(() => {
   if (props.pendingTruncate) return 'Truncate pending'
 
   const parts: string[] = []
+  if (props.pendingStructureChangesCount > 0) parts.push(`${props.pendingStructureChangesCount} schema change${props.pendingStructureChangesCount === 1 ? '' : 's'}`)
   if (props.pendingChangesCount > 0) parts.push(`${props.pendingChangesCount} update${props.pendingChangesCount === 1 ? '' : 's'}`)
   if (props.pendingDeletionsCount > 0) parts.push(`${props.pendingDeletionsCount} delete${props.pendingDeletionsCount === 1 ? '' : 's'}`)
   if (props.pendingInsertionsCount > 0) parts.push(`${props.pendingInsertionsCount} insert${props.pendingInsertionsCount === 1 ? '' : 's'}`)
   return parts.length ? `Pending: ${parts.join(' · ')}` : 'Pending changes'
 })
-</script>
 
+const hasDataChanges = computed(() =>
+  props.pendingTruncate ||
+  props.pendingDrop ||
+  props.pendingChangesCount > 0 ||
+  props.pendingDeletionsCount > 0 ||
+  props.pendingInsertionsCount > 0,
+)
+</script>

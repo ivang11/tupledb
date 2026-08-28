@@ -28,6 +28,7 @@ function tabHasPendingChanges(tab: TableTab): boolean {
     tab.pendingTruncate ||
     tab.pendingInserts.length > 0 ||
     Object.keys(tab.pendingChanges).length > 0 ||
+    Object.keys(tab.pendingStructureChanges ?? {}).length > 0 ||
     Object.keys(tab.pendingDeletions).length > 0
 }
 
@@ -210,6 +211,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     const tab = getPaneTab(pane)
     if (!tab) return
     tab.pendingChanges = {}
+    tab.pendingStructureChanges = {}
     tab.pendingDeletions = {}
     tab.pendingInserts = []
     tab.pendingTruncate = false
@@ -321,6 +323,7 @@ export function useRowEditing(ctx: RowEditingContext) {
 
   function clearTabPendingState(tab: TableTab) {
     tab.pendingChanges = {}
+    tab.pendingStructureChanges = {}
     tab.pendingDeletions = {}
     tab.pendingInserts = []
     tab.pendingTruncate = false
@@ -359,15 +362,27 @@ export function useRowEditing(ctx: RowEditingContext) {
 
   async function refreshMatchingTableTabs(target: TableTab) {
     for (const tab of matchingOpenTableTabs(target)) {
-      tab.queryResult = await store.fetchTableData(
-        tab.connectionId,
-        tab.database,
-        tab.tableName,
-        tab.page,
-        tab.pageSize,
-        tab.filters ?? null,
-        tab.sortColumn ? { column: tab.sortColumn, desc: tab.sortDesc } : null,
-      )
+      const [queryResult, tableStructure, tableIndexes, foreignKeys, ddl] = await Promise.all([
+        store.fetchTableData(
+          tab.connectionId,
+          tab.database,
+          tab.tableName,
+          tab.page,
+          tab.pageSize,
+          tab.filters ?? null,
+          tab.sortColumn ? { column: tab.sortColumn, desc: tab.sortDesc } : null,
+        ),
+        store.fetchTableStructure(tab.connectionId, tab.database, tab.tableName),
+        store.fetchTableIndexes(tab.connectionId, tab.database, tab.tableName),
+        store.fetchForeignKeys(tab.connectionId, tab.database, tab.tableName),
+        store.fetchTableDdl(tab.connectionId, tab.database, tab.tableName),
+      ])
+      tab.queryResult = queryResult
+      tab.tableStructure = tableStructure
+      tab.tableIndexes = tableIndexes
+      tab.foreignKeys = foreignKeys
+      tab.ddl = ddl
+      tab.metadataLoaded = true
     }
   }
 
@@ -387,6 +402,7 @@ export function useRowEditing(ctx: RowEditingContext) {
         connectionId: tab.connectionId, database: tab.database,
         table: tab.tableName, disableFkChecks: disableFkChecks.value,
       })
+      tab.pendingTruncate = false
     }
 
     if (!tab.pendingTruncate || tab.pendingInserts.length > 0) {
@@ -410,10 +426,13 @@ export function useRowEditing(ctx: RowEditingContext) {
           connectionId: tab.connectionId, database: tab.database, table: tab.tableName,
           updates, deletions, disableFkChecks: disableFkChecks.value,
         })
+        tab.pendingChanges = {}
+        tab.pendingDeletions = {}
       }
     }
 
-    for (const insert of tab.pendingInserts) {
+    while (tab.pendingInserts.length > 0) {
+      const insert = tab.pendingInserts[0]
       await invoke('insert_row', {
         connectionId: tab.connectionId,
         database: tab.database,
@@ -421,6 +440,30 @@ export function useRowEditing(ctx: RowEditingContext) {
         values: insert.values,
         disableFkChecks: disableFkChecks.value,
       })
+      tab.pendingInserts.shift()
+    }
+
+    for (const [oldName, change] of Object.entries(tab.pendingStructureChanges ?? {})) {
+      await store.alterTableColumn(
+        tab.connectionId,
+        tab.database,
+        tab.tableName,
+        oldName,
+        change.newName,
+        change.newType,
+      )
+
+      for (const matchingTab of matchingOpenTableTabs(tab)) {
+        if (matchingTab.sortColumn === oldName) matchingTab.sortColumn = change.newName
+        if (matchingTab.filters?.rows) {
+          for (const row of matchingTab.filters.rows) {
+            if (row.column === oldName) row.column = change.newName
+          }
+        }
+      }
+      // Remove successful operations immediately so retrying after a later
+      // failure never attempts to rename an already-renamed column.
+      delete tab.pendingStructureChanges[oldName]
     }
 
     clearTabPendingState(tab)
@@ -446,6 +489,15 @@ export function useRowEditing(ctx: RowEditingContext) {
         await refreshMatchingTableTabs(tab)
       }
     } catch (e: any) {
+      // A table can contain several DDL operations and MySQL commits each one.
+      // Refresh after a partial failure so already-applied changes are visible
+      // while the operations that did not run remain pending.
+      const pendingTabs = ctx.panes.value.flatMap(p =>
+        p.tabs.filter((t): t is TableTab => t.type === 'table' && tabHasPendingChanges(t)),
+      )
+      for (const tab of pendingTabs) {
+        await refreshMatchingTableTabs(tab).catch(() => undefined)
+      }
       toastError('Failed to apply changes', String(e))
     } finally {
       isSaving.value = false

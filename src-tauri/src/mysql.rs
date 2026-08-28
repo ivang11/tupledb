@@ -140,6 +140,150 @@ fn sql_literal(value: &Value) -> String {
     }
 }
 
+fn quote_identifier(identifier: &str) -> Result<String, String> {
+    let trimmed = identifier.trim();
+    if trimmed.is_empty() {
+        return Err("Identifier cannot be empty".to_string());
+    }
+    if trimmed.chars().count() > 64 || trimmed.contains('\0') {
+        return Err("Identifier must contain at most 64 characters".to_string());
+    }
+    Ok(format!("`{}`", trimmed.replace('`', "``")))
+}
+
+fn validate_column_type(column_type: &str) -> Result<String, String> {
+    const TYPES: &[&str] = &[
+        "BIGINT", "BINARY", "BIT", "BLOB", "BOOL", "BOOLEAN", "CHAR", "DATE",
+        "DATETIME", "DEC", "DECIMAL", "DOUBLE", "ENUM", "FIXED", "FLOAT", "GEOMETRY",
+        "GEOMETRYCOLLECTION", "INT", "INTEGER", "JSON", "LINESTRING", "LONGBLOB",
+        "LONGTEXT", "MEDIUMBLOB", "MEDIUMINT", "MEDIUMTEXT", "MULTILINESTRING",
+        "MULTIPOINT", "MULTIPOLYGON", "NUMERIC", "POINT", "POLYGON", "REAL", "SET",
+        "SMALLINT", "TEXT", "TIME", "TIMESTAMP", "TINYBLOB", "TINYINT", "TINYTEXT",
+        "VARBINARY", "VARCHAR", "YEAR",
+    ];
+
+    let value = column_type.trim();
+    if value.is_empty() || value.len() > 1_000 {
+        return Err("Enter a valid column type".to_string());
+    }
+    if value.contains(';')
+        || value.contains('`')
+        || value.contains('\0')
+        || value.contains("--")
+        || value.contains("/*")
+        || value.contains("*/")
+        || value.contains('#')
+    {
+        return Err("Column type contains unsupported SQL syntax".to_string());
+    }
+
+    let base_end = value
+        .find(|c: char| c == '(' || c.is_whitespace())
+        .unwrap_or(value.len());
+    let base = value[..base_end].to_ascii_uppercase();
+    if !TYPES.contains(&base.as_str()) {
+        return Err(format!("Unsupported column type: {}", &value[..base_end]));
+    }
+
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    for ch in value.chars() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quoted && ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if ch == '\'' {
+            quoted = !quoted;
+            continue;
+        }
+        if quoted {
+            continue;
+        }
+        match ch {
+            '(' => depth += 1,
+            ')' if depth == 0 => return Err("Column type has unbalanced parentheses".to_string()),
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                return Err("Column type contains unsupported SQL syntax".to_string())
+            }
+            c if c.is_ascii_alphanumeric()
+                || c.is_ascii_whitespace()
+                || matches!(c, '_' | ',' | '.' | '+' | '-') => {}
+            _ => return Err("Column type contains unsupported characters".to_string()),
+        }
+    }
+    if quoted || depth != 0 {
+        return Err("Column type has an unfinished quote or parenthesis".to_string());
+    }
+
+    let suffix_start = if let Some(open) = value.find('(') {
+        let mut suffix_depth = 0usize;
+        let mut end = None;
+        let mut in_quote = false;
+        let mut suffix_escaped = false;
+        for (offset, ch) in value[open..].char_indices() {
+            if suffix_escaped {
+                suffix_escaped = false;
+                continue;
+            }
+            if in_quote && ch == '\\' {
+                suffix_escaped = true;
+                continue;
+            }
+            if ch == '\'' {
+                in_quote = !in_quote;
+            } else if !in_quote && ch == '(' {
+                suffix_depth += 1;
+            } else if !in_quote && ch == ')' {
+                suffix_depth -= 1;
+                if suffix_depth == 0 {
+                    end = Some(open + offset + ch.len_utf8());
+                    break;
+                }
+            }
+        }
+        end.unwrap_or(value.len())
+    } else {
+        base_end
+    };
+    let modifiers = value[suffix_start..].trim();
+    if !modifiers.is_empty()
+        && !modifiers
+            .split_whitespace()
+            .all(|word| matches!(word.to_ascii_uppercase().as_str(), "UNSIGNED" | "ZEROFILL"))
+    {
+        return Err("Only UNSIGNED and ZEROFILL modifiers are supported".to_string());
+    }
+
+    Ok(value.to_string())
+}
+
+fn quote_mysql_string(value: &str) -> String {
+    format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"))
+}
+
+fn column_type_supports_charset(column_type: &str) -> bool {
+    let base_end = column_type
+        .find(|c: char| c == '(' || c.is_whitespace())
+        .unwrap_or(column_type.len());
+    matches!(
+        column_type[..base_end].to_ascii_uppercase().as_str(),
+        "CHAR"
+            | "VARCHAR"
+            | "TINYTEXT"
+            | "TEXT"
+            | "MEDIUMTEXT"
+            | "LONGTEXT"
+            | "ENUM"
+            | "SET"
+    )
+}
+
 fn append_keyset_predicate(
     where_clause: &str,
     keyset: &KeysetPage,
@@ -370,13 +514,18 @@ fn rows_to_parsed(rows: Vec<sqlx::mysql::MySqlRow>) -> (Vec<ColumnInfo>, Vec<Val
 // --------------------------------------------------------------------------
 
 fn get_str_lossy(row: &sqlx::mysql::MySqlRow, index: usize) -> String {
-    if let Ok(s) = row.try_get::<String, _>(index) {
-        return s;
+    get_optional_str_lossy(row, index).unwrap_or_else(|| "unknown".to_string())
+}
+
+fn get_optional_str_lossy(row: &sqlx::mysql::MySqlRow, index: usize) -> Option<String> {
+    if row.try_get_raw(index).ok().is_some_and(|value| value.is_null()) {
+        return None;
     }
-    if let Ok(b) = row.try_get::<Vec<u8>, _>(index) {
-        return String::from_utf8_lossy(&b).to_string();
-    }
-    "unknown".to_string()
+    row.try_get::<String, _>(index).ok().or_else(|| {
+        row.try_get::<Vec<u8>, _>(index)
+            .ok()
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+    })
 }
 
 fn is_early_connection_close(error: &sqlx::Error) -> bool {
@@ -585,7 +734,7 @@ impl DatabaseDriver for MySqlDriver {
                 field_type: get_str_lossy(row, 1),
                 nullable: get_str_lossy(row, 2) == "YES",
                 key: get_str_lossy(row, 3),
-                default_value: row.try_get::<Option<String>, _>(4).ok().flatten(),
+                default_value: get_optional_str_lossy(row, 4),
                 extra: get_str_lossy(row, 5),
             })
             .collect())
@@ -1242,6 +1391,143 @@ impl DatabaseDriver for MySqlDriver {
                 .map_err(|e| e.to_string())?;
         }
         tx.commit().await.map_err(|e| e.to_string())
+    }
+
+    async fn alter_table_column(
+        &self,
+        database: &str,
+        table: &str,
+        old_name: &str,
+        new_name: &str,
+        new_type: &str,
+    ) -> Result<String, String> {
+        let database_sql = quote_identifier(database)?;
+        let table_sql = quote_identifier(table)?;
+        let old_name_sql = quote_identifier(old_name)?;
+        let new_name_sql = quote_identifier(new_name)?;
+        let new_type = validate_column_type(new_type)?;
+
+        let metadata = sqlx::query(
+            "SELECT COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, EXTRA, COLUMN_COMMENT, \
+                    CHARACTER_SET_NAME, COLLATION_NAME, GENERATION_EXPRESSION \
+             FROM information_schema.COLUMNS \
+             WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+        )
+        .bind(database)
+        .bind(table)
+        .bind(old_name)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| format!("Failed to read column definition: {}", e))?
+        .ok_or_else(|| format!("Column '{}' no longer exists", old_name))?;
+
+        let current_type = get_optional_str_lossy(&metadata, 0)
+            .ok_or_else(|| "Failed to read column type from information_schema".to_string())?;
+        let name_changed = old_name.trim() != new_name.trim();
+        let type_changed = current_type.trim().to_ascii_lowercase()
+            != new_type.trim().to_ascii_lowercase();
+
+        if !name_changed && !type_changed {
+            return Ok(String::new());
+        }
+
+        // RENAME COLUMN is the safest path when the type is unchanged: MySQL
+        // retains every attribute without us having to rebuild the definition.
+        let sql = if !type_changed {
+            format!(
+                "ALTER TABLE {}.{} RENAME COLUMN {} TO {}",
+                database_sql, table_sql, old_name_sql, new_name_sql
+            )
+        } else {
+            let nullable = get_optional_str_lossy(&metadata, 1).ok_or_else(|| {
+                "Failed to read column nullability from information_schema".to_string()
+            })?;
+            let default_value = get_optional_str_lossy(&metadata, 2);
+            let extra = get_optional_str_lossy(&metadata, 3).unwrap_or_default();
+            let comment = get_optional_str_lossy(&metadata, 4).unwrap_or_default();
+            let character_set = get_optional_str_lossy(&metadata, 5);
+            let collation = get_optional_str_lossy(&metadata, 6);
+            let generation = get_optional_str_lossy(&metadata, 7).unwrap_or_default();
+            let extra_upper = extra.to_ascii_uppercase();
+
+            let mut definition = new_type;
+            if column_type_supports_charset(&definition) {
+                if let Some(charset) = character_set {
+                    definition.push_str(" CHARACTER SET ");
+                    definition.push_str(&quote_identifier(&charset)?);
+                }
+                if let Some(collation) = collation {
+                    definition.push_str(" COLLATE ");
+                    definition.push_str(&quote_identifier(&collation)?);
+                }
+            }
+
+            if !generation.trim().is_empty() {
+                definition.push_str(" GENERATED ALWAYS AS (");
+                definition.push_str(&generation);
+                definition.push(')');
+                if extra_upper.contains("STORED GENERATED") {
+                    definition.push_str(" STORED");
+                } else {
+                    definition.push_str(" VIRTUAL");
+                }
+            } else {
+                definition.push_str(if nullable == "YES" { " NULL" } else { " NOT NULL" });
+
+                if let Some(default) = default_value {
+                    let upper = default.trim().to_ascii_uppercase();
+                    let temporal_expression = upper == "CURRENT_TIMESTAMP"
+                        || upper.starts_with("CURRENT_TIMESTAMP(")
+                        || upper == "CURRENT_DATE"
+                        || upper.starts_with("CURRENT_DATE(")
+                        || upper == "CURRENT_TIME"
+                        || upper.starts_with("CURRENT_TIME(");
+                    definition.push_str(" DEFAULT ");
+                    if temporal_expression {
+                        definition.push_str(default.trim());
+                    } else if extra_upper.contains("DEFAULT_GENERATED") {
+                        if default.trim().starts_with('(') {
+                            definition.push_str(default.trim());
+                        } else {
+                            definition.push('(');
+                            definition.push_str(default.trim());
+                            definition.push(')');
+                        }
+                    } else {
+                        definition.push_str(&quote_mysql_string(&default));
+                    }
+                } else if nullable == "YES" && !extra_upper.contains("AUTO_INCREMENT") {
+                    definition.push_str(" DEFAULT NULL");
+                }
+
+                if extra_upper.contains("AUTO_INCREMENT") {
+                    definition.push_str(" AUTO_INCREMENT");
+                }
+                if let Some(on_update) = extra_upper.find("ON UPDATE ") {
+                    definition.push(' ');
+                    definition.push_str(&extra[on_update..]);
+                }
+                if extra_upper.contains("INVISIBLE") {
+                    definition.push_str(" INVISIBLE");
+                }
+            }
+
+            if !comment.is_empty() {
+                definition.push_str(" COMMENT ");
+                definition.push_str(&quote_mysql_string(&comment));
+            }
+
+            format!(
+                "ALTER TABLE {}.{} CHANGE COLUMN {} {} {}",
+                database_sql, table_sql, old_name_sql, new_name_sql, definition
+            )
+        };
+
+        sqlx::query(&sql)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to alter column: {}", e))?;
+        Ok(sql)
     }
 
     async fn drop_table(
@@ -2090,6 +2376,44 @@ pub async fn insert_row(
 }
 
 #[tauri::command]
+pub async fn alter_table_column(
+    state: State<'_, AppState>,
+    connection_id: Uuid,
+    database: String,
+    table: String,
+    old_name: String,
+    new_name: String,
+    new_type: String,
+) -> Result<(), String> {
+    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id))?;
+    let driver = state.get_driver(&connection_id)?;
+    let t0 = std::time::Instant::now();
+    let result = driver
+        .alter_table_column(&database, &table, &old_name, &new_name, &new_type)
+        .await;
+    let ms = t0.elapsed().as_millis() as u64;
+    let logged_sql = result
+        .as_ref()
+        .ok()
+        .filter(|sql| !sql.is_empty())
+        .cloned()
+        .unwrap_or_else(|| {
+            format!(
+                "ALTER TABLE `{}`.`{}` CHANGE COLUMN `{}` `{}` {}",
+                database, table, old_name, new_name, new_type
+            )
+        });
+    state.emit_query_log_context(
+        Some(connection_id),
+        Some(&database),
+        &logged_sql,
+        ms,
+        result.as_ref().err().map(|e| e.as_str()),
+    );
+    result.map(|_| ())
+}
+
+#[tauri::command]
 pub async fn drop_table(
     state: State<'_, AppState>,
     connection_id: Uuid,
@@ -2191,6 +2515,49 @@ mod tests {
             "'O\\'Reilly'"
         );
         assert_eq!(sql_literal(&Value::String("C:\\tmp".into())), "'C:\\\\tmp'");
+    }
+
+    #[test]
+    fn validates_column_types_used_by_the_structure_editor() {
+        for value in [
+            "varchar(255)",
+            "BIGINT UNSIGNED",
+            "decimal(10, 2)",
+            "enum('draft','published')",
+            "timestamp(6)",
+        ] {
+            assert_eq!(validate_column_type(value).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn rejects_column_type_sql_injection_and_definition_attributes() {
+        for value in [
+            "varchar(20); DROP TABLE users",
+            "int, DROP COLUMN email",
+            "int NOT NULL",
+            "varchar(20) COMMENT 'surprise'",
+            "made_up_type",
+            "enum('unfinished)",
+        ] {
+            assert!(validate_column_type(value).is_err(), "{value} should be rejected");
+        }
+    }
+
+    #[test]
+    fn quotes_mysql_identifiers_and_rejects_invalid_names() {
+        assert_eq!(quote_identifier("display name").unwrap(), "`display name`");
+        assert_eq!(quote_identifier("odd`name").unwrap(), "`odd``name`");
+        assert!(quote_identifier("").is_err());
+        assert!(quote_identifier(&"a".repeat(65)).is_err());
+    }
+
+    #[test]
+    fn only_character_types_retain_charset_and_collation() {
+        assert!(column_type_supports_charset("varchar(255)"));
+        assert!(column_type_supports_charset("ENUM('a','b')"));
+        assert!(!column_type_supports_charset("int unsigned"));
+        assert!(!column_type_supports_charset("varbinary(32)"));
     }
 
     #[test]

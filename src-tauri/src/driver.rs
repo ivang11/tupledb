@@ -269,6 +269,18 @@ pub trait DatabaseDriver: Send + Sync {
         disable_fk_checks: bool,
     ) -> Result<(), String>;
 
+    /// Renames a column and/or changes its data type while preserving the
+    /// rest of its definition (nullability, default, generated expression,
+    /// collation, comment and extra attributes).
+    async fn alter_table_column(
+        &self,
+        database: &str,
+        table: &str,
+        old_name: &str,
+        new_name: &str,
+        new_type: &str,
+    ) -> Result<String, String>;
+
     async fn drop_table(
         &self,
         database: &str,

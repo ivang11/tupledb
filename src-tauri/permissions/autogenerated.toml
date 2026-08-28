@@ -99,6 +99,11 @@ description = "Allows applying changes (updates/deletes) to a table"
 commands.allow = ["apply_table_changes"]
 
 [[permission]]
+identifier = "allow-alter-table-column"
+description = "Allows renaming a table column or changing its data type"
+commands.allow = ["alter_table_column"]
+
+[[permission]]
 identifier = "allow-drop-table"
 description = "Allows permanently dropping a table"
 commands.allow = ["drop_table"]

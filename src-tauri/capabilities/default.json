@@ -39,6 +39,7 @@
     "allow-create-database",
     "allow-drop-database",
     "allow-apply-table-changes",
+    "allow-alter-table-column",
     "allow-drop-table",
     "allow-drop-tables",
     "allow-truncate-table",

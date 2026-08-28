@@ -3,6 +3,7 @@ import { useConnectionStore } from '@/stores/connections'
 import type { PaneState, TableTab, QueryTab } from '@/types/workspace'
 import { findTabInsertIndex, findNextActiveIndex } from '@/lib/tabManagement'
 import { buildSortPayload, resolveKeysetColumn } from '@/lib/rowSelection'
+import { stageStructureChange } from '@/lib/schemaEditing'
 
 interface WorkspaceContext {
   panes: Ref<PaneState[]>
@@ -104,6 +105,27 @@ export function useTableTabs(ctx: WorkspaceContext) {
     await ensureTableMetadata(pane)
   }
 
+  function updatePendingStructureColumn(
+    pane: PaneState,
+    oldName: string,
+    newName: string,
+    newType: string,
+  ) {
+    const tab = getPaneTab(pane)
+    if (!tab) return
+    const original = tab.tableStructure.find((column: any) => column.field === oldName)
+    if (!original) return
+    tab.pendingStructureChanges ??= {}
+
+    stageStructureChange(
+      tab.pendingStructureChanges,
+      oldName,
+      original.field_type,
+      newName,
+      newType,
+    )
+  }
+
   async function loadTableData(
     tableName: string,
     connectionId: string,
@@ -132,7 +154,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
       queryResult: null, exactCountLoading: false, metadataLoading: false, metadataLoaded: false, tableStructure: [], tableIndexes: [], foreignKeys: [], ddl: null,
       page: 0, pageSize: pane.pageSize, viewMode: 'content',
       filters: initialFilter ?? null, sortColumn: null, sortDesc: false,
-      pendingChanges: {}, pendingDeletions: {}, pendingInserts: [], pendingTruncate: false, pendingDrop: false,
+      pendingChanges: {}, pendingStructureChanges: {}, pendingDeletions: {}, pendingInserts: [], pendingTruncate: false, pendingDrop: false,
       selectedRowPk: null, selectedRowPks: [], inlineEditColumn: null,
     }
     const insertIndex = findTabInsertIndex(pane.tabs, connectionId, database)
@@ -283,6 +305,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     refreshExactCount,
     ensureTableMetadata,
     loadStructureViewMetadata,
+    updatePendingStructureColumn,
     sortPayload,
     changePage,
     changeLimit,
