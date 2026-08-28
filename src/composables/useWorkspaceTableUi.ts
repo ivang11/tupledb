@@ -1,6 +1,7 @@
 import { computed, ref, watch, type Ref } from "vue";
 import { useConnectionStore } from "@/stores/connections";
 import type { AnyTab, PaneState, TableTab } from "@/types/workspace";
+import { pendingTabsForDatabase, summarizePendingTabs } from "@/lib/pendingChanges";
 
 interface WorkspaceTableUiContext {
   panes: Ref<PaneState[]>;
@@ -77,35 +78,10 @@ export function useWorkspaceTableUi(ctx: WorkspaceTableUiContext) {
     rowDetailOnClick.value = !rowDetailOnClick.value;
   }
 
-  const globalPendingSummary = computed(() => {
-    let pendingDrop = false;
-    let pendingTruncate = false;
-    let pendingChangesCount = 0;
-    let pendingStructureChangesCount = 0;
-    let pendingDeletionsCount = 0;
-    let pendingInsertionsCount = 0;
-
-    for (const pane of ctx.panes.value) {
-      for (const tab of pane.tabs) {
-        if (tab.type !== "table") continue;
-        pendingDrop ||= tab.pendingDrop;
-        pendingTruncate ||= tab.pendingTruncate;
-        pendingChangesCount += Object.keys(tab.pendingChanges).length;
-        pendingStructureChangesCount += Object.keys(tab.pendingStructureChanges ?? {}).length;
-        pendingDeletionsCount += Object.keys(tab.pendingDeletions).length;
-        pendingInsertionsCount += tab.pendingInserts.length;
-      }
-    }
-
-    return {
-      pendingDrop,
-      pendingTruncate,
-      pendingChangesCount,
-      pendingStructureChangesCount,
-      pendingDeletionsCount,
-      pendingInsertionsCount,
-    };
-  });
+  function pendingSummaryForPane(pane: PaneState) {
+    const tab = ctx.getPaneTab(pane);
+    return summarizePendingTabs(tab ? pendingTabsForDatabase(ctx.panes.value, tab) : []);
+  }
 
   async function applyFilters(pane: PaneState, filters: any) {
     const t = ctx.getPaneTab(pane);
@@ -170,7 +146,7 @@ export function useWorkspaceTableUi(ctx: WorkspaceTableUiContext) {
     pendingTableAction,
     tableGridColumns,
     toggleRowDetailOnClick,
-    globalPendingSummary,
+    pendingSummaryForPane,
     applyFilters,
     clearFilters,
     getSchema,

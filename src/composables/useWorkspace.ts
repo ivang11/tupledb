@@ -2,6 +2,7 @@ import { ref, type Ref } from 'vue'
 import { useConnectionStore } from '@/stores/connections'
 import type { Connection } from '@/types/connection'
 import type { TableTab, QueryTab, PaneState } from '@/types/workspace'
+import { pendingTabsForDatabase } from '@/lib/pendingChanges'
 
 export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
   const store = useConnectionStore()
@@ -91,7 +92,7 @@ export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
   function hasPendingChangesInPane(pane: PaneState): boolean {
     const tab = getPaneTab(pane)
     if (!tab) return false
-    return tab.pendingDrop || tab.pendingTruncate || tab.pendingInserts.length > 0 || Object.keys(tab.pendingChanges).length > 0 || Object.keys(tab.pendingStructureChanges ?? {}).length > 0 || Object.keys(tab.pendingDeletions).length > 0
+    return pendingTabsForDatabase(panes.value, tab).length > 0
   }
 
   function getFkMap(pane: PaneState): Record<string, { table: string; column: string }> {

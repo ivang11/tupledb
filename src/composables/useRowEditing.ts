@@ -14,6 +14,7 @@ import {
   computeRowClickSelection,
   computeNoPkRowClick,
 } from '@/lib/rowSelection'
+import { pendingTabsForDatabase } from '@/lib/pendingChanges'
 
 interface RowEditingContext {
   panes: Ref<PaneState[]>
@@ -22,15 +23,6 @@ interface RowEditingContext {
   getPaneConnection: (pane: PaneState) => any
   refreshActiveTab: (paneId?: string) => Promise<void>
   loadTableData: (tableName: string, connectionId: string, database: string, initialFilter?: any, paneId?: string) => Promise<void>
-}
-
-function tabHasPendingChanges(tab: TableTab): boolean {
-  return tab.pendingDrop ||
-    tab.pendingTruncate ||
-    tab.pendingInserts.length > 0 ||
-    Object.keys(tab.pendingChanges).length > 0 ||
-    Object.keys(tab.pendingStructureChanges ?? {}).length > 0 ||
-    Object.keys(tab.pendingDeletions).length > 0
 }
 
 export function useRowEditing(ctx: RowEditingContext) {
@@ -236,21 +228,14 @@ export function useRowEditing(ctx: RowEditingContext) {
   function discardChanges(pane: PaneState) {
     const tab = getPaneTab(pane)
     if (!tab) return
-    tab.pendingChanges = {}
-    tab.pendingStructureChanges = {}
-    tab.pendingDeletions = {}
-    tab.pendingInserts = []
-    tab.pendingTruncate = false
-    tab.pendingDrop = false
-    if (insertingRowTabId.value === tab.id) {
+    const pendingTabs = pendingTabsForDatabase(ctx.panes.value, tab)
+    for (const pendingTab of pendingTabs) clearTabPendingState(pendingTab)
+    if (pendingTabs.some(pendingTab => insertingRowTabId.value === pendingTab.id)) {
       pendingInsertDraft.value = null
       insertingRowPaneId.value = null
       insertingRowTabId.value = null
       insertRowError.value = null
     }
-    tab.selectedRowPk = null
-    tab.selectedRowPks = []
-    tab.inlineEditColumn = null
   }
 
   function clearRowSelection(pane: PaneState) {
@@ -502,10 +487,10 @@ export function useRowEditing(ctx: RowEditingContext) {
     return 'changed'
   }
 
-  async function applyChanges(_pane: PaneState) {
-    const pendingTabs = ctx.panes.value.flatMap(p =>
-      p.tabs.filter((t): t is TableTab => t.type === 'table' && tabHasPendingChanges(t)),
-    )
+  async function applyChanges(pane: PaneState) {
+    const targetTab = getPaneTab(pane)
+    if (!targetTab) return
+    const pendingTabs = pendingTabsForDatabase(ctx.panes.value, targetTab)
     if (pendingTabs.length === 0) return
 
     isSaving.value = true
@@ -524,10 +509,7 @@ export function useRowEditing(ctx: RowEditingContext) {
       // A table can contain several DDL operations and MySQL commits each one.
       // Refresh after a partial failure so already-applied changes are visible
       // while the operations that did not run remain pending.
-      const pendingTabs = ctx.panes.value.flatMap(p =>
-        p.tabs.filter((t): t is TableTab => t.type === 'table' && tabHasPendingChanges(t)),
-      )
-      for (const tab of pendingTabs) {
+      for (const tab of pendingTabsForDatabase(ctx.panes.value, targetTab)) {
         await refreshMatchingTableTabs(tab).catch(() => undefined)
       }
       toastError('Failed to apply changes', String(e))

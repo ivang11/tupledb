@@ -173,12 +173,12 @@
 
       <PendingChangesBar
         v-if="hasPendingChangesInPane(pane) && (panes.length === 1 || pane.id === activePaneId)"
-        :pending-truncate="globalPendingSummary.pendingTruncate"
-        :pending-drop="globalPendingSummary.pendingDrop"
-        :pending-changes-count="globalPendingSummary.pendingChangesCount"
-        :pending-structure-changes-count="globalPendingSummary.pendingStructureChangesCount"
-        :pending-deletions-count="globalPendingSummary.pendingDeletionsCount"
-        :pending-insertions-count="globalPendingSummary.pendingInsertionsCount"
+        :pending-truncate="pendingSummaryForPane(pane).pendingTruncate"
+        :pending-drop="pendingSummaryForPane(pane).pendingDrop"
+        :pending-changes-count="pendingSummaryForPane(pane).pendingChangesCount"
+        :pending-structure-changes-count="pendingSummaryForPane(pane).pendingStructureChangesCount"
+        :pending-deletions-count="pendingSummaryForPane(pane).pendingDeletionsCount"
+        :pending-insertions-count="pendingSummaryForPane(pane).pendingInsertionsCount"
         :disable-fk-checks="disableFkChecks"
         :is-saving="isSaving"
         @update:disable-fk-checks="disableFkChecks = $event"
@@ -245,7 +245,7 @@ const {
   sidePanelWidths,
   insertingRowTabId,
   insertRowValues,
-  globalPendingSummary,
+  pendingSummaryForPane,
   disableFkChecks,
   isSaving,
   switchToTab,
