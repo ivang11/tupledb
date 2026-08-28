@@ -1,5 +1,37 @@
 export type NormalizedValue = string | number | null
 
+export interface InsertValue {
+  column: string
+  value: unknown
+}
+
+interface TableColumn {
+  field: string
+  extra?: string
+}
+
+// Build a pending insert from an existing result row. Values are copied as-is:
+// unlike user-entered insert text, a duplicated empty string or literal "null"
+// must not be reinterpreted as NULL.
+export function buildDuplicateInsertValues(
+  row: Record<string, unknown>,
+  columns: TableColumn[],
+): InsertValue[] {
+  return columns
+    .filter(column => column.extra !== 'auto_increment')
+    .map(column => ({
+      column: column.field,
+      value: row[column.field] ?? null,
+    }))
+}
+
+export function buildDuplicatePendingInserts(
+  rows: Record<string, unknown>[],
+  columns: TableColumn[],
+): Array<{ values: InsertValue[] }> {
+  return rows.map(row => ({ values: buildDuplicateInsertValues(row, columns) }))
+}
+
 // Used when inserting a new row: empty string and null both become NULL.
 // Does NOT coerce numeric strings — the column type is unknown at this layer.
 export function normalizeInsertValue(value: string | null): NormalizedValue {

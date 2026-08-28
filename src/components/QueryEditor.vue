@@ -166,6 +166,7 @@
                 :sort-desc="false"
                 :inserting-row="false"
                 :insert-row-values="{}"
+                :pending-inserts="[]"
                 :column-widths="queryColumnWidths"
                 :fk-map="{}"
                 :is-col-auto-increment="() => false"
@@ -1020,4 +1021,3 @@ onBeforeUnmount(() => {
 })
 
 </script>
-

@@ -5,7 +5,55 @@ import {
   normalizeChangeValue,
   coercePkValue,
   computeCellEditValue,
+  buildDuplicateInsertValues,
+  buildDuplicatePendingInserts,
 } from '../src/lib/tableEditing.js'
+
+test('buildDuplicateInsertValues: creates a pending copy without the auto-increment column', () => {
+  const values = buildDuplicateInsertValues(
+    { id: 7, name: 'Alice', enabled: true },
+    [
+      { field: 'id', extra: 'auto_increment' },
+      { field: 'name' },
+      { field: 'enabled' },
+    ],
+  )
+
+  assert.deepEqual(values, [
+    { column: 'name', value: 'Alice' },
+    { column: 'enabled', value: true },
+  ])
+})
+
+test('buildDuplicateInsertValues: preserves empty strings, literal null strings, and NULL', () => {
+  const values = buildDuplicateInsertValues(
+    { empty: '', literalNull: 'null', nullable: null },
+    [{ field: 'empty' }, { field: 'literalNull' }, { field: 'nullable' }],
+  )
+
+  assert.deepEqual(values, [
+    { column: 'empty', value: '' },
+    { column: 'literalNull', value: 'null' },
+    { column: 'nullable', value: null },
+  ])
+})
+
+test('buildDuplicatePendingInserts: creates one pending insert per selected row', () => {
+  const rows = Array.from({ length: 5 }, (_, index) => ({
+    id: index + 1,
+    name: `Row ${index + 1}`,
+  }))
+
+  const inserts = buildDuplicatePendingInserts(rows, [
+    { field: 'id', extra: 'auto_increment' },
+    { field: 'name' },
+  ])
+
+  assert.equal(inserts.length, 5)
+  assert.deepEqual(inserts[4], {
+    values: [{ column: 'name', value: 'Row 5' }],
+  })
+})
 
 // ── normalizeInsertValue ────────────────────────────────────────────────────
 

@@ -54,6 +54,7 @@ function defaults() {
     sortDesc: false,
     insertingRow: false,
     insertRowValues: {},
+    pendingInserts: [],
     columnWidths: {},
     fkMap: {},
     isColAutoIncrement: () => false,
@@ -66,6 +67,41 @@ describe('DataGrid — empty state', () => {
   it('shows empty-state message when rows is empty', () => {
     const w = mount(DataGrid, { props: defaults() })
     expect(w.text()).toContain('No records')
+  })
+})
+
+describe('DataGrid — pending inserts', () => {
+  it('renders every pending duplicated row even when the table has no stored rows', () => {
+    const w = mount(DataGrid, {
+      props: {
+        ...defaults(),
+        pendingInserts: [
+          { values: [{ column: 'name', value: 'Copy 1' }] },
+          { values: [{ column: 'name', value: 'Copy 2' }] },
+        ],
+      },
+    })
+
+    expect(w.text()).not.toContain('No records')
+    expect(w.findAll('tr.bg-emerald-500\\/12')).toHaveLength(2)
+    expect(w.findAll<HTMLInputElement>('.pending-insert-input').some(input => input.element.value === 'Copy 2')).toBe(true)
+  })
+
+  it('emits edits and cancellation for the selected pending row', async () => {
+    const w = mount(DataGrid, {
+      props: {
+        ...defaults(),
+        pendingInserts: [{ values: [{ column: 'name', value: 'Copy' }] }],
+      },
+    })
+    const nameInput = w.findAll<HTMLInputElement>('.pending-insert-input')
+      .find(input => input.element.value === 'Copy')!
+
+    await nameInput.setValue('Changed')
+    expect(w.emitted('pending-insert-input')?.at(-1)).toEqual([0, 'name', 'Changed'])
+
+    await nameInput.trigger('keydown', { key: 'Escape' })
+    expect(w.emitted('pending-insert-cancel')).toEqual([[0]])
   })
 })
 

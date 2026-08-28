@@ -7,7 +7,7 @@
   >
     <!-- Empty state -->
     <div
-      v-if="rows && rows.length === 0 && !insertingRow"
+      v-if="rows && rows.length === 0 && pendingInserts.length === 0"
       class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-12"
     >
       <DatabaseIcon class="size-8 text-muted-foreground/15" />
@@ -178,16 +178,17 @@
           </td>
         </tr>
 
-        <!-- Bottom spacer -->
-        <tr v-if="paddingBottom > 0">
-          <td :colspan="columns.length" :style="{ height: paddingBottom + 'px', padding: 0, border: 'none' }" />
+        <!-- Remaining virtualized data-row space -->
+        <tr v-if="dataPaddingBottom > 0">
+          <td :colspan="columns.length" :style="{ height: dataPaddingBottom + 'px', padding: 0, border: 'none' }" />
         </tr>
 
-        <!-- Insert row -->
+        <!-- Pending insert rows -->
         <tr
-          v-if="insertingRow"
-          class="sticky z-30 border-y border-emerald-500/25 bg-emerald-500/12 shadow-[0_-8px_20px_rgba(0,0,0,0.22)]"
-          :style="{ bottom: (bottomInset ?? 0) + 'px' }"
+          v-for="(insert, insertIndex) in pendingInserts"
+          :key="`pending-insert-${insertIndex}`"
+          :data-pending-insert-index="insertIndex"
+          class="border-y border-emerald-500/25 bg-emerald-500/12"
         >
           <td
             v-for="col in columns"
@@ -200,18 +201,23 @@
               { height: ROW_HEIGHT + 'px' }
             ]"
           >
-            <span v-if="isColAutoIncrement(col.name)" class="px-2 text-[10px] text-muted-foreground/40 italic font-mono">auto</span>
+            <span v-if="isColAutoIncrement(col.name)" class="px-2 text-[10px] text-emerald-500/70 italic font-mono">new</span>
             <input
               v-else
-              :value="insertRowValues[col.name]"
+              :value="pendingInsertValue(insert, col.name)"
               :placeholder="isBooleanCol(col.name) ? '0 / 1' : ''"
-              class="insert-row-input w-full h-full px-2 text-xs font-mono focus:outline-none focus:bg-emerald-500/10 focus:ring-1 focus:ring-emerald-500/40 rounded"
-              @input="emit('insert-row-input', col.name, ($event.target as HTMLInputElement).value)"
+              class="insert-row-input pending-insert-input w-full h-full px-2 text-xs font-mono focus:outline-none focus:bg-emerald-500/10 focus:ring-1 focus:ring-emerald-500/40 rounded"
+              @input="emit('pending-insert-input', insertIndex, col.name, ($event.target as HTMLInputElement).value)"
               @keydown.delete.stop
               @keydown.backspace.stop
-              @keydown.escape="emit('insert-row-cancel')"
+              @keydown.escape="emit('pending-insert-cancel', insertIndex)"
             />
           </td>
+        </tr>
+
+        <!-- Bottom spacer -->
+        <tr v-if="paddingBottom > 0">
+          <td :colspan="columns.length" :style="{ height: paddingBottom + 'px', padding: 0, border: 'none' }" />
         </tr>
 
       </tbody>
@@ -227,7 +233,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { ArrowUpIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowRightIcon, DatabaseIcon } from 'lucide-vue-next'
 
@@ -247,6 +253,7 @@ const props = defineProps<{
   sortDesc: boolean
   insertingRow: boolean
   insertRowValues: Record<string, string>
+  pendingInserts: Array<{ values: Array<{ column: string; value: any }> }>
   columnWidths: Record<string, number>
   fkMap: Record<string, { table: string; column: string }>
   bottomInset?: number
@@ -266,6 +273,8 @@ const emit = defineEmits<{
   'insert-row-input': [colName: string, value: string]
   'insert-row-submit': []
   'insert-row-cancel': []
+  'pending-insert-input': [index: number, colName: string, value: string]
+  'pending-insert-cancel': [index: number]
   'row-contextmenu': [row: any, x: number, y: number]
   'delete-key-pressed': []
 }>()
@@ -280,7 +289,30 @@ function cellStyle(colName: string) {
   return w ? { width: w + 'px', maxWidth: w + 'px' } : { maxWidth: '280px' }
 }
 
+function pendingInsertValue(
+  insert: { values: Array<{ column: string; value: any }> },
+  colName: string,
+) {
+  const value = insert.values.find(item => item.column === colName)?.value
+  return value === null || value === undefined ? '' : String(value)
+}
+
 const scrollContainer = ref<HTMLElement | null>(null)
+
+watch(
+  () => props.pendingInserts.length,
+  (nextCount, previousCount) => {
+    if (nextCount <= previousCount) return
+    nextTick(() => {
+      const container = scrollContainer.value
+      if (!container) return
+      container.scrollTop = container.scrollHeight
+      container
+        .querySelector<HTMLInputElement>(`[data-pending-insert-index="${previousCount}"] input`)
+        ?.focus()
+    })
+  },
+)
 
 const ROW_HEIGHT = 34
 
@@ -297,11 +329,13 @@ const totalSize = computed(() => virtualizer.value.getTotalSize())
 const paddingTop = computed(() =>
   virtualRows.value.length > 0 ? virtualRows.value[0].start : 0
 )
-const paddingBottom = computed(() =>
-  (virtualRows.value.length > 0
+const dataPaddingBottom = computed(() =>
+  virtualRows.value.length > 0
     ? totalSize.value - virtualRows.value[virtualRows.value.length - 1].end
-    : 0) + (props.bottomInset ?? 0)
+    : 0
 )
+
+const paddingBottom = computed(() => props.bottomInset ?? 0)
 
 function rowKey(virtualRow: any) {
   const row = props.rows[virtualRow.index]

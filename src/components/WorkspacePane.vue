@@ -132,6 +132,7 @@
           :sort-desc="getPaneTab(pane)?.sortDesc ?? false"
           :inserting-row="insertingRowTabId !== null && insertingRowTabId === pane.activeTabId"
           :insert-row-values="insertRowValues"
+          :pending-inserts="getPaneTab(pane)?.pendingInserts ?? []"
           :column-widths="getColumnWidths(getPaneTab(pane))"
           :fk-map="getFkMap(pane)"
           :bottom-inset="hasPendingChangesInPane(pane) ? 128 : 0"
@@ -147,6 +148,8 @@
           @navigate-related="(table, col, val) => navigateToRelated(pane, table, col, val)"
           @insert-row-input="(col, val) => updateInsertRowValue(pane, col, val)"
           @insert-row-cancel="cancelInsertRow"
+          @pending-insert-input="(index, col, val) => updatePendingInsertValue(pane, index, col, val)"
+          @pending-insert-cancel="(index) => removePendingInsert(pane, index)"
           @row-contextmenu="(row, x, y) => openRowContextMenu(pane, row, x, y)"
           @delete-key-pressed="toggleDeletionSelected(pane)"
         />
@@ -277,6 +280,8 @@ const {
   navigateToRelated,
   updateInsertRowValue,
   cancelInsertRow,
+  updatePendingInsertValue,
+  removePendingInsert,
   openRowContextMenu,
   toggleDeletionSelected,
   getSelectedRow,

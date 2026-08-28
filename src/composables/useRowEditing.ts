@@ -8,6 +8,7 @@ import {
   normalizeChangeValue,
   coercePkValue,
   computeCellEditValue,
+  buildDuplicatePendingInserts,
 } from '@/lib/tableEditing'
 import {
   computeRowClickSelection,
@@ -119,6 +120,41 @@ export function useRowEditing(ctx: RowEditingContext) {
     updatePendingInsertDraft(tab)
   }
 
+  function updatePendingInsertValue(
+    pane: PaneState,
+    index: number,
+    column: string,
+    value: string,
+  ) {
+    const tab = getPaneTab(pane)
+    const insert = tab?.pendingInserts[index]
+    if (!tab || !insert) return
+    const field = insert.values.find(item => item.column === column)
+    if (field) field.value = normalizeInsertValue(value)
+    else insert.values.push({ column, value: normalizeInsertValue(value) })
+
+    if (pendingInsertDraft.value?.tabId === tab.id && pendingInsertDraft.value.index === index) {
+      insertRowValues.value[column] = value
+    }
+  }
+
+  function removePendingInsert(pane: PaneState, index: number) {
+    const tab = getPaneTab(pane)
+    if (!tab?.pendingInserts[index]) return
+    tab.pendingInserts.splice(index, 1)
+
+    const draft = pendingInsertDraft.value
+    if (!draft || draft.tabId !== tab.id) return
+    if (draft.index === index) {
+      pendingInsertDraft.value = null
+      insertingRowPaneId.value = null
+      insertingRowTabId.value = null
+      insertRowError.value = null
+    } else if (draft.index > index) {
+      draft.index -= 1
+    }
+  }
+
   function duplicateRow(pane: PaneState, row: any) {
     const tab = getPaneTab(pane)
     if (!tab) return
@@ -131,12 +167,14 @@ export function useRowEditing(ctx: RowEditingContext) {
         }),
     )
     insertRowError.value = null
+    tab.pendingInserts.push(...buildDuplicatePendingInserts([row], tab.tableStructure))
+    pendingInsertDraft.value = { tabId: tab.id, index: tab.pendingInserts.length - 1 }
     insertingRowPaneId.value = pane.id
     insertingRowTabId.value = tab.id
     nextTick(() => document.querySelector<HTMLInputElement>('.insert-row-input')?.focus())
   }
 
-  async function duplicateSelectedRows(pane: PaneState) {
+  function duplicateSelectedRows(pane: PaneState) {
     const tab = getPaneTab(pane)
     const pk = getPrimaryKey(pane)
     if (!tab || !pk || !tab.queryResult?.rows) return
@@ -146,22 +184,10 @@ export function useRowEditing(ctx: RowEditingContext) {
     const rows = tab.queryResult.rows.filter((r: any) =>
       selectedPks.includes(String(r[pk]))
     )
-    const cols = (tab.tableStructure as any[]).filter(
-      (col: any) => col.extra !== 'auto_increment'
-    )
-
     try {
-      for (const row of rows) {
-        const values = cols.map((col: any) => ({
-          column: col.field,
-          value: normalizeInsertValue(
-            row[col.field] === null || row[col.field] === undefined
-              ? ''
-              : String(row[col.field])
-          ),
-        }))
-        tab.pendingInserts.push({ values })
-      }
+      tab.pendingInserts.push(
+        ...buildDuplicatePendingInserts(rows, tab.tableStructure),
+      )
     } catch (e: any) {
       toastError('Failed to stage duplicated rows', String(e))
     }
@@ -331,6 +357,12 @@ export function useRowEditing(ctx: RowEditingContext) {
     tab.selectedRowPk = null
     tab.selectedRowPks = []
     tab.inlineEditColumn = null
+    if (pendingInsertDraft.value?.tabId === tab.id) {
+      pendingInsertDraft.value = null
+      insertingRowPaneId.value = null
+      insertingRowTabId.value = null
+      insertRowError.value = null
+    }
   }
 
   function closeMatchingTableTabs(target: TableTab) {
@@ -527,6 +559,8 @@ export function useRowEditing(ctx: RowEditingContext) {
     openInsertRowDialog,
     cancelInsertRow,
     updateInsertRowValue,
+    updatePendingInsertValue,
+    removePendingInsert,
     duplicateRow,
     duplicateSelectedRows,
     updatePendingChange,
