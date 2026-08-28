@@ -40,6 +40,7 @@ pub fn run() {
             crate::commands::export_connections,
             crate::commands::import_connections,
             crate::schema::get_databases,
+            crate::schema::get_database_creation_options,
             crate::schema::create_database,
             crate::schema::drop_database,
             crate::schema::get_tables,

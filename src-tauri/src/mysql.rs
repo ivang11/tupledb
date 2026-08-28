@@ -1,7 +1,7 @@
 use crate::driver::{
-    ColumnInfo, ColumnStructure, DatabaseDriver, ForeignKey, KeysetPage, QueryResult,
-    QueryChunkCallback, RawQueryResult, RowChange, RowDeletion, Table, TableChange,
-    TableDataTimings, TableIndex,
+    ColumnInfo, ColumnStructure, DatabaseCollation, DatabaseCreationOptions, DatabaseDriver,
+    ForeignKey, KeysetPage, QueryChunkCallback, QueryResult, RawQueryResult, RowChange,
+    RowDeletion, Table, TableChange, TableDataTimings, TableIndex,
 };
 use crate::filters::FilterSet;
 use crate::state::AppState;
@@ -442,8 +442,98 @@ impl DatabaseDriver for MySqlDriver {
         Ok(rows.iter().map(|row| get_str_lossy(row, 0)).collect())
     }
 
-    async fn create_database(&self, name: &str) -> Result<(), String> {
-        sqlx::query(&format!("CREATE DATABASE `{}`", name))
+    async fn get_database_creation_options(&self) -> Result<DatabaseCreationOptions, String> {
+        let defaults = sqlx::query("SELECT @@character_set_server, @@collation_server")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| format!("Failed to fetch database defaults: {}", e))?;
+        let collations = match sqlx::query(
+            "SELECT COLLATION_NAME, CHARACTER_SET_NAME, IS_DEFAULT FROM information_schema.COLLATIONS ORDER BY CHARACTER_SET_NAME, COLLATION_NAME",
+        )
+        .fetch_all(&self.pool)
+        .await
+        {
+            Ok(rows) => rows
+                .iter()
+                .map(|row| DatabaseCollation {
+                    name: get_str_lossy(row, 0),
+                    character_set: get_str_lossy(row, 1),
+                    is_default: get_str_lossy(row, 2).eq_ignore_ascii_case("yes"),
+                })
+                .collect(),
+            Err(information_schema_error) => {
+                // Some managed MySQL-compatible services restrict information_schema
+                // while still exposing the equivalent SHOW command.
+                let rows = sqlx::query("SHOW COLLATION")
+                    .fetch_all(&self.pool)
+                    .await
+                    .map_err(|show_error| {
+                        format!(
+                            "Failed to fetch available collations (information_schema: {}; SHOW COLLATION: {})",
+                            information_schema_error, show_error
+                        )
+                    })?;
+                rows.iter()
+                    .map(|row| DatabaseCollation {
+                        name: get_str_lossy(row, 0),
+                        character_set: get_str_lossy(row, 1),
+                        is_default: get_str_lossy(row, 3).eq_ignore_ascii_case("yes"),
+                    })
+                    .collect()
+            }
+        };
+
+        Ok(DatabaseCreationOptions {
+            default_character_set: get_str_lossy(&defaults, 0),
+            default_collation: get_str_lossy(&defaults, 1),
+            collations,
+        })
+    }
+
+    async fn create_database(
+        &self,
+        name: &str,
+        character_set: Option<&str>,
+        collation: Option<&str>,
+    ) -> Result<(), String> {
+        let mut query = format!("CREATE DATABASE `{}`", name);
+
+        if character_set.is_some() || collation.is_some() {
+            let options = self.get_database_creation_options().await?;
+            let selected_collation = collation.and_then(|value| {
+                options
+                    .collations
+                    .iter()
+                    .find(|option| option.name == value)
+            });
+
+            if let Some(value) = character_set {
+                let is_valid = options
+                    .collations
+                    .iter()
+                    .any(|option| option.character_set == value);
+                if !is_valid {
+                    return Err(format!("Unsupported character set: {}", value));
+                }
+                query.push_str(&format!(" CHARACTER SET {}", value));
+            }
+
+            if let Some(value) = collation {
+                let option = selected_collation
+                    .ok_or_else(|| format!("Unsupported collation: {}", value))?;
+                if let Some(selected_character_set) = character_set {
+                    if option.character_set != selected_character_set {
+                        return Err(format!(
+                            "Collation {} does not belong to character set {}",
+                            value, selected_character_set
+                        ));
+                    }
+                }
+                query.push_str(&format!(" COLLATE {}", value));
+            }
+        }
+
+        sqlx::query(&query)
             .execute(&self.pool)
             .await
             .map_err(|e| format!("Failed to create database: {}", e))?;

@@ -34,6 +34,11 @@
     :open="!!showNewDb"
     :connection-name="showNewDb ? (store.openConnections[showNewDb]?.connection.name ?? '') : ''"
     :name="newDbName"
+    :character-set="newDbCharacterSet"
+    :collation="newDbCollation"
+    :options="newDbOptions"
+    :is-loading-options="isLoadingNewDbOptions"
+    :options-error="newDbOptionsError"
     :is-creating="isCreatingDb"
     @update:open="
       (val) => {
@@ -44,6 +49,8 @@
       }
     "
     @update:name="newDbName = $event"
+    @update:character-set="updateNewDbCharacterSet"
+    @update:collation="newDbCollation = $event"
     @create="showNewDb && createDatabase(showNewDb)"
   />
   <DeleteConfirmDialog
@@ -217,6 +224,11 @@ const {
   isSavingConn,
   showNewDb,
   newDbName,
+  newDbCharacterSet,
+  newDbCollation,
+  newDbOptions,
+  isLoadingNewDbOptions,
+  newDbOptionsError,
   isCreatingDb,
   showDeleteConnDialog,
   databaseActionData,
@@ -244,6 +256,7 @@ const {
   confirmImportFromFilePath,
   saveNewConn,
   createDatabase,
+  updateNewDbCharacterSet,
   deleteConn,
   executeDatabaseAction,
   openEditConnDialog,

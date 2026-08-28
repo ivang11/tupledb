@@ -27,6 +27,7 @@
     "allow-test-connection",
     "allow-connect",
     "allow-get-databases",
+    "allow-get-database-creation-options",
     "allow-get-tables",
     "allow-get-table-data",
     "allow-get-table-structure",

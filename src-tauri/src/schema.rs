@@ -1,5 +1,6 @@
 use crate::driver::{
-    ColumnInfo, ColumnStructure, DatabaseDriver, ForeignKey, ImportResult, Table, TableIndex,
+    ColumnInfo, ColumnStructure, DatabaseCreationOptions, DatabaseDriver, ForeignKey, ImportResult,
+    Table, TableIndex,
 };
 use crate::state::AppState;
 use chrono::Local;
@@ -304,10 +305,21 @@ pub async fn get_databases(
 }
 
 #[tauri::command]
+pub async fn get_database_creation_options(
+    state: State<'_, AppState>,
+    connection_id: Uuid,
+) -> Result<DatabaseCreationOptions, String> {
+    let driver = state.get_driver(&connection_id)?;
+    driver.get_database_creation_options().await
+}
+
+#[tauri::command]
 pub async fn create_database(
     state: State<'_, AppState>,
     connection_id: Uuid,
     name: String,
+    character_set: Option<String>,
+    collation: Option<String>,
 ) -> Result<(), String> {
     if name.is_empty() || name.contains('`') || name.contains(';') {
         return Err("Invalid database name".into());
@@ -321,7 +333,9 @@ pub async fn create_database(
     };
     crate::security::ensure_writes_allowed(allow_writes)?;
     let driver = state.get_driver(&connection_id)?;
-    driver.create_database(&name).await
+    driver
+        .create_database(&name, character_set.as_deref(), collation.as_deref())
+        .await
 }
 
 #[tauri::command]

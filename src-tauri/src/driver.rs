@@ -117,6 +117,22 @@ pub struct ImportResult {
     pub metrics: ImportMetrics,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseCollation {
+    pub name: String,
+    pub character_set: String,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DatabaseCreationOptions {
+    pub default_character_set: String,
+    pub default_collation: String,
+    pub collations: Vec<DatabaseCollation>,
+}
+
 pub type QueryChunkCallback = Arc<dyn Fn(Option<Vec<ColumnInfo>>, Vec<Value>) + Send + Sync>;
 
 // --------------------------------------------------------------------------
@@ -128,7 +144,13 @@ pub type QueryChunkCallback = Arc<dyn Fn(Option<Vec<ColumnInfo>>, Vec<Value>) + 
 pub trait DatabaseDriver: Send + Sync {
     // Schema
     async fn get_databases(&self) -> Result<Vec<String>, String>;
-    async fn create_database(&self, name: &str) -> Result<(), String>;
+    async fn get_database_creation_options(&self) -> Result<DatabaseCreationOptions, String>;
+    async fn create_database(
+        &self,
+        name: &str,
+        character_set: Option<&str>,
+        collation: Option<&str>,
+    ) -> Result<(), String>;
     async fn drop_database(&self, name: &str) -> Result<(), String>;
     async fn get_tables(&self, database: &str) -> Result<Vec<Table>, String>;
     async fn get_table_structure(

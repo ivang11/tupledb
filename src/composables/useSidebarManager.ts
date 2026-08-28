@@ -1,4 +1,4 @@
-import { ref, computed, onMounted, type Ref } from "vue";
+import { ref, computed, onMounted, watch, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { downloadDir } from "@tauri-apps/api/path";
@@ -32,6 +32,20 @@ interface SidebarContext {
     paneId?: string,
   ) => void;
 }
+
+interface DatabaseCollation {
+  name: string;
+  characterSet: string;
+  isDefault: boolean;
+}
+
+interface DatabaseCreationOptions {
+  defaultCharacterSet: string;
+  defaultCollation: string;
+  collations: DatabaseCollation[];
+}
+
+const DATABASE_OPTION_DEFAULT = "__server_default__";
 
 export function useSidebarManager(ctx: SidebarContext) {
   const store = useConnectionStore();
@@ -71,6 +85,11 @@ export function useSidebarManager(ctx: SidebarContext) {
   const selectedSidebarConnectionId = ref<string | null>(null);
   const showNewDb = ref<string | null>(null);
   const newDbName = ref("");
+  const newDbCharacterSet = ref(DATABASE_OPTION_DEFAULT);
+  const newDbCollation = ref(DATABASE_OPTION_DEFAULT);
+  const newDbOptions = ref<DatabaseCreationOptions | null>(null);
+  const isLoadingNewDbOptions = ref(false);
+  const newDbOptionsError = ref("");
   const isCreatingDb = ref(false);
   const connectingId = ref<string | null>(null);
 
@@ -86,6 +105,47 @@ export function useSidebarManager(ctx: SidebarContext) {
       selectedSidebarConnectionId.value = Object.keys(store.openConnections)[0] ?? null;
     }
   });
+
+  watch(showNewDb, async (connectionId) => {
+    newDbOptions.value = null;
+    newDbOptionsError.value = "";
+    newDbCharacterSet.value = DATABASE_OPTION_DEFAULT;
+    newDbCollation.value = DATABASE_OPTION_DEFAULT;
+    if (!connectionId) return;
+
+    isLoadingNewDbOptions.value = true;
+    try {
+      const options = await invoke<DatabaseCreationOptions>(
+        "get_database_creation_options",
+        { connectionId },
+      );
+      if (showNewDb.value !== connectionId) return;
+      newDbOptions.value = options;
+    } catch (e) {
+      if (showNewDb.value === connectionId) {
+        newDbOptionsError.value = String(e);
+      }
+    } finally {
+      if (showNewDb.value === connectionId) isLoadingNewDbOptions.value = false;
+    }
+  });
+
+  function updateNewDbCharacterSet(characterSet: string) {
+    newDbCharacterSet.value = characterSet;
+    if (characterSet === DATABASE_OPTION_DEFAULT) {
+      newDbCollation.value = DATABASE_OPTION_DEFAULT;
+      return;
+    }
+    const collations = newDbOptions.value?.collations.filter(
+      (option) => option.characterSet === characterSet,
+    ) ?? [];
+    if (
+      newDbCollation.value !== DATABASE_OPTION_DEFAULT &&
+      !collations.some((option) => option.name === newDbCollation.value)
+    ) {
+      newDbCollation.value = DATABASE_OPTION_DEFAULT;
+    }
+  }
 
   async function connectSaved(conn: any) {
     const existing = store.openConnections[conn.id];
@@ -181,6 +241,14 @@ export function useSidebarManager(ctx: SidebarContext) {
       await invoke("create_database", {
         connectionId,
         name: databaseName,
+        characterSet:
+          newDbCharacterSet.value === DATABASE_OPTION_DEFAULT
+            ? null
+            : newDbCharacterSet.value,
+        collation:
+          newDbCollation.value === DATABASE_OPTION_DEFAULT
+            ? null
+            : newDbCollation.value,
       });
       await store.fetchDatabasesForConnection(connectionId);
       await store.selectDatabase(connectionId, databaseName);
@@ -1083,6 +1151,12 @@ export function useSidebarManager(ctx: SidebarContext) {
     selectedSidebarConnectionId,
     showNewDb,
     newDbName,
+    newDbCharacterSet,
+    newDbCollation,
+    newDbOptions,
+    isLoadingNewDbOptions,
+    newDbOptionsError,
+    updateNewDbCharacterSet,
     isCreatingDb,
     connectingId,
     closedConnections,

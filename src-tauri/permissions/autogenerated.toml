@@ -39,6 +39,11 @@ description = "Allows listing databases"
 commands.allow = ["get_databases"]
 
 [[permission]]
+identifier = "allow-get-database-creation-options"
+description = "Allows listing character sets and collations for database creation"
+commands.allow = ["get_database_creation_options"]
+
+[[permission]]
 identifier = "allow-get-tables"
 description = "Allows listing tables"
 commands.allow = ["get_tables"]

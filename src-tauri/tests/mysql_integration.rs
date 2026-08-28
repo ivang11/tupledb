@@ -753,7 +753,7 @@ async fn destructive_operations_handle_fk_checks_and_unusual_names() {
         .expect("drop child in bulk");
 
     driver
-        .create_database(&dropped_db)
+        .create_database(&dropped_db, None, None)
         .await
         .expect("create database through driver");
     assert!(driver
