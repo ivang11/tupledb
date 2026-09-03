@@ -4,6 +4,7 @@ import type { PaneState, TableTab, QueryTab } from '@/types/workspace'
 import { findTabInsertIndex, findNextActiveIndex } from '@/lib/tabManagement'
 import { buildSortPayload, resolveKeysetColumn } from '@/lib/rowSelection'
 import { stageStructureChange } from '@/lib/schemaEditing'
+import { rowValue } from '@/lib/rowAccess'
 
 interface WorkspaceContext {
   panes: Ref<PaneState[]>
@@ -223,7 +224,9 @@ export function useTableTabs(ctx: WorkspaceContext) {
 
     if (canUseKeyset) {
       const cursorRow = delta === 1 ? rows[rows.length - 1] : rows[0]
-      const cursorValue = cursorRow?.[pk]
+      const cursorValue = cursorRow
+        ? rowValue(cursorRow, pk, tab.queryResult?.columns ?? [])
+        : undefined
       if (cursorValue !== undefined && cursorValue !== null) {
         const nextPage = Math.max(0, pane.page + delta)
         const nextResult = await store.fetchTableData(

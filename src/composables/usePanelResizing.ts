@@ -72,9 +72,9 @@ export function usePanelResizing() {
     e.preventDefault(); e.stopPropagation()
     if (!tab) return
     const key = tableColKey(tab)
-    const th = (e.currentTarget as HTMLElement).closest('th') as HTMLElement
+    const header = (e.currentTarget as HTMLElement).closest('[role="columnheader"]') as HTMLElement | null
     const startX = e.clientX
-    const startWidth = th.getBoundingClientRect().width
+    const startWidth = header?.getBoundingClientRect().width ?? columnWidths.value[key]?.[colName] ?? 180
     const onMove = (ev: MouseEvent) => {
       const newWidth = Math.max(60, startWidth + ev.clientX - startX)
       if (!columnWidths.value[key]) columnWidths.value[key] = {}

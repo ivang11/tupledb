@@ -9,24 +9,29 @@ import DataGrid from '@/components/DataGrid.vue'
 // arrives as a ComputedRef — we unwrap it before reading count.
 vi.mock('@tanstack/vue-virtual', () => ({
   useVirtualizer: (opts: any) => {
-    const ROW_H = 33
+    const getOptions = () => opts?.value ?? opts
     const getCount = () => {
-      const o = opts?.value ?? opts
+      const o = getOptions()
       const c = o?.count
       return typeof c === 'function' ? c() : (c ?? 0)
     }
+    const getSize = () => getOptions()?.horizontal ? 180 : 33
+    const getRenderedCount = () => getOptions()?.horizontal
+      ? Math.min(getCount(), 5)
+      : getCount()
     return ref({
       getVirtualItems: () =>
-        Array.from({ length: getCount() }, (_, i) => ({
+        Array.from({ length: getRenderedCount() }, (_, i) => ({
           index: i,
-          start: i * ROW_H,
-          end: (i + 1) * ROW_H,
-          size: ROW_H,
+          start: i * getSize(),
+          end: (i + 1) * getSize(),
+          size: getSize(),
           key: i,
         })),
-      getTotalSize: () => getCount() * ROW_H,
+      getTotalSize: () => getCount() * getSize(),
       scrollToIndex: vi.fn(),
       measureElement: vi.fn(),
+      measure: vi.fn(),
     })
   },
 }))
@@ -83,7 +88,7 @@ describe('DataGrid — pending inserts', () => {
     })
 
     expect(w.text()).not.toContain('No records')
-    expect(w.findAll('tr.bg-emerald-500\\/12')).toHaveLength(2)
+    expect(w.findAll('[role="row"].bg-emerald-500\\/12')).toHaveLength(2)
     expect(w.findAll<HTMLInputElement>('.pending-insert-input').some(input => input.element.value === 'Copy 2')).toBe(true)
   })
 
@@ -141,7 +146,7 @@ describe('DataGrid — row selection', () => {
     const w = mount(DataGrid, {
       props: { ...defaults(), rows, totalCount: 2, selectedRowPk: '1' },
     })
-    const trs = w.findAll('tbody tr')
+    const trs = w.findAll('[role="rowgroup"]:last-child > [role="row"]')
     expect(trs[0].classes()).toContain('bg-primary/10')
   })
 
@@ -149,7 +154,7 @@ describe('DataGrid — row selection', () => {
     const w = mount(DataGrid, {
       props: { ...defaults(), rows, totalCount: 2, selectedRowPk: '1' },
     })
-    const trs = w.findAll('tbody tr')
+    const trs = w.findAll('[role="rowgroup"]:last-child > [role="row"]')
     expect(trs[1].classes()).not.toContain('bg-primary/10')
   })
 
@@ -157,7 +162,7 @@ describe('DataGrid — row selection', () => {
     const w = mount(DataGrid, {
       props: { ...defaults(), rows, totalCount: 2, selectedRowPk: '1', selectedRowPks: ['1', '2'] },
     })
-    const trs = w.findAll('tbody tr')
+    const trs = w.findAll('[role="rowgroup"]:last-child > [role="row"]')
     // row 2 is multi-selected but not the primary selection
     expect(trs[1].classes()).toContain('bg-primary/25')
   })
@@ -170,7 +175,7 @@ describe('DataGrid — pending deletions', () => {
     const w = mount(DataGrid, {
       props: { ...defaults(), rows, totalCount: 1, pendingDeletions: { '1': true } },
     })
-    const tr = w.find('tbody tr')
+    const tr = w.find('[role="rowgroup"]:last-child > [role="row"]')
     expect(tr.classes()).toContain('bg-destructive/10')
   })
 })
@@ -189,7 +194,7 @@ describe('DataGrid — no-PK table', () => {
         totalCount: 2,
       },
     })
-    expect(w.findAll('tbody tr')).toHaveLength(2)
+    expect(w.findAll('[role="rowgroup"]:last-child > [role="row"]')).toHaveLength(2)
   })
 
   it('selects a no-PK row by row-index key', () => {
@@ -203,7 +208,7 @@ describe('DataGrid — no-PK table', () => {
         selectedRowPk: '__row_index:0',
       },
     })
-    const trs = w.findAll('tbody tr')
+    const trs = w.findAll('[role="rowgroup"]:last-child > [role="row"]')
     expect(trs[0].classes()).toContain('bg-primary/10')
   })
 })
@@ -213,7 +218,7 @@ describe('DataGrid — sort indicator', () => {
     const w = mount(DataGrid, {
       props: { ...defaults(), rows: [{ id: 1, name: 'A', value: 'x' }], totalCount: 1 },
     })
-    const headers = w.findAll('th')
+    const headers = w.findAll('[role="columnheader"]')
     await headers[0].trigger('click')
     expect(w.emitted('sort')).toBeTruthy()
     expect(w.emitted('sort')![0]).toEqual(['id'])
@@ -229,8 +234,31 @@ describe('DataGrid — sort indicator', () => {
         sortDesc: false,
       },
     })
-    const headers = w.findAll('th')
+    const headers = w.findAll('[role="columnheader"]')
     expect(headers[1].classes()).toContain('bg-primary/12')
     expect(headers[0].classes()).not.toContain('bg-primary/12')
+  })
+})
+
+describe('DataGrid — horizontal virtualization', () => {
+  it('renders only viewport columns while exposing the complete column count', () => {
+    const wideColumns = Array.from({ length: 100 }, (_, index) => ({
+      name: `column_${index}`,
+      type_name: 'VARCHAR',
+    }))
+    const row = Object.fromEntries(wideColumns.map(column => [column.name, column.name]))
+    const w = mount(DataGrid, {
+      props: {
+        ...defaults(),
+        columns: wideColumns,
+        rows: [row],
+        primaryKey: null,
+        totalCount: 1,
+      },
+    })
+
+    expect(w.find('[role="table"]').attributes('aria-colcount')).toBe('100')
+    expect(w.findAll('[role="columnheader"]')).toHaveLength(5)
+    expect(w.findAll('[role="rowgroup"]:last-child > [role="row"]').at(0)?.findAll('[role="cell"]')).toHaveLength(5)
   })
 })

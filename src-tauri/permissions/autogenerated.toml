@@ -1,4 +1,14 @@
 [[permission]]
+identifier = "allow-benchmark-config"
+description = "Allows reading the opt-in renderer benchmark configuration"
+commands.allow = ["benchmark_config"]
+
+[[permission]]
+identifier = "allow-report-benchmark-metrics"
+description = "Allows reporting opt-in renderer benchmark measurements"
+commands.allow = ["report_benchmark_metrics"]
+
+[[permission]]
 identifier = "allow-get-connections"
 description = "Allows retrieving the list of connections"
 commands.allow = ["get_connections"]

@@ -1,3 +1,4 @@
+pub mod benchmark;
 pub mod commands;
 pub mod connections;
 pub mod driver;
@@ -15,6 +16,7 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    crate::benchmark::mark_process_started();
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
@@ -32,6 +34,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            crate::benchmark::benchmark_config,
+            crate::benchmark::report_benchmark_metrics,
             crate::commands::get_connections,
             crate::commands::add_connection,
             crate::commands::remove_connection,
