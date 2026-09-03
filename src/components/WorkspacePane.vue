@@ -139,7 +139,7 @@
           :is-col-auto-increment="(col) => isColAutoIncrement(pane, col)"
           :is-boolean-col="(col) => isBooleanCol(pane, col)"
           :get-cell-value="(row, col) => cellEditValue(pane, row, col)"
-          @row-click="(row, e, index) => onTableRowClick(pane, row, e, index)"
+          @row-click="(row, e, index, column) => onTableRowClick(pane, row, e, index, column)"
           @cell-dblclick="(row, col) => onCellDblclick(pane, row, col)"
           @cell-blur="onCellBlur(pane)"
           @cell-input="(row, col, val) => updatePendingChange(pane, row, col, val)"

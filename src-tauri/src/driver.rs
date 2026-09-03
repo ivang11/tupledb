@@ -229,6 +229,7 @@ pub trait DatabaseDriver: Send + Sync {
         query_id: Option<&str>,
         on_progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
         on_chunk: Option<QueryChunkCallback>,
+        max_retained_cells: Option<usize>,
     ) -> Result<RawQueryResult, String>;
 
     /// Returns the MySQL thread id of a currently-running query, if tracked.

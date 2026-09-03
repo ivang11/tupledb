@@ -38,6 +38,23 @@ test('buildDuplicateInsertValues: preserves empty strings, literal null strings,
   ])
 })
 
+test('buildDuplicateInsertValues: supports compact array rows', () => {
+  assert.deepEqual(
+    buildDuplicateInsertValues(
+      [7, 'Ada', null],
+      [
+        { field: 'id', extra: 'auto_increment' },
+        { field: 'name' },
+        { field: 'note' },
+      ],
+    ),
+    [
+      { column: 'name', value: 'Ada' },
+      { column: 'note', value: null },
+    ],
+  )
+})
+
 test('buildDuplicatePendingInserts: creates one pending insert per selected row', () => {
   const rows = Array.from({ length: 5 }, (_, index) => ({
     id: index + 1,
@@ -184,4 +201,11 @@ test('computeCellEditValue: falls back to row when pending is for a different co
 test('computeCellEditValue: works when pk is null (no-PK table)', () => {
   assert.equal(computeCellEditValue({}, null, { name: 'Alice' }, 'name'), 'Alice')
   assert.equal(computeCellEditValue({}, null, { name: null }, 'name'), '')
+})
+
+test('computeCellEditValue: reads compact rows using column metadata', () => {
+  assert.equal(
+    computeCellEditValue({}, 'id', [5, 'Ada'], 'name', [{ field: 'id' }, { field: 'name' }]),
+    'Ada',
+  )
 })

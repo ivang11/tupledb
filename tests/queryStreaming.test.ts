@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
+  QUERY_RESULT_CELL_LIMIT,
   QUERY_RESULT_ROW_LIMIT,
   applyQueryChunk,
   finalizeStreamedQueryResult,
   limitBufferedQueryResult,
+  queryResultRowLimit,
   type QueryChunkState,
   type RawQueryResult,
 } from '../src/lib/queryStreaming.js'
@@ -41,6 +43,26 @@ test('applyQueryChunk keeps only the configured row limit while counting all str
   assert.equal(state.rowsLimited, true)
 })
 
+test('applyQueryChunk limits wide query results by total retained cells', () => {
+  const wideColumns = Array.from({ length: 200 }, (_, index) => ({
+    name: `col_${index}`,
+    type_name: 'VARCHAR',
+  }))
+  const effectiveLimit = queryResultRowLimit(wideColumns, QUERY_RESULT_ROW_LIMIT, QUERY_RESULT_CELL_LIMIT)
+  assert.equal(effectiveLimit, QUERY_RESULT_CELL_LIMIT / wideColumns.length)
+
+  const state = applyQueryChunk({
+    result: null,
+    rowsLimited: false,
+    streamedRowsSeen: 0,
+  }, { columns: wideColumns, rows: rows(1, QUERY_RESULT_ROW_LIMIT) }, QUERY_RESULT_ROW_LIMIT, QUERY_RESULT_CELL_LIMIT)
+
+  assert.equal(state.result?.rows.length, effectiveLimit)
+  assert.equal(state.result?.rows_affected, effectiveLimit)
+  assert.equal(state.streamedRowsSeen, QUERY_RESULT_ROW_LIMIT)
+  assert.equal(state.rowsLimited, true)
+})
+
 test('finalizeStreamedQueryResult promotes backend total without storing extra rows', () => {
   const current: RawQueryResult = {
     columns,
@@ -70,7 +92,7 @@ test('limitBufferedQueryResult truncates legacy buffered selects but leaves DML 
     rows_affected: QUERY_RESULT_ROW_LIMIT + 1,
     is_select: true,
   }
-  const limited = limitBufferedQueryResult(select)
+  const limited = limitBufferedQueryResult(select, QUERY_RESULT_ROW_LIMIT, QUERY_RESULT_CELL_LIMIT)
 
   assert.equal(limited.result.rows.length, QUERY_RESULT_ROW_LIMIT)
   assert.equal(limited.totalRows, QUERY_RESULT_ROW_LIMIT + 1)
@@ -87,4 +109,24 @@ test('limitBufferedQueryResult truncates legacy buffered selects but leaves DML 
   assert.equal(unchanged.result, dml)
   assert.equal(unchanged.totalRows, null)
   assert.equal(unchanged.rowsLimited, false)
+})
+
+test('limitBufferedQueryResult limits wide buffered selects by retained cells', () => {
+  const wideColumns = Array.from({ length: 200 }, (_, index) => ({
+    name: `col_${index}`,
+    type_name: 'VARCHAR',
+  }))
+  const effectiveLimit = queryResultRowLimit(wideColumns, QUERY_RESULT_ROW_LIMIT, QUERY_RESULT_CELL_LIMIT)
+  const select: RawQueryResult = {
+    columns: wideColumns,
+    rows: rows(1, QUERY_RESULT_ROW_LIMIT),
+    rows_affected: QUERY_RESULT_ROW_LIMIT,
+    is_select: true,
+  }
+
+  const limited = limitBufferedQueryResult(select, QUERY_RESULT_ROW_LIMIT, QUERY_RESULT_CELL_LIMIT)
+
+  assert.equal(limited.result.rows.length, effectiveLimit)
+  assert.equal(limited.totalRows, QUERY_RESULT_ROW_LIMIT)
+  assert.equal(limited.rowsLimited, true)
 })

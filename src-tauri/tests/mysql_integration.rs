@@ -1015,6 +1015,7 @@ async fn execute_query_streams_select_results_in_chunks() {
                 }
                 chunk_sizes_for_cb.lock().unwrap().push(rows.len());
             })),
+            None,
         )
         .await
         .expect("execute streaming query");
@@ -1059,6 +1060,7 @@ async fn cancel_query_kills_running_select_and_cleans_tracking() {
                 Some(&query_db),
                 "SELECT SLEEP(10) AS slept",
                 Some(&query_id_for_task),
+                None,
                 None,
                 None,
             )

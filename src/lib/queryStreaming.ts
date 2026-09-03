@@ -1,3 +1,5 @@
+import type { DataRow } from './rowAccess.js'
+
 export interface ColumnInfo {
   name: string
   type_name: string
@@ -5,14 +7,14 @@ export interface ColumnInfo {
 
 export interface RawQueryResult {
   columns: ColumnInfo[]
-  rows: Record<string, unknown>[]
+  rows: DataRow[]
   rows_affected: number
   is_select: boolean
 }
 
 export interface QueryChunkPayload {
   columns?: ColumnInfo[]
-  rows: Record<string, unknown>[]
+  rows: DataRow[]
 }
 
 export interface QueryChunkState {
@@ -22,18 +24,31 @@ export interface QueryChunkState {
 }
 
 export const QUERY_RESULT_ROW_LIMIT = 5000
+export const QUERY_RESULT_CELL_LIMIT = 300_000
+
+export function queryResultRowLimit(
+  columns: ColumnInfo[] | undefined,
+  rowLimit = QUERY_RESULT_ROW_LIMIT,
+  cellLimit = Number.POSITIVE_INFINITY,
+) {
+  const columnCount = columns?.length ?? 0
+  if (columnCount <= 0) return rowLimit
+  return Math.max(1, Math.min(rowLimit, Math.floor(cellLimit / columnCount)))
+}
 
 export function applyQueryChunk(
   state: QueryChunkState,
   chunk: QueryChunkPayload,
   rowLimit = QUERY_RESULT_ROW_LIMIT,
+  cellLimit?: number,
 ): QueryChunkState {
   const streamedRowsSeen = state.streamedRowsSeen + chunk.rows.length
   const currentRows = state.result?.rows.length ?? 0
-  const remainingRows = Math.max(rowLimit - currentRows, 0)
+  const effectiveRowLimit = queryResultRowLimit(chunk.columns ?? state.result?.columns, rowLimit, cellLimit)
+  const remainingRows = Math.max(effectiveRowLimit - currentRows, 0)
   const rowsToKeep = remainingRows > 0 ? chunk.rows.slice(0, remainingRows) : []
   const rowsLimited =
-    state.rowsLimited || rowsToKeep.length < chunk.rows.length || streamedRowsSeen > rowLimit
+    state.rowsLimited || rowsToKeep.length < chunk.rows.length || streamedRowsSeen > effectiveRowLimit
 
   if (!state.result) {
     return {
@@ -93,8 +108,10 @@ export function finalizeStreamedQueryResult(
 export function limitBufferedQueryResult(
   meta: RawQueryResult,
   rowLimit = QUERY_RESULT_ROW_LIMIT,
+  cellLimit?: number,
 ): { result: RawQueryResult; rowsLimited: boolean; totalRows: number | null } {
-  if (!meta.is_select || meta.rows.length <= rowLimit) {
+  const effectiveRowLimit = queryResultRowLimit(meta.columns, rowLimit, cellLimit)
+  if (!meta.is_select || meta.rows.length <= effectiveRowLimit) {
     return {
       result: meta,
       rowsLimited: false,
@@ -105,7 +122,7 @@ export function limitBufferedQueryResult(
   return {
     result: {
       ...meta,
-      rows: meta.rows.slice(0, rowLimit),
+      rows: meta.rows.slice(0, effectiveRowLimit),
     },
     rowsLimited: true,
     totalRows: meta.rows_affected,

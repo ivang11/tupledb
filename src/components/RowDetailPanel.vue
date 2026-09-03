@@ -17,7 +17,7 @@
           {{ isReadOnly() ? 'Read-only row' : 'Selected row' }}
         </p>
         <p class="text-[11px] font-mono font-semibold text-foreground truncate">
-          {{ primaryKey ? `${primaryKey} = ${row[primaryKey]}` : 'No primary key' }}
+          {{ primaryKey ? `${primaryKey} = ${rawValue(primaryKey)}` : 'No primary key' }}
         </p>
       </div>
       <button
@@ -81,7 +81,7 @@
               :readonly="isReadOnly()"
               :disabled="isPendingDelete()"
               :value="getCellValue(row, col.name)"
-              :placeholder="row[col.name] === null ? 'NULL' : 'EMPTY'"
+              :placeholder="rawValue(col.name) === null ? 'NULL' : 'EMPTY'"
               @input="(e) => {
                 if (isReadOnly()) return
                 const t = e.target as HTMLTextAreaElement
@@ -95,7 +95,7 @@
               type="button"
               class="mt-0.5 ml-1 shrink-0 flex items-center justify-center rounded text-foreground/80 hover:text-foreground transition-colors"
               :title="`Go to ${fkMap[col.name].table}`"
-              @click="emit('navigate-related', fkMap[col.name].table, fkMap[col.name].column, row[col.name])"
+              @click="emit('navigate-related', fkMap[col.name].table, fkMap[col.name].column, rawValue(col.name))"
             >
               <ArrowRightIcon class="size-3" />
             </button>
@@ -112,10 +112,11 @@ import { ref, nextTick } from 'vue'
 import { SearchIcon, XIcon, CopyIcon, CheckIcon, ArrowRightIcon } from 'lucide-vue-next'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { rowValue } from '@/lib/rowAccess'
 
 const props = defineProps<{
   paneId: string
-  row: Record<string, any>
+  row: Record<string, any> | any[]
   columns: any[]
   primaryKey: string | null
   fkMap: Record<string, { table: string; column: string }>
@@ -155,9 +156,10 @@ function autoResize(el: HTMLTextAreaElement | null) {
 }
 
 const isReadOnly = () => !props.primaryKey
-const pkVal = () => props.primaryKey ? String(props.row[props.primaryKey]) : ''
+const rawValue = (column: string) => rowValue(props.row, column, props.columns)
+const pkVal = () => props.primaryKey ? String(rawValue(props.primaryKey)) : ''
 const isPendingDelete = () => !!props.pendingDeletions[pkVal()]
-const fieldWidth = (row: Record<string, any>, colName: string) => {
+const fieldWidth = (row: Record<string, any> | any[], colName: string) => {
   const length = Math.max(props.getCellValue(row, colName).length, 1)
   return `min(100%, ${length}ch)`
 }

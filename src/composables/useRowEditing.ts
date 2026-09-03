@@ -15,6 +15,7 @@ import {
   computeNoPkRowClick,
 } from '@/lib/rowSelection'
 import { pendingTabsForDatabase } from '@/lib/pendingChanges'
+import { rowValue } from '@/lib/rowAccess'
 
 interface RowEditingContext {
   panes: Ref<PaneState[]>
@@ -154,7 +155,7 @@ export function useRowEditing(ctx: RowEditingContext) {
       (tab.tableStructure as any[])
         .filter((col: any) => col.extra !== 'auto_increment')
         .map((col: any) => {
-          const val = row[col.field]
+          const val = rowValue(row, col.field, tab.queryResult?.columns ?? tab.tableStructure)
           return [col.field, val === null || val === undefined ? '' : String(val)]
         }),
     )
@@ -174,7 +175,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     if (selectedPks.length === 0) return
 
     const rows = tab.queryResult.rows.filter((r: any) =>
-      selectedPks.includes(String(r[pk]))
+      selectedPks.includes(String(rowValue(r, pk, tab.queryResult.columns)))
     )
     try {
       tab.pendingInserts.push(
@@ -191,8 +192,8 @@ export function useRowEditing(ctx: RowEditingContext) {
     const tab = getPaneTab(pane)
     const pk = getPrimaryKey(pane)
     if (!tab || !pk) return
-    const pkVal = String(row[pk])
-    const originalValue = row[column]
+    const pkVal = String(rowValue(row, pk, tab.queryResult?.columns ?? []))
+    const originalValue = rowValue(row, column, tab.queryResult?.columns ?? [])
     if (newValue === originalValue) {
       if (tab.pendingChanges[pkVal]) {
         delete tab.pendingChanges[pkVal][column]
@@ -209,7 +210,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     const tab = getPaneTab(pane)
     const pk = getPrimaryKey(pane)
     if (!tab || !pk) return
-    const pkVal = String(row[pk])
+    const pkVal = String(rowValue(row, pk, tab.queryResult?.columns ?? []))
     if (tab.pendingDeletions[pkVal]) delete tab.pendingDeletions[pkVal]
     else tab.pendingDeletions[pkVal] = true
   }
@@ -220,7 +221,9 @@ export function useRowEditing(ctx: RowEditingContext) {
     if (!tab || !pk || !tab.selectedRowPks.length) return
     const rows = tab.queryResult?.rows ?? []
     for (const pkVal of tab.selectedRowPks) {
-      const row = rows.find((r: any) => String(r[pk]) === pkVal)
+      const row = rows.find((r: any) =>
+        String(rowValue(r, pk, tab.queryResult?.columns ?? [])) === pkVal,
+      )
       if (row) toggleDeletion(pane, row)
     }
   }
@@ -255,18 +258,41 @@ export function useRowEditing(ctx: RowEditingContext) {
       if (!match) return null
       return tab.queryResult.rows[Number(match[1])] ?? null
     }
-    return tab.queryResult.rows.find((r: any) => String(r[pk]) === tab.selectedRowPk) ?? null
+    return tab.queryResult.rows.find((r: any) =>
+      String(rowValue(r, pk, tab.queryResult.columns ?? [])) === tab.selectedRowPk,
+    ) ?? null
   }
 
-  function onTableRowClick(pane: PaneState, row: any, e: MouseEvent, rowIndex?: number) {
-    const el = e.target as HTMLElement
-    if (el.closest('button')) return
-    const td = el.closest('td')
-    if (!td?.parentElement) return
-    const tdIdx = Array.from(td.parentElement.children).indexOf(td)
+  function onTableRowClick(
+    pane: PaneState,
+    row: any,
+    e: MouseEvent,
+    rowIndex?: number,
+    canvasColumn?: string,
+  ) {
     const pk = getPrimaryKey(pane)
     const tab = getPaneTab(pane)
     if (!tab) return
+
+    let tdIdx: number
+    let colName: string | null
+    if (canvasColumn) {
+      const columnIndex = (tab.queryResult?.columns ?? []).findIndex(
+        (column: { name: string }) => column.name === canvasColumn,
+      )
+      tdIdx = Math.max(0, columnIndex)
+      colName = tdIdx > 0 ? canvasColumn : null
+    } else {
+      const el = e.target as HTMLElement
+      if (el.closest('button')) return
+      const td = el.closest('td')
+      if (!td?.parentElement) return
+      tdIdx = Array.from(td.parentElement.children).indexOf(td)
+      const columns = tab.queryResult?.columns
+      colName = tdIdx > 0
+        ? ((columns?.[tdIdx] as { name: string } | undefined)?.name ?? null)
+        : null
+    }
 
     if (!pk) {
       const key = `__row_index:${rowIndex ?? tab.queryResult?.rows?.indexOf(row) ?? 0}`
@@ -275,10 +301,10 @@ export function useRowEditing(ctx: RowEditingContext) {
       return
     }
 
-    const pkVal = String((row as any)[pk])
-    const cols = tab.queryResult?.columns
-    const colName = tdIdx > 0 ? ((cols?.[tdIdx - 1] as { name: string } | undefined)?.name ?? null) : null
-    const allRowPks = (tab.queryResult?.rows as any[] ?? []).map((r: any) => String(r[pk]))
+    const pkVal = String(rowValue(row, pk, tab.queryResult?.columns ?? []))
+    const allRowPks = (tab.queryResult?.rows as any[] ?? []).map((r: any) =>
+      String(rowValue(r, pk, tab.queryResult?.columns ?? [])),
+    )
     const next = computeRowClickSelection(
       pkVal,
       tdIdx,
@@ -294,7 +320,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     const tab = getPaneTab(pane)
     const pk = getPrimaryKey(pane)
     if (!tab || !pk) return
-    const pkVal = String((row as any)[pk])
+    const pkVal = String(rowValue(row, pk, tab.queryResult?.columns ?? []))
     if (tab.pendingDeletions[pkVal]) return
     tab.selectedRowPk = pkVal
     tab.selectedRowPks = [pkVal]
@@ -316,7 +342,13 @@ export function useRowEditing(ctx: RowEditingContext) {
   function cellEditValue(pane: PaneState, row: any, colName: string): string {
     const tab = getPaneTab(pane)
     if (!tab) return ''
-    return computeCellEditValue(tab.pendingChanges, getPrimaryKey(pane), row, colName)
+    return computeCellEditValue(
+      tab.pendingChanges,
+      getPrimaryKey(pane),
+      row,
+      colName,
+      tab.queryResult?.columns ?? [],
+    )
   }
 
   function setViewMode(pane: PaneState, mode: TableViewMode) {

@@ -1,3 +1,5 @@
+import { rowValue, type DataRow } from './rowAccess.js'
+
 export type NormalizedValue = string | number | null
 
 export interface InsertValue {
@@ -14,19 +16,19 @@ interface TableColumn {
 // unlike user-entered insert text, a duplicated empty string or literal "null"
 // must not be reinterpreted as NULL.
 export function buildDuplicateInsertValues(
-  row: Record<string, unknown>,
+  row: DataRow,
   columns: TableColumn[],
 ): InsertValue[] {
   return columns
     .filter(column => column.extra !== 'auto_increment')
     .map(column => ({
       column: column.field,
-      value: row[column.field] ?? null,
+      value: rowValue(row, column.field, columns) ?? null,
     }))
 }
 
 export function buildDuplicatePendingInserts(
-  rows: Record<string, unknown>[],
+  rows: DataRow[],
   columns: TableColumn[],
 ): Array<{ values: InsertValue[] }> {
   return rows.map(row => ({ values: buildDuplicateInsertValues(row, columns) }))
@@ -68,15 +70,16 @@ export function coercePkValue(pkVal: string): string | number {
 export function computeCellEditValue(
   pendingChanges: Record<string, Record<string, unknown>>,
   pk: string | null,
-  row: Record<string, unknown>,
+  row: DataRow,
   colName: string,
+  columns: TableColumn[] = [],
 ): string {
   if (pk) {
-    const pkVal = String(row[pk])
+    const pkVal = String(rowValue(row, pk, columns))
     const pending = pendingChanges[pkVal]?.[colName]
     if (pending !== undefined) return pending === null ? '' : String(pending)
   }
-  const v = row[colName]
+  const v = rowValue(row, colName, columns)
   if (v === null || v === undefined) return ''
   if (typeof v === 'object') return JSON.stringify(v)
   return String(v)

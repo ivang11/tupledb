@@ -1042,6 +1042,7 @@ impl DatabaseDriver for MySqlDriver {
         query_id: Option<&str>,
         on_progress: Option<Arc<dyn Fn(u64) + Send + Sync>>,
         on_chunk: Option<QueryChunkCallback>,
+        max_retained_cells: Option<usize>,
     ) -> Result<RawQueryResult, String> {
         const CHUNK_SIZE: usize = 500;
 
@@ -1100,7 +1101,11 @@ impl DatabaseDriver for MySqlDriver {
                                 });
                             }
                         }
-                        chunk_buf.push(parse_mysql_row(&row));
+                        if (row_count as usize)
+                            < retained_row_limit(columns.len(), max_retained_cells)
+                        {
+                            chunk_buf.push(parse_mysql_row(&row));
+                        }
                         row_count += 1;
 
                         if chunk_buf.len() >= CHUNK_SIZE {
@@ -1119,6 +1124,10 @@ impl DatabaseDriver for MySqlDriver {
                                 );
                                 first_chunk = false;
                             }
+                            if let Some(ref cb) = on_progress {
+                                cb(row_count);
+                            }
+                        } else if row_count.is_multiple_of(1000) {
                             if let Some(ref cb) = on_progress {
                                 cb(row_count);
                             }
@@ -1804,6 +1813,34 @@ impl DatabaseDriver for MySqlDriver {
 // Tauri commands — thin wrappers over the driver
 // --------------------------------------------------------------------------
 
+fn compact_rows_for_ipc(columns: &[ColumnInfo], rows: Vec<Value>) -> Vec<Value> {
+    rows.into_iter()
+        .map(|row| match row {
+            Value::Object(mut values) => Value::Array(
+                columns
+                    .iter()
+                    .map(|column| values.remove(&column.name).unwrap_or(Value::Null))
+                    .collect(),
+            ),
+            row => row,
+        })
+        .collect()
+}
+
+fn compact_query_result_for_ipc(mut result: QueryResult) -> QueryResult {
+    result.rows = compact_rows_for_ipc(&result.columns, result.rows);
+    result
+}
+
+fn retained_row_limit(column_count: usize, max_retained_cells: Option<usize>) -> usize {
+    max_retained_cells
+        .map(|cell_limit| {
+            let column_count = column_count.max(1);
+            (cell_limit / column_count).max(1)
+        })
+        .unwrap_or(usize::MAX)
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn get_table_data(
@@ -1989,7 +2026,7 @@ pub async fn get_table_data(
         }
     }
 
-    result
+    result.map(compact_query_result_for_ipc)
 }
 
 /// Fire-and-forget: returns immediately and emits `query-result:{query_id}` when done.
@@ -2001,6 +2038,7 @@ pub fn execute_query(
     database: Option<String>,
     sql: String,
     query_id: String,
+    max_retained_cells: Option<usize>,
 ) -> Result<(), String> {
     let (env, allow_writes) = {
         let configs = state.connections_config.read();
@@ -2029,12 +2067,18 @@ pub fn execute_query(
 
         let chunk_handle = app_handle.clone();
         let chunk_qid = query_id.clone();
+        let chunk_columns = Arc::new(RwLock::new(Vec::<ColumnInfo>::new()));
+        let chunk_columns_for_cb = Arc::clone(&chunk_columns);
         let on_chunk: Option<QueryChunkCallback> = Some(Arc::new(
             move |columns: Option<Vec<crate::driver::ColumnInfo>>, rows: Vec<serde_json::Value>| {
                 use tauri::Emitter;
+                if let Some(ref incoming_columns) = columns {
+                    *chunk_columns_for_cb.write() = incoming_columns.clone();
+                }
+                let compact_rows = compact_rows_for_ipc(&chunk_columns_for_cb.read(), rows);
                 let _ = chunk_handle.emit(
                     &format!("query-chunk:{}", chunk_qid),
-                    serde_json::json!({ "columns": columns, "rows": rows }),
+                    serde_json::json!({ "columns": columns, "rows": compact_rows }),
                 );
             },
         ));
@@ -2046,6 +2090,7 @@ pub fn execute_query(
                 Some(&query_id),
                 on_progress,
                 on_chunk,
+                max_retained_cells,
             )
             .await;
         let ms = t0.elapsed().as_millis() as u64;
@@ -2504,6 +2549,39 @@ mod tests {
         assert_eq!(escape_csv("hello,world"), "\"hello,world\"");
         assert_eq!(escape_csv("hello \"world\""), "\"hello \"\"world\"\"\"");
         assert_eq!(escape_csv("hello\nworld"), "\"hello\nworld\"");
+    }
+
+    #[test]
+    fn compacts_named_rows_for_the_webview_ipc_contract() {
+        let columns = vec![
+            ColumnInfo {
+                name: "id".into(),
+                type_name: "INT".into(),
+            },
+            ColumnInfo {
+                name: "name".into(),
+                type_name: "VARCHAR".into(),
+            },
+            ColumnInfo {
+                name: "nullable".into(),
+                type_name: "VARCHAR".into(),
+            },
+        ];
+        let rows = vec![json!({ "name": "Ada", "id": 7, "nullable": null })];
+
+        assert_eq!(
+            compact_rows_for_ipc(&columns, rows),
+            vec![json!([7, "Ada", null])]
+        );
+    }
+
+    #[test]
+    fn retained_row_limit_caps_wide_query_results_by_cells() {
+        assert_eq!(retained_row_limit(200, Some(300_000)), 1_500);
+        assert_eq!(retained_row_limit(20, Some(300_000)), 15_000);
+        assert_eq!(retained_row_limit(0, Some(300_000)), 300_000);
+        assert_eq!(retained_row_limit(200, None), usize::MAX);
+        assert_eq!(retained_row_limit(200, Some(0)), 1);
     }
 
     #[test]

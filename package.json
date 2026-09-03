@@ -9,6 +9,7 @@
     "build": "vite build",
     "test:unit": "vue-tsc -p tsconfig.test.json && node --test '.tmp-tests/tests/*.test.js'",
     "test:component": "vitest run",
+    "benchmark:tauri-grid": "node scripts/benchmark-tauri-grid.mjs",
     "preview": "vite preview",
     "dev:app": "npm run tauri:dev",
     "build:app": "npm run tauri:build",

@@ -21,6 +21,8 @@
     "core:window:allow-set-focus",
     "core:window:allow-start-dragging",
     "core:window:allow-start-resize-dragging",
+    "allow-benchmark-config",
+    "allow-report-benchmark-metrics",
     "allow-get-connections",
     "allow-add-connection",
     "allow-remove-connection",

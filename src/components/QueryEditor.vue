@@ -71,7 +71,7 @@
       >
         {{ rowsFetched.toLocaleString() }} rows…
         <span v-if="resultRowsLimited" class="text-amber-500">
-          showing {{ QUERY_RESULT_ROW_LIMIT.toLocaleString() }}
+          showing {{ retainedResultRows.toLocaleString() }}
         </span>
       </span>
 
@@ -416,6 +416,7 @@ import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
 import { type CompletionContext, type CompletionResult, type Completion } from '@codemirror/autocomplete'
 import { tags } from '@lezer/highlight'
 import {
+  QUERY_RESULT_CELL_LIMIT,
   QUERY_RESULT_ROW_LIMIT,
   applyQueryChunk,
   finalizeStreamedQueryResult,
@@ -424,6 +425,8 @@ import {
   type RawQueryResult,
 } from '@/lib/queryStreaming'
 import { getQueryCancelButtonState, shouldSurfaceQueryError } from '@/lib/queryExecutionUi'
+import { rowValue, type DataRow } from '@/lib/rowAccess'
+import { usesLinuxWebKitRuntime } from '@/lib/platform'
 
 const props = defineProps<{
   connectionId: string
@@ -490,6 +493,8 @@ const cancelButtonState = computed(() => getQueryCancelButtonState(
   isCancelling.value,
   activeQueryId.value,
 ))
+const retainedResultRows = computed(() => result.value?.rows.length ?? QUERY_RESULT_ROW_LIMIT)
+const queryResultCellLimit = usesLinuxWebKitRuntime ? QUERY_RESULT_CELL_LIMIT : undefined
 
 function syncResultState() {
   emit('update:result', result.value)
@@ -572,8 +577,8 @@ async function deleteSaved(id: string) {
 
 const queryColumnWidths = ref<Record<string, number>>({})
 
-function queryCellValue(row: Record<string, unknown>, colName: string): string {
-  const value = row[colName]
+function queryCellValue(row: Record<string, unknown> | unknown[], colName: string): string {
+  const value = rowValue(row, colName, result.value?.columns ?? [])
   if (value === null || value === undefined) return ''
   if (typeof value === 'object') return JSON.stringify(value)
   return String(value)
@@ -663,7 +668,7 @@ async function runQuery() {
     })
 
     // Chunk listener: builds result incrementally as rows arrive
-    unlistenChunk = await listen<{ columns?: ColumnInfo[]; rows: Record<string, any>[] }>(
+    unlistenChunk = await listen<{ columns?: ColumnInfo[]; rows: DataRow[] }>(
       `query-chunk:${queryId}`,
       event => {
         const wasEmpty = !result.value
@@ -671,7 +676,7 @@ async function runQuery() {
           result: result.value,
           rowsLimited: resultRowsLimited.value,
           streamedRowsSeen,
-        }, event.payload)
+        }, event.payload, QUERY_RESULT_ROW_LIMIT, queryResultCellLimit)
 
         streamedRowsSeen = nextState.streamedRowsSeen
         resultRowsLimited.value = nextState.rowsLimited
@@ -694,6 +699,7 @@ async function runQuery() {
       database: selectedDb.value || null,
       sql: q,
       queryId,
+      maxRetainedCells: queryResultCellLimit,
     })
 
     // Wait for the backend to signal completion
@@ -720,7 +726,7 @@ async function runQuery() {
         triggerRef(result)
       } else {
         // Non-SELECT or legacy buffered result
-        const limited = limitBufferedQueryResult(meta)
+        const limited = limitBufferedQueryResult(meta, QUERY_RESULT_ROW_LIMIT, queryResultCellLimit)
         resultRowsLimited.value = limited.rowsLimited
         resultTotalRows.value = limited.totalRows
         result.value = markRaw(limited.result)
