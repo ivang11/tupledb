@@ -1,8 +1,4 @@
-use crate::driver::{
-    ColumnInfo, ColumnStructure, DatabaseCreationOptions, DatabaseDriver, ForeignKey, ImportResult,
-    Table, TableIndex,
-};
-use crate::state::AppState;
+use crate::database::driver::{ColumnInfo, DatabaseDriver, ImportResult};
 use chrono::Local;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -12,147 +8,13 @@ use std::collections::HashSet;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::sync::Arc;
-use tauri::State;
-use uuid::Uuid;
 
 // --------------------------------------------------------------------------
 // SQL file splitter (used by import_sql)
 // --------------------------------------------------------------------------
 
-struct SqlStatementSplitter {
-    current: String,
-    in_single_quote: bool,
-    in_double_quote: bool,
-    in_backtick: bool,
-    escaped: bool,
-    in_line_comment: bool,
-    in_block_comment: bool,
-    pending_dash_comment: bool,
-    pending_slash_comment: bool,
-    pending_block_comment_end: bool,
-}
-
-impl SqlStatementSplitter {
-    fn new() -> Self {
-        Self {
-            current: String::new(),
-            in_single_quote: false,
-            in_double_quote: false,
-            in_backtick: false,
-            escaped: false,
-            in_line_comment: false,
-            in_block_comment: false,
-            pending_dash_comment: false,
-            pending_slash_comment: false,
-            pending_block_comment_end: false,
-        }
-    }
-
-    fn push_char(&mut self, ch: char) -> Option<String> {
-        if self.in_line_comment {
-            if ch == '\n' {
-                self.in_line_comment = false;
-            }
-            return None;
-        }
-
-        if self.in_block_comment {
-            if self.pending_block_comment_end && ch == '/' {
-                self.in_block_comment = false;
-                self.pending_block_comment_end = false;
-                return None;
-            }
-            self.pending_block_comment_end = ch == '*';
-            return None;
-        }
-
-        if self.pending_dash_comment {
-            if ch == '-' {
-                self.pending_dash_comment = false;
-                self.in_line_comment = true;
-                return None;
-            }
-            self.current.push('-');
-            self.pending_dash_comment = false;
-        }
-
-        if self.pending_slash_comment {
-            if ch == '*' {
-                self.pending_slash_comment = false;
-                self.in_block_comment = true;
-                self.pending_block_comment_end = false;
-                return None;
-            }
-            self.current.push('/');
-            self.pending_slash_comment = false;
-        }
-
-        if self.escaped {
-            self.current.push(ch);
-            self.escaped = false;
-            return None;
-        }
-
-        match ch {
-            '\\' => {
-                self.escaped = true;
-                self.current.push(ch);
-            }
-            '\'' if !self.in_double_quote && !self.in_backtick => {
-                self.in_single_quote = !self.in_single_quote;
-                self.current.push(ch);
-            }
-            '"' if !self.in_single_quote && !self.in_backtick => {
-                self.in_double_quote = !self.in_double_quote;
-                self.current.push(ch);
-            }
-            '`' if !self.in_single_quote && !self.in_double_quote => {
-                self.in_backtick = !self.in_backtick;
-                self.current.push(ch);
-            }
-            '-' if !self.in_single_quote && !self.in_double_quote && !self.in_backtick => {
-                self.pending_dash_comment = true;
-            }
-            '/' if !self.in_single_quote && !self.in_double_quote && !self.in_backtick => {
-                self.pending_slash_comment = true;
-            }
-            ';' if !self.in_single_quote && !self.in_double_quote && !self.in_backtick => {
-                let stmt = self.current.trim().to_string();
-                self.current.clear();
-                if !stmt.is_empty() {
-                    return Some(stmt);
-                }
-            }
-            _ => self.current.push(ch),
-        }
-
-        None
-    }
-
-    fn finish(mut self) -> Option<String> {
-        if self.pending_dash_comment {
-            self.current.push('-');
-        }
-        if self.pending_slash_comment {
-            self.current.push('/');
-        }
-        let stmt = self.current.trim().to_string();
-        if stmt.is_empty() {
-            None
-        } else {
-            Some(stmt)
-        }
-    }
-}
-
 fn statement_preview(stmt: &str) -> String {
     stmt.chars().take(60).collect()
-}
-
-#[derive(Debug)]
-struct CompactableInsert {
-    prefix: String,
-    values: String,
 }
 
 #[derive(Debug)]
@@ -163,79 +25,19 @@ struct ImportBatchStatement {
     compact_insert_prefix: Option<String>,
 }
 
-fn find_top_level_values_keyword(stmt: &str) -> Option<usize> {
-    let bytes = stmt.as_bytes();
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut in_backtick = false;
-    let mut escaped = false;
-    let mut i = 0usize;
-
-    while i < bytes.len() {
-        let ch = bytes[i] as char;
-
-        if escaped {
-            escaped = false;
-            i += 1;
-            continue;
-        }
-
-        match ch {
-            '\\' => escaped = true,
-            '\'' if !in_double_quote && !in_backtick => in_single_quote = !in_single_quote,
-            '"' if !in_single_quote && !in_backtick => in_double_quote = !in_double_quote,
-            '`' if !in_single_quote && !in_double_quote => in_backtick = !in_backtick,
-            _ => {}
-        }
-
-        if !in_single_quote
-            && !in_double_quote
-            && !in_backtick
-            && i + 6 <= bytes.len()
-            && stmt[i..i + 6].eq_ignore_ascii_case("VALUES")
-        {
-            let prev_ok = i == 0
-                || !((bytes[i - 1] as char).is_ascii_alphanumeric() || bytes[i - 1] == b'_');
-            let next_ok = i + 6 == bytes.len()
-                || !((bytes[i + 6] as char).is_ascii_alphanumeric() || bytes[i + 6] == b'_');
-            if prev_ok && next_ok {
-                return Some(i);
-            }
-        }
-
-        i += 1;
-    }
-
-    None
-}
-
-fn parse_compactable_insert(stmt: &str) -> Option<CompactableInsert> {
-    let values_idx = find_top_level_values_keyword(stmt)?;
-    let prefix = stmt[..values_idx].trim_end().to_string();
-    if !prefix.to_ascii_uppercase().starts_with("INSERT ") {
-        return None;
-    }
-
-    let values = stmt[values_idx + "VALUES".len()..].trim().to_string();
-    if !values.starts_with('(') || !values.ends_with(')') {
-        return None;
-    }
-
-    Some(CompactableInsert { prefix, values })
-}
-
 fn push_import_statement(
     batch: &mut Vec<ImportBatchStatement>,
     batch_bytes: &mut usize,
     stmt: String,
     max_batch_bytes: usize,
+    parser: &dyn crate::database::sql::SqlImportParser,
 ) -> bool {
-    if let Some(insert) = parse_compactable_insert(&stmt) {
+    if let Some(insert) = parser.compactable_insert(&stmt) {
         if let Some(last) = batch.last_mut() {
             if last
                 .compact_insert_prefix
                 .as_deref()
-                .map(|prefix| prefix.eq_ignore_ascii_case(&insert.prefix))
+                .map(|prefix| prefix == &insert.prefix)
                 .unwrap_or(false)
             {
                 let merged_len = last.sql.len() + 1 + insert.values.len();
@@ -270,232 +72,14 @@ fn push_import_statement(
 }
 
 // --------------------------------------------------------------------------
-// Tauri commands
+// Shared transfer formats and progress
 // --------------------------------------------------------------------------
-
-#[tauri::command]
-pub async fn get_databases(
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-) -> Result<Vec<String>, String> {
-    // If the connection is configured with a specific database, return only that one
-    let configured_db = {
-        let configs = state.connections_config.read();
-        configs
-            .get(&connection_id)
-            .and_then(|c| c.mysql.database.clone().filter(|d| !d.is_empty()))
-    };
-
-    if let Some(db) = configured_db {
-        return Ok(vec![db]);
-    }
-
-    let driver = state.get_driver(&connection_id)?;
-    let t0 = std::time::Instant::now();
-    let result = driver.get_databases().await;
-    let ms = t0.elapsed().as_millis() as u64;
-    state.emit_query_log_context(
-        Some(connection_id),
-        None,
-        "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name ASC",
-        ms,
-        result.as_ref().err().map(|e| e.as_str()),
-    );
-    result
-}
-
-#[tauri::command]
-pub async fn get_database_creation_options(
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-) -> Result<DatabaseCreationOptions, String> {
-    let driver = state.get_driver(&connection_id)?;
-    driver.get_database_creation_options().await
-}
-
-#[tauri::command]
-pub async fn create_database(
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-    name: String,
-    character_set: Option<String>,
-    collation: Option<String>,
-) -> Result<(), String> {
-    if name.is_empty() || name.contains('`') || name.contains(';') {
-        return Err("Invalid database name".into());
-    }
-    let allow_writes = {
-        let configs = state.connections_config.read();
-        configs
-            .get(&connection_id)
-            .map(|c| c.allow_writes)
-            .unwrap_or(true)
-    };
-    crate::security::ensure_writes_allowed(allow_writes)?;
-    let driver = state.get_driver(&connection_id)?;
-    driver
-        .create_database(&name, character_set.as_deref(), collation.as_deref())
-        .await
-}
-
-#[tauri::command]
-pub async fn drop_database(
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-    name: String,
-) -> Result<(), String> {
-    if name.is_empty() || name.contains('`') || name.contains(';') {
-        return Err("Invalid database name".into());
-    }
-    let allow_writes = {
-        let configs = state.connections_config.read();
-        configs
-            .get(&connection_id)
-            .map(|c| c.allow_writes)
-            .unwrap_or(true)
-    };
-    crate::security::ensure_writes_allowed(allow_writes)?;
-    let driver = state.get_driver(&connection_id)?;
-    driver.drop_database(&name).await
-}
-
-#[tauri::command]
-pub async fn get_tables(
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-    database: String,
-) -> Result<Vec<Table>, String> {
-    println!("Fetching tables for database: '{}'", database);
-    let driver = state.get_driver(&connection_id)?;
-    let t0 = std::time::Instant::now();
-    let result = driver.get_tables(&database).await;
-    let ms = t0.elapsed().as_millis() as u64;
-    let sql = format!("SHOW FULL TABLES FROM `{}`", database);
-    state.emit_query_log_context(
-        Some(connection_id),
-        Some(&database),
-        &sql,
-        ms,
-        result.as_ref().err().map(|e| e.as_str()),
-    );
-    let tables = result?;
-    println!("  -> Found {} tables", tables.len());
-    Ok(tables)
-}
-
-#[tauri::command]
-pub async fn get_table_structure(
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-    database: String,
-    table: String,
-) -> Result<Vec<ColumnStructure>, String> {
-    let driver = state.get_driver(&connection_id)?;
-    let sql = format!("SHOW COLUMNS FROM `{}`.`{}`", database, table);
-    let t0 = std::time::Instant::now();
-    let result = driver.get_table_structure(&database, &table).await;
-    let ms = t0.elapsed().as_millis() as u64;
-    state.emit_query_log_context(
-        Some(connection_id),
-        Some(&database),
-        &sql,
-        ms,
-        result.as_ref().err().map(|e| e.as_str()),
-    );
-    result
-}
-
-#[tauri::command]
-pub async fn get_foreign_keys(
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-    database: String,
-    table: String,
-) -> Result<Vec<ForeignKey>, String> {
-    let driver = state.get_driver(&connection_id)?;
-    let sql = format!(
-        "SELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME \
-         FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE \
-         WHERE TABLE_SCHEMA = '{}' AND TABLE_NAME = '{}' AND REFERENCED_TABLE_NAME IS NOT NULL",
-        database, table
-    );
-    let t0 = std::time::Instant::now();
-    let result = driver.get_foreign_keys(&database, &table).await;
-    let ms = t0.elapsed().as_millis() as u64;
-    state.emit_query_log_context(
-        Some(connection_id),
-        Some(&database),
-        &sql,
-        ms,
-        result.as_ref().err().map(|e| e.as_str()),
-    );
-    result
-}
-
-#[tauri::command]
-pub async fn get_table_indexes(
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-    database: String,
-    table: String,
-) -> Result<Vec<TableIndex>, String> {
-    let driver = state.get_driver(&connection_id)?;
-    let sql = format!("SHOW INDEX FROM `{}`.`{}`", database, table);
-    let t0 = std::time::Instant::now();
-    let result = driver.get_table_indexes(&database, &table).await;
-    let ms = t0.elapsed().as_millis() as u64;
-    state.emit_query_log_context(
-        Some(connection_id),
-        Some(&database),
-        &sql,
-        ms,
-        result.as_ref().err().map(|e| e.as_str()),
-    );
-    result
-}
-
-#[tauri::command]
-pub async fn get_table_ddl(
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-    database: String,
-    table: String,
-) -> Result<String, String> {
-    let driver = state.get_driver(&connection_id)?;
-    let sql = format!("SHOW CREATE TABLE `{}`.`{}`", database, table);
-    let t0 = std::time::Instant::now();
-    let result = driver.get_table_ddl(&database, &table).await;
-    let ms = t0.elapsed().as_millis() as u64;
-    state.emit_query_log_context(
-        Some(connection_id),
-        Some(&database),
-        &sql,
-        ms,
-        result.as_ref().err().map(|e| e.as_str()),
-    );
-    result
-}
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Progress {
     pub current: usize,
     pub total: usize,
     pub status: String,
-}
-
-fn sql_export_value(value: Option<&Value>) -> String {
-    match value {
-        Some(Value::Null) | None => "NULL".to_string(),
-        Some(Value::String(s)) => format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'")),
-        Some(Value::Bool(b)) => {
-            if *b {
-                "1".to_string()
-            } else {
-                "0".to_string()
-            }
-        }
-        Some(v) => v.to_string(),
-    }
 }
 
 fn csv_export_value(value: Option<&Value>) -> String {
@@ -583,98 +167,50 @@ impl Write for ExportWriter {
     }
 }
 
-#[tauri::command]
-#[allow(clippy::too_many_arguments)]
-pub async fn export_database(
-    window: tauri::Window,
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-    database: String,
-    mode: String,
-    path: String,
-    tables: Option<Vec<String>>,
-    export_id: Option<String>,
-    format: Option<String>,
-    drop_if_exists: Option<bool>,
-    include_views: Option<bool>,
-    use_transactions: Option<bool>,
-    compress_gzip: Option<bool>,
-) -> Result<usize, String> {
-    use tauri::Emitter;
-
-    let eid = export_id.unwrap_or_default();
-    let fmt = format.as_deref().unwrap_or("sql");
-    let options = ExportOptions {
-        drop_if_exists: drop_if_exists.unwrap_or(true),
-        include_views: include_views.unwrap_or(true),
-        use_transactions: use_transactions.unwrap_or(true),
-        compress_gzip: compress_gzip.unwrap_or(false),
-    };
-    state.clear_export_cancel(&eid);
-
-    let driver = state.get_driver(&connection_id)?;
-    let result = export_database_file(
-        driver,
-        database,
-        mode,
-        path,
-        tables,
-        fmt,
-        options,
-        &|progress| {
-            let _ = window.emit("export-progress", progress);
-        },
-        &|| state.is_export_canceled(&eid),
-    )
-    .await;
-
-    state.clear_export_cancel(&eid);
-    result
-}
-
-#[tauri::command]
-pub async fn cancel_export(state: State<'_, AppState>, export_id: String) -> Result<(), String> {
-    state.request_export_cancel(&export_id);
-    Ok(())
-}
-
 #[allow(clippy::too_many_arguments)]
 pub async fn export_database_file(
     driver: Arc<dyn DatabaseDriver>,
     database: String,
     mode: String,
     path: String,
-    tables: Option<Vec<String>>,
+    tables: Option<Vec<TableRef>>,
     format: &str,
     options: ExportOptions,
     emit_progress: &(dyn Fn(Progress) + Send + Sync),
     is_canceled: &(dyn Fn() -> bool + Send + Sync),
 ) -> Result<usize, String> {
+    if !["sql", "csv", "json"].contains(&format) {
+        return Err(format!("Unknown export format: {format}"));
+    }
+    crate::database::capabilities::require(
+        format != "sql" || driver.capabilities().export_sql,
+        "SQL export",
+    )?;
     use std::path::Path;
     use tokio::sync::mpsc;
 
     let table_metadata = driver.get_tables(&database).await?;
-    let view_names: HashSet<String> = table_metadata
+    let view_names: HashSet<TableRef> = table_metadata
         .iter()
         .filter(|table| table.table_type.to_uppercase().contains("VIEW"))
-        .map(|table| table.name.clone())
+        .map(|table| table.reference.clone())
         .collect();
-    let base_table_names: HashSet<String> = table_metadata
+    let base_table_names: HashSet<TableRef> = table_metadata
         .iter()
         .filter(|table| !table.table_type.to_uppercase().contains("VIEW"))
-        .map(|table| table.name.clone())
+        .map(|table| table.reference.clone())
         .collect();
 
     let mut tables_to_export = match tables {
         Some(t) => t,
         None if options.include_views => table_metadata
             .iter()
-            .map(|table| table.name.clone())
+            .map(|table| table.reference.clone())
             .collect(),
         None => table_metadata
             .iter()
-            .filter(|table| base_table_names.contains(&table.name))
-            .map(|table| table.name.clone())
+            .filter(|table| base_table_names.contains(&table.reference))
+            .map(|table| table.reference.clone())
             .collect(),
     };
     if !options.include_views {
@@ -722,13 +258,11 @@ pub async fn export_database_file(
 
                 let (tx, mut rx) = mpsc::channel::<(Option<Vec<ColumnInfo>>, Value)>(512);
                 let driver_clone = driver.clone();
-                let db_clone = database.clone();
                 let table_clone = table.clone();
-                let stream_handle = tokio::spawn(async move {
-                    driver_clone
-                        .stream_all_rows(&db_clone, &table_clone, tx)
-                        .await
-                });
+                let stream_handle =
+                    tokio::spawn(
+                        async move { driver_clone.stream_all_rows(&table_clone, tx).await },
+                    );
 
                 let mut columns: Vec<ColumnInfo> = Vec::new();
                 let mut header_written = false;
@@ -798,18 +332,20 @@ pub async fn export_database_file(
                 if i > 0 {
                     write!(writer, ",").map_err(|e| format!("Write error: {}", e))?;
                 }
-                write!(writer, "\n  \"{}\": [", table)
-                    .map_err(|e| format!("Write error: {}", e))?;
+                write!(
+                    writer,
+                    "\n  {}: [",
+                    serde_json::to_string(&table.to_string()).map_err(|e| e.to_string())?
+                )
+                .map_err(|e| format!("Write error: {}", e))?;
 
                 let (tx, mut rx) = mpsc::channel::<(Option<Vec<ColumnInfo>>, Value)>(512);
                 let driver_clone = driver.clone();
-                let db_clone = database.clone();
                 let table_clone = table.clone();
-                let stream_handle = tokio::spawn(async move {
-                    driver_clone
-                        .stream_all_rows(&db_clone, &table_clone, tx)
-                        .await
-                });
+                let stream_handle =
+                    tokio::spawn(
+                        async move { driver_clone.stream_all_rows(&table_clone, tx).await },
+                    );
 
                 let mut first_row = true;
                 let mut table_rows = 0usize;
@@ -864,12 +400,15 @@ pub async fn export_database_file(
                 writer,
                 "-- TupleDB Export\n-- Database: `{}`\n-- Mode: {}\n-- Generated: {}\n\
                  -- --------------------------------------------------------\n\n\
-                 SET FOREIGN_KEY_CHECKS=0;\n\n",
-                database, mode, now
+                 {}\n\n",
+                database,
+                mode,
+                now,
+                driver.dialect().export_prologue()
             )
             .map_err(|e| format!("Failed to write file: {}", e))?;
             if options.use_transactions {
-                writeln!(writer, "START TRANSACTION;\n")
+                writeln!(writer, "{}\n", driver.dialect().begin_transaction())
                     .map_err(|e| format!("Failed to write file: {}", e))?;
             }
 
@@ -895,11 +434,16 @@ pub async fn export_database_file(
                 .map_err(|e| format!("Failed to write file: {}", e))?;
 
                 if include_structure {
-                    let create_sql = driver.get_table_ddl(&database, table).await?;
+                    let create_sql = driver.get_table_ddl(table).await?;
                     if options.drop_if_exists {
                         let object_kind = if is_view { "VIEW" } else { "TABLE" };
-                        writeln!(writer, "DROP {} IF EXISTS `{}`;", object_kind, table)
-                            .map_err(|e| format!("Failed to write file: {}", e))?;
+                        writeln!(
+                            writer,
+                            "DROP {} IF EXISTS {};",
+                            object_kind,
+                            driver.dialect().quote_table_for_export(table)?
+                        )
+                        .map_err(|e| format!("Failed to write file: {}", e))?;
                     }
                     writeln!(writer, "{};\n", create_sql)
                         .map_err(|e| format!("Failed to write file: {}", e))?;
@@ -907,13 +451,10 @@ pub async fn export_database_file(
 
                 if include_data && !is_view {
                     let (tx, mut rx) = mpsc::channel::<(Option<Vec<ColumnInfo>>, Value)>(512);
-                    let db_clone = database.clone();
                     let table_clone = table.clone();
                     let driver_clone = driver.clone();
                     let stream_handle = tokio::spawn(async move {
-                        driver_clone
-                            .stream_all_rows(&db_clone, &table_clone, tx)
-                            .await
+                        driver_clone.stream_all_rows(&table_clone, tx).await
                     });
 
                     let mut columns: Vec<ColumnInfo> = Vec::new();
@@ -929,22 +470,13 @@ pub async fn export_database_file(
                         }
 
                         if let Value::Object(map) = row {
-                            let col_names = columns
-                                .iter()
-                                .map(|c| format!("`{}`", c.name))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            let values = columns
-                                .iter()
-                                .map(|c| sql_export_value(map.get(&c.name)))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            writeln!(
-                                writer,
-                                "INSERT INTO `{}` ({}) VALUES ({});",
-                                table, col_names, values
-                            )
-                            .map_err(|e| format!("Failed to write file: {}", e))?;
+                            let sql = driver.dialect().insert_statement(
+                                table,
+                                &columns,
+                                &Value::Object(map),
+                            )?;
+                            writeln!(writer, "{sql}")
+                                .map_err(|e| format!("Failed to write file: {e}"))?;
                             table_rows += 1;
                             total_rows += 1;
                             if table_rows.is_multiple_of(5000) {
@@ -969,10 +501,11 @@ pub async fn export_database_file(
                 }
             }
 
-            writeln!(writer, "SET FOREIGN_KEY_CHECKS=1;")
+            writeln!(writer, "{}", driver.dialect().export_epilogue())
                 .map_err(|e| format!("Failed to write file: {}", e))?;
             if options.use_transactions {
-                writeln!(writer, "COMMIT;").map_err(|e| format!("Failed to write file: {}", e))?;
+                writeln!(writer, "{}", driver.dialect().commit_transaction())
+                    .map_err(|e| format!("Failed to write file: {}", e))?;
             }
             writer.finish()?;
         }
@@ -987,43 +520,6 @@ pub async fn export_database_file(
     Ok(total_rows)
 }
 
-#[tauri::command]
-pub async fn import_sql(
-    window: tauri::Window,
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-    database: String,
-    path: String,
-    import_id: String,
-) -> Result<ImportResult, String> {
-    let allow_writes = {
-        let configs = state.connections_config.read();
-        configs
-            .get(&connection_id)
-            .map(|c| c.allow_writes)
-            .unwrap_or(true)
-    };
-    crate::security::ensure_writes_allowed(allow_writes)?;
-
-    state.clear_import_cancel(&import_id);
-
-    let driver = state.get_driver(&connection_id)?;
-    let result = import_sql_file(
-        driver,
-        &database,
-        &path,
-        &import_id,
-        &|| state.is_import_canceled(&import_id),
-        &|progress| {
-            use tauri::Emitter;
-            let _ = window.emit("import-progress", progress);
-        },
-    )
-    .await;
-    state.clear_import_cancel(&import_id);
-    result
-}
-
 pub async fn import_sql_file(
     driver: Arc<dyn DatabaseDriver>,
     database: &str,
@@ -1034,6 +530,8 @@ pub async fn import_sql_file(
 ) -> Result<ImportResult, String> {
     use std::time::{Duration, Instant};
 
+    crate::database::capabilities::require(driver.capabilities().import_sql, "SQL import")?;
+    let mut splitter = driver.import_parser()?;
     let file = File::open(path).map_err(|e| format!("Failed to read file: {}", e))?;
     let total_bytes = file.metadata().map(|m| m.len() as usize).unwrap_or(0);
     let mut reader = BufReader::with_capacity(1024 * 1024, file);
@@ -1051,7 +549,6 @@ pub async fn import_sql_file(
     let max_batch_bytes = driver
         .get_import_batch_bytes(import_id)
         .unwrap_or(4 * 1024 * 1024);
-    let mut splitter = SqlStatementSplitter::new();
     let mut batch: Vec<ImportBatchStatement> = Vec::with_capacity(MAX_BATCH_STATEMENTS.min(1024));
     let mut batch_bytes = 0usize;
     let mut line = String::new();
@@ -1070,7 +567,7 @@ pub async fn import_sql_file(
     macro_rules! queue_import_statement {
         ($stmt:expr, $process_started:ident) => {{
             parsed_statements += 1;
-            if push_import_statement(&mut batch, &mut batch_bytes, $stmt, max_batch_bytes) {
+            if push_import_statement(&mut batch, &mut batch_bytes, $stmt, max_batch_bytes, splitter.as_ref()) {
                 compacted_statements += 1;
             }
             if batch.len() >= MAX_BATCH_STATEMENTS || batch_bytes >= max_batch_bytes {
@@ -1190,7 +687,13 @@ pub async fn import_sql_file(
     if let Some(stmt) = splitter.finish() {
         parsed_statements += 1;
         let process_started = Instant::now();
-        if push_import_statement(&mut batch, &mut batch_bytes, stmt, max_batch_bytes) {
+        if push_import_statement(
+            &mut batch,
+            &mut batch_bytes,
+            stmt,
+            max_batch_bytes,
+            splitter.as_ref(),
+        ) {
             compacted_statements += 1;
         }
         process_time += process_started.elapsed();
@@ -1271,7 +774,7 @@ pub async fn import_sql_file(
     Ok(ImportResult {
         executed,
         errors,
-        metrics: crate::driver::ImportMetrics {
+        metrics: crate::database::driver::ImportMetrics {
             parsed_statements,
             compacted_statements,
             executed_batches,
@@ -1284,27 +787,161 @@ pub async fn import_sql_file(
     })
 }
 
-#[tauri::command]
-pub async fn cancel_import(
-    state: State<'_, AppState>,
-    connection_id: Uuid,
-    import_id: String,
-) -> Result<(), String> {
-    state.request_import_cancel(&import_id);
-    let driver = state.get_driver(&connection_id)?;
-    if let Some(thread_id) = driver.get_thread_id_for_import(&import_id) {
-        let _ = driver.abort_import_session(&import_id).await;
-        let _ = driver.kill_connection(thread_id).await;
+pub fn escape_csv(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
+        format!("\"{}\"", s.replace('"', "\"\""))
     } else {
-        let _ = driver.abort_import_session(&import_id).await;
+        s.to_string()
     }
-    Ok(())
+}
+
+pub async fn export_table_file(
+    driver: Arc<dyn DatabaseDriver>,
+    database: String,
+    table: TableRef,
+    format: String,
+    path: String,
+    emit_progress: &(dyn Fn(usize, usize, String) + Send + Sync),
+) -> Result<usize, String> {
+    crate::database::capabilities::require(
+        format != "sql" || driver.capabilities().export_sql,
+        "SQL export",
+    )?;
+    use std::io::{BufWriter, Write};
+    use tokio::sync::mpsc;
+
+    if format != "csv" && format != "json" && format != "sql" {
+        return Err(format!("Unknown format: {}", format));
+    }
+
+    emit_progress(0, 100, format!("Streaming data from {}...", table));
+
+    // Channel: producer streams rows, consumer writes to disk
+    let (tx, mut rx) = mpsc::channel::<(Option<Vec<ColumnInfo>>, Value)>(512);
+
+    let table_clone = table.clone();
+    let driver_clone = driver.clone();
+    let stream_handle =
+        tokio::spawn(async move { driver_clone.stream_all_rows(&table_clone, tx).await });
+
+    let file = std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {}", e))?;
+    let mut writer = BufWriter::new(file);
+    let mut columns: Vec<ColumnInfo> = Vec::new();
+    let mut row_count: usize = 0;
+    let mut header_written = false;
+
+    while let Some((col_opt, row)) = rx.recv().await {
+        if let Some(cols) = col_opt {
+            columns = cols;
+        }
+
+        row_count += 1;
+
+        if row_count.is_multiple_of(5000) {
+            emit_progress(50, 100, format!("Writing row {}...", row_count));
+        }
+
+        match format.as_str() {
+            "csv" => {
+                if !header_written {
+                    let header: Vec<String> = columns.iter().map(|c| escape_csv(&c.name)).collect();
+                    writeln!(writer, "{}", header.join(","))
+                        .map_err(|e| format!("Write error: {}", e))?;
+                    header_written = true;
+                }
+                if let Value::Object(ref map) = row {
+                    let values: Vec<String> = columns
+                        .iter()
+                        .map(|c| match map.get(&c.name) {
+                            Some(Value::Null) | None => String::new(),
+                            Some(Value::String(s)) => escape_csv(s),
+                            Some(Value::Bool(b)) => b.to_string(),
+                            Some(v) => v.to_string(),
+                        })
+                        .collect();
+                    writeln!(writer, "{}", values.join(","))
+                        .map_err(|e| format!("Write error: {}", e))?;
+                }
+            }
+            "json" => {
+                if !header_written {
+                    writer
+                        .write_all(b"[\n")
+                        .map_err(|e| format!("Write error: {}", e))?;
+                    header_written = true;
+                } else {
+                    writer
+                        .write_all(b",\n")
+                        .map_err(|e| format!("Write error: {}", e))?;
+                }
+                let row_str = serde_json::to_string(&row)
+                    .map_err(|e| format!("Serialization error: {}", e))?;
+                writer
+                    .write_all(row_str.as_bytes())
+                    .map_err(|e| format!("Write error: {}", e))?;
+            }
+            "sql" => {
+                if !header_written {
+                    writeln!(writer, "-- Export of `{}`.`{}`\n", database, table)
+                        .map_err(|e| format!("Write error: {}", e))?;
+                    header_written = true;
+                }
+                if let Value::Object(ref map) = row {
+                    let sql = driver.dialect().insert_statement(
+                        &table,
+                        &columns,
+                        &Value::Object(map.clone()),
+                    )?;
+                    writeln!(writer, "{sql}").map_err(|e| format!("Write error: {e}"))?;
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    // Close JSON array
+    if format == "json" {
+        if header_written {
+            writer
+                .write_all(b"\n]")
+                .map_err(|e| format!("Write error: {}", e))?;
+        } else {
+            writer
+                .write_all(b"[]")
+                .map_err(|e| format!("Write error: {}", e))?;
+        }
+    }
+
+    writer.flush().map_err(|e| format!("Write error: {}", e))?;
+
+    // Propagate any streaming error
+    stream_handle
+        .await
+        .map_err(|e| format!("Stream task error: {}", e))??;
+
+    emit_progress(100, 100, "Export complete".to_string());
+
+    Ok(row_count)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn sql_export_value(value: Option<&Value>) -> String {
+        use crate::database::sql::SqlDialect;
+        crate::database::drivers::mysql::sql::MySqlDialect.literal(value.unwrap_or(&Value::Null))
+    }
+    use crate::database::drivers::mysql::script::{parse_compactable_insert, SqlStatementSplitter};
+    use crate::database::sql::SqlImportParser;
     use serde_json::json;
+
+    #[test]
+    fn escape_csv_quotes_only_when_needed() {
+        assert_eq!(escape_csv("plain"), "plain");
+        assert_eq!(escape_csv("hello,world"), "\"hello,world\"");
+        assert_eq!(escape_csv("hello \"world\""), "\"hello \"\"world\"\"\"");
+        assert_eq!(escape_csv("hello\nworld"), "\"hello\nworld\"");
+    }
 
     fn split_sql(sql: &str) -> Vec<String> {
         let mut splitter = SqlStatementSplitter::new();
@@ -1376,12 +1013,14 @@ mod tests {
             &mut batch_bytes,
             "INSERT INTO users(id) VALUES (1)".to_string(),
             1024,
+            &SqlStatementSplitter::new(),
         ));
         assert!(push_import_statement(
             &mut batch,
             &mut batch_bytes,
             "INSERT INTO users(id) VALUES (2)".to_string(),
             1024,
+            &SqlStatementSplitter::new(),
         ));
 
         assert_eq!(batch.len(), 1);
@@ -1400,16 +1039,47 @@ mod tests {
             &mut batch_bytes,
             "INSERT INTO users(id) VALUES (1)".to_string(),
             1024,
+            &SqlStatementSplitter::new(),
         );
         let merged = push_import_statement(
             &mut batch,
             &mut batch_bytes,
             "INSERT INTO roles(id) VALUES (1)".to_string(),
             1024,
+            &SqlStatementSplitter::new(),
         );
 
         assert!(!merged);
         assert_eq!(batch.len(), 2);
+    }
+
+    #[test]
+    fn compaction_preserves_case_sensitive_table_names() {
+        let mut batch = Vec::new();
+        let mut bytes = 0;
+        let parser = SqlStatementSplitter::new();
+        push_import_statement(
+            &mut batch,
+            &mut bytes,
+            "INSERT INTO Users VALUES (1)".into(),
+            1024,
+            &parser,
+        );
+        assert!(!push_import_statement(
+            &mut batch,
+            &mut bytes,
+            "INSERT INTO users VALUES (2)".into(),
+            1024,
+            &parser
+        ));
+        assert_eq!(batch.len(), 2);
+    }
+
+    #[test]
+    fn compaction_handles_unicode_identifiers_without_slicing_inside_a_character() {
+        let insert = parse_compactable_insert("INSERT INTO café VALUES ('té')").unwrap();
+        assert_eq!(insert.prefix, "INSERT INTO café");
+        assert_eq!(insert.values, "('té')");
     }
 
     #[test]
@@ -1494,3 +1164,4 @@ mod tests {
         );
     }
 }
+use crate::database::types::TableRef;

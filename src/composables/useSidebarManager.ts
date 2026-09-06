@@ -1045,13 +1045,13 @@ export function useSidebarManager(ctx: SidebarContext) {
       id: uuidv4(),
       name: "",
       environment: "LOCAL",
-      mysql: {
+      database: { engine: 'mysql', settings: {
         host: "127.0.0.1",
         port: 3306,
         user: "root",
         password: "",
         database: "",
-      },
+      } },
       allow_writes: true,
     };
   }

@@ -1,3 +1,6 @@
+import { tableReferenceKey } from '@/lib/tableReference'
+import type { TableRef } from '@/types/database'
+import { rowKey, primaryKeyColumns, decodeRowKey } from '@/lib/tableIdentity'
 import { ref, nextTick, type Ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useToast } from '@/composables/useToast'
@@ -6,7 +9,6 @@ import type { PaneState, TableTab, TableViewMode } from '@/types/workspace'
 import {
   normalizeInsertValue,
   normalizeChangeValue,
-  coercePkValue,
   computeCellEditValue,
   buildDuplicatePendingInserts,
 } from '@/lib/tableEditing'
@@ -20,10 +22,10 @@ import { rowValue } from '@/lib/rowAccess'
 interface RowEditingContext {
   panes: Ref<PaneState[]>
   getPaneTab: (pane: PaneState) => TableTab | null
-  getPrimaryKey: (pane: PaneState) => string | null
+  getPrimaryKey: (pane: PaneState) => string[] | null
   getPaneConnection: (pane: PaneState) => any
   refreshActiveTab: (paneId?: string) => Promise<void>
-  loadTableData: (tableName: string, connectionId: string, database: string, initialFilter?: any, paneId?: string) => Promise<void>
+  loadTableData: (tableName: string | TableRef, connectionId: string, database: string, initialFilter?: any, paneId?: string) => Promise<void>
 }
 
 export function useRowEditing(ctx: RowEditingContext) {
@@ -44,10 +46,14 @@ export function useRowEditing(ctx: RowEditingContext) {
   const insertRowError = ref<string | null>(null)
   const pendingInsertDraft = ref<{ tabId: string; index: number } | null>(null)
 
-  function buildInsertValues() {
-    return Object.entries(insertRowValues.value).map(([column, value]) => ({
+  function buildInsertValues(tab: TableTab) {
+    return Object.entries(insertRowValues.value)
+      .filter(([column, value]) => {
+        const metadata = tab.tableStructure.find(c => c.field === column)
+        return !metadata?.is_generated && !metadata?.is_identity && !(value === '' && metadata?.default_value != null)
+      }).map(([column, value]) => ({
       column,
-      value: normalizeInsertValue(value),
+      value: normalizeInsertValue(value, tab.tableStructure.find(c => c.field === column)?.value_kind),
     }))
   }
 
@@ -56,21 +62,21 @@ export function useRowEditing(ctx: RowEditingContext) {
     if (!draft || draft.tabId !== tab.id) return
     const pendingInsert = tab.pendingInserts[draft.index]
     if (!pendingInsert) return
-    pendingInsert.values = buildInsertValues()
+    pendingInsert.values = buildInsertValues(tab)
   }
 
   function isColAutoIncrement(pane: PaneState, colName: string): boolean {
     const tab = getPaneTab(pane)
     if (!tab) return false
-    return (tab.tableStructure as any[]).find((c: any) => c.field === colName)?.extra === 'auto_increment'
+    const column = tab.tableStructure.find(c => c.field === colName)
+    return !!column?.is_identity || !!column?.is_generated
   }
 
   function isBooleanCol(pane: PaneState, colName: string): boolean {
     const tab = getPaneTab(pane)
     if (!tab) return false
     const col = (tab.tableStructure as any[]).find((c: any) => c.field === colName)
-    const type = (col?.type ?? '').toLowerCase()
-    return type === 'tinyint(1)' || type === 'boolean' || type === 'bool'
+    return col?.value_kind === 'boolean'
   }
 
   function openInsertRowDialog(pane: PaneState) {
@@ -82,10 +88,10 @@ export function useRowEditing(ctx: RowEditingContext) {
     }
     insertRowValues.value = Object.fromEntries(
       (tab.tableStructure as any[])
-        .filter((col: any) => col.extra !== 'auto_increment')
-        .map((col: any) => [col.field, col.default ?? '']),
+        .filter((col: any) => !col.is_identity && !col.is_generated)
+        .map((col: any) => [col.field, '']),
     )
-    tab.pendingInserts.push({ values: buildInsertValues() })
+    tab.pendingInserts.push({ values: buildInsertValues(tab) })
     pendingInsertDraft.value = { tabId: tab.id, index: tab.pendingInserts.length - 1 }
     insertRowError.value = null
     insertingRowPaneId.value = pane.id
@@ -175,7 +181,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     if (selectedPks.length === 0) return
 
     const rows = tab.queryResult.rows.filter((r: any) =>
-      selectedPks.includes(String(rowValue(r, pk, tab.queryResult.columns)))
+      selectedPks.includes(rowKey(r, pk, tab.queryResult.columns))
     )
     try {
       tab.pendingInserts.push(
@@ -192,7 +198,8 @@ export function useRowEditing(ctx: RowEditingContext) {
     const tab = getPaneTab(pane)
     const pk = getPrimaryKey(pane)
     if (!tab || !pk) return
-    const pkVal = String(rowValue(row, pk, tab.queryResult?.columns ?? []))
+    if (tab.tableStructure.find(c => c.field === column)?.is_generated) return
+    const pkVal = rowKey(row, pk, tab.queryResult?.columns ?? [])
     const originalValue = rowValue(row, column, tab.queryResult?.columns ?? [])
     if (newValue === originalValue) {
       if (tab.pendingChanges[pkVal]) {
@@ -210,7 +217,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     const tab = getPaneTab(pane)
     const pk = getPrimaryKey(pane)
     if (!tab || !pk) return
-    const pkVal = String(rowValue(row, pk, tab.queryResult?.columns ?? []))
+    const pkVal = rowKey(row, pk, tab.queryResult?.columns ?? [])
     if (tab.pendingDeletions[pkVal]) delete tab.pendingDeletions[pkVal]
     else tab.pendingDeletions[pkVal] = true
   }
@@ -222,7 +229,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     const rows = tab.queryResult?.rows ?? []
     for (const pkVal of tab.selectedRowPks) {
       const row = rows.find((r: any) =>
-        String(rowValue(r, pk, tab.queryResult?.columns ?? [])) === pkVal,
+        rowKey(r, pk, tab.queryResult?.columns ?? []) === pkVal,
       )
       if (row) toggleDeletion(pane, row)
     }
@@ -259,7 +266,7 @@ export function useRowEditing(ctx: RowEditingContext) {
       return tab.queryResult.rows[Number(match[1])] ?? null
     }
     return tab.queryResult.rows.find((r: any) =>
-      String(rowValue(r, pk, tab.queryResult.columns ?? [])) === tab.selectedRowPk,
+      rowKey(r, pk, tab.queryResult.columns ?? []) === tab.selectedRowPk,
     ) ?? null
   }
 
@@ -301,9 +308,9 @@ export function useRowEditing(ctx: RowEditingContext) {
       return
     }
 
-    const pkVal = String(rowValue(row, pk, tab.queryResult?.columns ?? []))
+    const pkVal = rowKey(row, pk, tab.queryResult?.columns ?? [])
     const allRowPks = (tab.queryResult?.rows as any[] ?? []).map((r: any) =>
-      String(rowValue(r, pk, tab.queryResult?.columns ?? [])),
+      rowKey(r, pk, tab.queryResult?.columns ?? []),
     )
     const next = computeRowClickSelection(
       pkVal,
@@ -320,7 +327,8 @@ export function useRowEditing(ctx: RowEditingContext) {
     const tab = getPaneTab(pane)
     const pk = getPrimaryKey(pane)
     if (!tab || !pk) return
-    const pkVal = String(rowValue(row, pk, tab.queryResult?.columns ?? []))
+    if (tab.tableStructure.find(c => c.field === colName)?.is_generated) return
+    const pkVal = rowKey(row, pk, tab.queryResult?.columns ?? [])
     if (tab.pendingDeletions[pkVal]) return
     tab.selectedRowPk = pkVal
     tab.selectedRowPks = [pkVal]
@@ -360,8 +368,8 @@ export function useRowEditing(ctx: RowEditingContext) {
 
   // ── Apply changes ───────────────────────────────────────────────────────────
 
-  function getTabPrimaryKey(tab: TableTab): string | null {
-    return (tab.tableStructure as any[]).find(c => c.key === 'PRI')?.field || null
+  function getTabPrimaryKey(tab: TableTab): string[] | null {
+    return primaryKeyColumns(tab.tableStructure)
   }
 
   function clearTabPendingState(tab: TableTab) {
@@ -388,7 +396,7 @@ export function useRowEditing(ctx: RowEditingContext) {
         t.type === 'table' &&
         (t as TableTab).connectionId === target.connectionId &&
         (t as TableTab).database === target.database &&
-        (t as TableTab).tableName === target.tableName,
+        sameTable(t as TableTab, target),
       )
       for (const relatedTab of related) {
         const idx = p.tabs.findIndex(t => t.id === relatedTab.id)
@@ -398,13 +406,18 @@ export function useRowEditing(ctx: RowEditingContext) {
     }
   }
 
+  function sameTable(a: TableTab, b: TableTab): boolean {
+    return tableReferenceKey(a.reference ?? store.tableReference(a.connectionId, a.database, a.tableName))
+      === tableReferenceKey(b.reference ?? store.tableReference(b.connectionId, b.database, b.tableName))
+  }
+
   function matchingOpenTableTabs(target: TableTab): TableTab[] {
     return ctx.panes.value.flatMap(p =>
       p.tabs.filter((t): t is TableTab =>
         t.type === 'table' &&
         t.connectionId === target.connectionId &&
         t.database === target.database &&
-        t.tableName === target.tableName,
+        sameTable(t, target),
       ),
     )
   }
@@ -415,16 +428,16 @@ export function useRowEditing(ctx: RowEditingContext) {
         store.fetchTableData(
           tab.connectionId,
           tab.database,
-          tab.tableName,
+          tab.reference ?? tab.tableName,
           tab.page,
           tab.pageSize,
           tab.filters ?? null,
           tab.sortColumn ? { column: tab.sortColumn, desc: tab.sortDesc } : null,
         ),
-        store.fetchTableStructure(tab.connectionId, tab.database, tab.tableName),
-        store.fetchTableIndexes(tab.connectionId, tab.database, tab.tableName),
-        store.fetchForeignKeys(tab.connectionId, tab.database, tab.tableName),
-        store.fetchTableDdl(tab.connectionId, tab.database, tab.tableName),
+        store.fetchTableStructure(tab.connectionId, tab.database, tab.reference ?? tab.tableName),
+        store.fetchTableIndexes(tab.connectionId, tab.database, tab.reference ?? tab.tableName),
+        store.fetchForeignKeys(tab.connectionId, tab.database, tab.reference ?? tab.tableName),
+        store.fetchTableDdl(tab.connectionId, tab.database, tab.reference ?? tab.tableName),
       ])
       tab.queryResult = queryResult
       tab.tableStructure = tableStructure
@@ -439,7 +452,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     if (tab.pendingDrop) {
       await invoke('drop_table', {
         connectionId: tab.connectionId, database: tab.database,
-        table: tab.tableName, disableFkChecks: disableFkChecks.value,
+        table: tab.reference ?? store.tableReference(tab.connectionId, tab.database, tab.tableName), disableFkChecks: disableFkChecks.value,
       })
       closeMatchingTableTabs(tab)
       await store.fetchTablesForConnection(tab.connectionId, tab.database)
@@ -449,7 +462,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     if (tab.pendingTruncate) {
       await invoke('truncate_table', {
         connectionId: tab.connectionId, database: tab.database,
-        table: tab.tableName, disableFkChecks: disableFkChecks.value,
+        table: tab.reference ?? store.tableReference(tab.connectionId, tab.database, tab.tableName), disableFkChecks: disableFkChecks.value,
       })
       tab.pendingTruncate = false
     }
@@ -458,21 +471,19 @@ export function useRowEditing(ctx: RowEditingContext) {
       const pk = getTabPrimaryKey(tab)
       const hasRowMutations = Object.keys(tab.pendingChanges).length > 0 || Object.keys(tab.pendingDeletions).length > 0
       if (hasRowMutations && !pk) throw new Error(`Table \`${tab.tableName}\` has no Primary Key`)
-      const updates = Object.entries(tab.pendingChanges).map(([pkValue, changes]) => ({
-        pk_column: pk!,
-        pk_value: coercePkValue(pkValue),
+      const updates = Object.entries(tab.pendingChanges).filter(([key]) => !tab.pendingDeletions[key]).map(([pkValue, changes]) => ({
+        key: decodeRowKey(pkValue, pk!),
         changes: Object.entries(changes).map(([column, value]) => ({
           column,
-          value: normalizeChangeValue(value),
+          value: normalizeChangeValue(value, tab.tableStructure.find(c => c.field === column)?.value_kind),
         })),
       }))
       const deletions = Object.keys(tab.pendingDeletions).map(pkValue => ({
-        pk_column: pk!,
-        pk_value: coercePkValue(pkValue),
+        key: decodeRowKey(pkValue, pk!),
       }))
       if (updates.length > 0 || deletions.length > 0) {
         await invoke('apply_table_changes', {
-          connectionId: tab.connectionId, database: tab.database, table: tab.tableName,
+          connectionId: tab.connectionId, database: tab.database, table: tab.reference ?? store.tableReference(tab.connectionId, tab.database, tab.tableName),
           updates, deletions, disableFkChecks: disableFkChecks.value,
         })
         tab.pendingChanges = {}
@@ -485,7 +496,7 @@ export function useRowEditing(ctx: RowEditingContext) {
       await invoke('insert_row', {
         connectionId: tab.connectionId,
         database: tab.database,
-        table: tab.tableName,
+        table: tab.reference ?? store.tableReference(tab.connectionId, tab.database, tab.tableName),
         values: insert.values,
         disableFkChecks: disableFkChecks.value,
       })
@@ -496,7 +507,7 @@ export function useRowEditing(ctx: RowEditingContext) {
       await store.alterTableColumn(
         tab.connectionId,
         tab.database,
-        tab.tableName,
+        tab.reference ?? tab.tableName,
         oldName,
         change.newName,
         change.newType,
@@ -550,14 +561,14 @@ export function useRowEditing(ctx: RowEditingContext) {
     }
   }
 
-  async function navigateToRelated(pane: PaneState, targetTable: string, filterColumn: string, filterValue: any) {
+  async function navigateToRelated(pane: PaneState, targetTable: string | TableRef, filterColumn: string, filterValue: any) {
     const tab = getPaneTab(pane)
     if (!tab) return
     const filter = {
       match_all: true,
       rows: [{ active: true, column: filterColumn, operator: 'equals', value: String(filterValue) }],
     }
-    await loadTableData(targetTable, tab.connectionId, tab.database, filter, pane.id)
+    await loadTableData(targetTable, tab.connectionId, typeof targetTable === 'string' ? tab.database : targetTable.catalog, filter, pane.id)
     pane.showFilters = true
   }
 

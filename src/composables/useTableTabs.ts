@@ -1,3 +1,5 @@
+import type { TableRef } from '@/types/database'
+import { tableReferenceKey } from '@/lib/tableReference'
 import { type Ref } from 'vue'
 import { useConnectionStore } from '@/stores/connections'
 import type { PaneState, TableTab, QueryTab } from '@/types/workspace'
@@ -12,7 +14,7 @@ interface WorkspaceContext {
   focusedPaneId: Ref<string | null>
   getPane: (paneId?: string) => PaneState
   getPaneTab: (pane: PaneState) => TableTab | null
-  getPrimaryKey: (pane: PaneState) => string | null
+  getPrimaryKey: (pane: PaneState) => string[] | null
   getPaneConnection: (pane: PaneState) => any
   addPane: () => string
   removePane: (paneId: string) => void
@@ -69,7 +71,8 @@ export function useTableTabs(ctx: WorkspaceContext) {
     // Use getPaneTab to get the reactive proxy, not the local plain-object reference
     const tab = getPaneTab(pane)
     if (!tab) { console.error('[fetchInitialTabData] getPaneTab returned null'); return }
-    const { connectionId, database, tableName } = tab
+    const { connectionId, database } = tab
+    const tableName = tab.reference ?? tab.tableName
     const [queryResult, tableStructure] = await Promise.all([
       store.fetchTableData(connectionId, database, tableName, page, pageSize, filters, sort).catch((e: any) => {
         console.error('[fetchTableData]', e);
@@ -86,7 +89,8 @@ export function useTableTabs(ctx: WorkspaceContext) {
     const tab = getPaneTab(pane)
     if (!tab || tab.metadataLoaded || tab.metadataLoading) return
     tab.metadataLoading = true
-    const { connectionId, database, tableName } = tab
+    const { connectionId, database } = tab
+    const tableName = tab.reference ?? tab.tableName
     try {
       const [tableIndexes, foreignKeys, ddl] = await Promise.all([
         store.fetchTableIndexes(connectionId, database, tableName).catch((e: any) => { console.error('[fetchTableIndexes]', e); return [] }),
@@ -128,12 +132,14 @@ export function useTableTabs(ctx: WorkspaceContext) {
   }
 
   async function loadTableData(
-    tableName: string,
+    table: string | TableRef,
     connectionId: string,
     database: string,
     initialFilter?: any,
     paneId?: string,
   ) {
+    const reference = store.tableReference(connectionId, database, table)
+    const tableName = reference.name
     let pane = getPane(paneId)
     if (!paneId) {
       // TablePlus-like default: opening a table uses the active pane.
@@ -143,7 +149,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     if (!initialFilter) {
       const existing = pane.tabs.find(t =>
         t.type === 'table' &&
-        (t as TableTab).tableName === tableName &&
+        tableReferenceKey((t as TableTab).reference ?? store.tableReference(connectionId, database, (t as TableTab).tableName)) === tableReferenceKey(reference) &&
         (t as TableTab).database === database &&
         t.connectionId === connectionId,
       )
@@ -151,7 +157,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     }
     const id = crypto.randomUUID()
     const tab: TableTab = {
-      type: 'table', id, connectionId, tableName, database,
+      type: 'table', id, connectionId, tableName, database, reference,
       queryResult: null, exactCountLoading: false, metadataLoading: false, metadataLoaded: false, tableStructure: [], tableIndexes: [], foreignKeys: [], ddl: null,
       page: 0, pageSize: pane.pageSize, viewMode: 'content',
       filters: initialFilter ?? null, sortColumn: null, sortDesc: false,
@@ -191,7 +197,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
       tab.queryResult = await store.fetchTableData(
         tab.connectionId,
         tab.database,
-        tab.tableName,
+        tab.reference ?? tab.tableName,
         pane.page,
         pane.pageSize,
         tab.filters,
@@ -232,7 +238,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
         const nextResult = await store.fetchTableData(
           tab.connectionId,
           tab.database,
-          tab.tableName,
+          tab.reference ?? tab.tableName,
           nextPage,
           pane.pageSize,
           tab.filters,
@@ -251,7 +257,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     }
 
     pane.page += delta; tab.page = pane.page; tab.keysetPage = undefined
-    tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
+    tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.reference ?? tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
   }
 
   async function changeLimit(pane: PaneState, newLimit: number) {
@@ -263,7 +269,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     pane.page = Math.floor(offset / newLimit); tab.page = pane.page
     tab.keysetPage = undefined
     tab.selectedRowPk = null; tab.inlineEditColumn = null
-    tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
+    tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.reference ?? tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
   }
 
   async function gotoOffset(pane: PaneState, newOffset: number) {
@@ -273,7 +279,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     tab.selectedRowPk = null; tab.inlineEditColumn = null
     pane.page = Math.floor(newOffset / pane.pageSize); tab.page = pane.page
     tab.keysetPage = undefined
-    tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
+    tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.reference ?? tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
   }
 
   async function onSortColumn(pane: PaneState, column: string) {
@@ -284,7 +290,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     tab.selectedRowPk = null; tab.inlineEditColumn = null
     pane.page = 0; tab.page = 0
     tab.keysetPage = undefined
-    tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.tableName, 0, pane.pageSize, tab.filters, sortPayload(tab))
+    tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.reference ?? tab.tableName, 0, pane.pageSize, tab.filters, sortPayload(tab))
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────

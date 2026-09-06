@@ -1,5 +1,5 @@
 use crate::connections::Connection;
-use crate::driver::DatabaseDriver;
+use crate::database::driver::DatabaseDriver;
 use crate::saved_queries::SavedQuery;
 use crate::ssh::SshTunnel;
 use parking_lot::RwLock;

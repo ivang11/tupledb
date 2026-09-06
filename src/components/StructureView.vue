@@ -110,7 +110,7 @@
                   class="inline-flex items-center gap-1 text-(--acc)"
                 >
                   <ArrowRightIcon class="size-3 shrink-0" />
-                  {{ fkMap[col.field].table }}.{{ fkMap[col.field].column }}
+                  {{ tableLabel(fkMap[col.field].table) }}.{{ fkMap[col.field].column }}
                 </span>
                 <span v-else class="text-(--fg-5)">—</span>
               </td>
@@ -144,6 +144,8 @@
 </template>
 
 <script setup lang="ts">
+import type { TableRef } from '@/types/database'
+import { tableLabel } from '@/lib/tableReference'
 import { nextTick, ref } from "vue";
 import { ArrowRightIcon, CodeIcon } from "lucide-vue-next";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -160,7 +162,7 @@ interface ColumnStructure {
 const props = withDefaults(defineProps<{
   tableStructure: ColumnStructure[];
   tableIndexes: any[];
-  fkMap: Record<string, { table: string; column: string }>;
+  fkMap: Record<string, { table: string | TableRef; column: string }>;
   ddl: string | null;
   metadataLoading?: boolean;
   metadataLoaded?: boolean;

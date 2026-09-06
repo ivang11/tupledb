@@ -34,6 +34,16 @@ description = "Allows establishing an active connection"
 commands.allow = ["connect"]
 
 [[permission]]
+identifier = "allow-disconnect"
+description = "Allows closing an active connection"
+commands.allow = ["disconnect"]
+
+[[permission]]
+identifier = "allow-get-available-drivers"
+description = "Allows listing implemented database adapters"
+commands.allow = ["get_available_drivers"]
+
+[[permission]]
 identifier = "allow-export-connections"
 description = "Allows exporting connections to a JSON file"
 commands.allow = ["export_connections"]

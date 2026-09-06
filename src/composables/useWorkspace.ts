@@ -1,3 +1,5 @@
+import type { TableRef } from '@/types/database'
+import { primaryKeyColumns } from '@/lib/tableIdentity'
 import { ref, type Ref } from 'vue'
 import { useConnectionStore } from '@/stores/connections'
 import type { Connection } from '@/types/connection'
@@ -83,10 +85,10 @@ export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
     return pane.tabs.filter((t): t is QueryTab => t.type === 'query')
   }
 
-  function getPrimaryKey(pane: PaneState): string | null {
+  function getPrimaryKey(pane: PaneState): string[] | null {
     const tab = getPaneTab(pane)
     if (!tab) return null
-    return (tab.tableStructure as any[]).find(c => c.key === 'PRI')?.field || null
+    return primaryKeyColumns(tab.tableStructure)
   }
 
   function hasPendingChangesInPane(pane: PaneState): boolean {
@@ -95,30 +97,15 @@ export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
     return pendingTabsForDatabase(panes.value, tab).length > 0
   }
 
-  function getFkMap(pane: PaneState): Record<string, { table: string; column: string }> {
+  function getFkMap(pane: PaneState): Record<string, { table: string | TableRef; column: string }> {
     const tab = getPaneTab(pane)
     if (!tab) return {}
-    const map: Record<string, { table: string; column: string }> = {}
-    for (const fk of tab.foreignKeys as any[]) {
-      map[fk.column] = { table: fk.referenced_table, column: fk.referenced_column }
-    }
-    const connTables = store.openConnections[tab.connectionId]?.tables[tab.database] ?? []
-    const tableNames = (connTables as any[]).map((t: any) => t.name.toLowerCase())
-    const heuristicCols = [
-      ...((tab.queryResult as any)?.columns ?? []).map((c: any) => c.name),
-      ...((tab.tableStructure as any[]) ?? []).map((c: any) => c.field),
-    ]
-    for (const colName of heuristicCols) {
-      if (colName.endsWith('_id') && !map[colName]) {
-        const prefix = colName.slice(0, -3)
-        for (const candidate of [prefix + 's', prefix + 'es', prefix]) {
-          const i = tableNames.indexOf(candidate.toLowerCase())
-          if (i !== -1) {
-            map[colName] = { table: (connTables as any[])[i].name, column: 'id' }
-            break
-          }
-        }
-      }
+    const map: Record<string, { table: string | TableRef; column: string }> = {}
+    for (const fk of tab.foreignKeys) {
+      // A scalar shortcut cannot faithfully represent a composite relation.
+      // Keep its metadata available without navigating with a partial key.
+      if (tab.foreignKeys.filter(other => other.constraint_name === fk.constraint_name).length !== 1) continue
+      map[fk.column] = { table: fk.referenced, column: fk.referenced_column }
     }
     return map
   }

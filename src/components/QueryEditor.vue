@@ -79,7 +79,7 @@
       <button
         v-if="isRunning"
         @click="cancelQuery"
-        :disabled="cancelButtonState.disabled"
+        :disabled="cancelButtonState.disabled || !canCancelQuery"
         class="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-bold bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-destructive/20"
         title="Cancel query"
       >
@@ -409,7 +409,8 @@ import DataGrid from '@/components/DataGrid.vue'
 import type { SavedQuery } from '@/types/savedQuery'
 import { EditorView, basicSetup } from 'codemirror'
 import { placeholder, keymap } from '@codemirror/view'
-import { MySQL } from '@codemirror/lang-sql'
+import { MySQL, PostgreSQL, SQLite } from '@codemirror/lang-sql'
+import { databaseEngines } from '@/lib/databaseEngines'
 import { EditorState, Compartment } from '@codemirror/state'
 import { useKeybindings } from '@/composables/useKeybindings'
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
@@ -467,6 +468,10 @@ const HISTORY_PANEL_WIDTH_KEY = 'tupledb:history-panel-width'
 const MAX_HISTORY = 100
 
 const connStore = useConnectionStore()
+const canCancelQuery = computed(() => connStore.openConnections[props.connectionId]?.capabilities.cancelQuery ?? false)
+const engine = computed(() => connStore.openConnections[props.connectionId]?.connection.database.engine ?? 'mysql')
+const sqlDialect = computed(() => ({ mysql: MySQL, postgresql: PostgreSQL, sqlite: SQLite })[engine.value])
+const dialectCompartment = new Compartment()
 const savedStore = useSavedQueriesStore()
 
 // Cache of fetched column names keyed by table name
@@ -769,7 +774,7 @@ async function runQuery() {
 }
 
 async function cancelQuery() {
-  if (!cancelButtonState.value.canRequestCancel || !activeQueryId.value) return
+  if (!canCancelQuery.value || !cancelButtonState.value.canRequestCancel || !activeQueryId.value) return
   isCancelling.value = true
   try {
     await invoke('cancel_query', {
@@ -787,7 +792,7 @@ async function cancelQuery() {
 function beautify() {
   if (!sql.value.trim()) return
   try {
-    sql.value = formatSql(sql.value, { language: 'mysql', tabWidth: 2, keywordCase: 'upper' })
+    sql.value = formatSql(sql.value, { language: databaseEngines[engine.value].formatter, tabWidth: 2, keywordCase: 'upper' })
   } catch {
     // leave as-is if formatter fails
   }
@@ -962,6 +967,13 @@ function makeSqlCompletion() {
   }
 }
 
+watch(sqlDialect, (dialect) => {
+  editorView?.dispatch({ effects: dialectCompartment.reconfigure([
+    dialect.language,
+    dialect.language.data.of({ autocomplete: makeSqlCompletion() }),
+  ]) })
+})
+
 onMounted(() => {
   loadHistory()
   savedStore.fetch()
@@ -977,8 +989,10 @@ onMounted(() => {
           { key: kb.getCodeMirrorKey('formatQuery'), run: () => { beautify(); return true } },
         ])),
         basicSetup,
-        MySQL.language,
-        MySQL.language.data.of({ autocomplete: makeSqlCompletion() }),
+        dialectCompartment.of([
+          sqlDialect.value.language,
+          sqlDialect.value.language.data.of({ autocomplete: makeSqlCompletion() }),
+        ]),
         syntaxHighlighting(sqlHighlight, { fallback: true }),
         darkTheme,
         placeholder(`SELECT * FROM table WHERE ...  (${kb.getBinding('runQuery')} to run)`),

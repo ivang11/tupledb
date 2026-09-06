@@ -12,7 +12,7 @@
           {{
             isEdit
               ? "Update your connection settings"
-              : "Configure your MySQL connection settings"
+              : `Configure your ${engineLabel} connection settings`
           }}
         </DialogDescription>
       </DialogHeader>
@@ -66,7 +66,7 @@
 
         <Separator />
 
-        <div class="space-y-4">
+        <div v-if="connection.database.engine === 'mysql'" class="space-y-4">
           <div
             class="flex items-center gap-2 text-xs font-bold text-muted-foreground uppercase tracking-wider"
           >
@@ -75,22 +75,22 @@
           <div class="grid grid-cols-12 gap-3">
             <div class="col-span-8 space-y-2">
               <Label>Host</Label>
-              <Input v-model="connection.mysql.host" placeholder="127.0.0.1" />
+              <Input v-model="connection.database.settings.host" placeholder="127.0.0.1" />
             </div>
             <div class="col-span-4 space-y-2">
               <Label>Port</Label>
-              <Input v-model.number="connection.mysql.port" type="number" />
+              <Input v-model.number="connection.database.settings.port" type="number" />
             </div>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div class="space-y-2">
               <Label>User</Label>
-              <Input v-model="connection.mysql.user" placeholder="root" />
+              <Input v-model="connection.database.settings.user" placeholder="root" />
             </div>
             <div class="space-y-2">
               <Label>Password</Label>
               <Input
-                v-model="connection.mysql.password"
+                v-model="connection.database.settings.password"
                 type="password"
                 :placeholder="
                   isEdit ? 'Leave blank to keep existing' : '••••••••'
@@ -107,7 +107,7 @@
                 ></Label
               >
               <Input
-                v-model="connection.mysql.database"
+                v-model="connection.database.settings.database"
                 placeholder="Leave blank to pick after connecting"
               />
             </div>
@@ -129,6 +129,10 @@
         </div>
 
         <Separator />
+
+        <p v-if="!isAvailable" class="text-xs text-muted-foreground">
+          {{ engineLabel }} connections are not available in this version.
+        </p>
 
         <!-- SSH Tunnel -->
         <div class="space-y-4">
@@ -263,7 +267,7 @@
         <div class="flex gap-2">
           <Button
             variant="outline"
-            :disabled="isTesting || isSaving"
+            :disabled="isTesting || isSaving || !isAvailable"
             @click="test"
           >
             {{ isTesting ? "Testing..." : "Test" }}
@@ -277,7 +281,7 @@
           </Button>
           <Button
             v-if="showConnectButton"
-            :disabled="isSaving || !connection.name"
+            :disabled="isSaving || !connection.name || !isAvailable"
             @click="emit('save', buildConn(), true)"
           >
             {{ isSaving ? "Saving..." : "Save & Connect" }}
@@ -289,7 +293,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, toRaw, ref, watch } from "vue";
+import { databaseEngines } from '@/lib/databaseEngines';
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useConnectionStore } from "@/stores/connections";
 import type { Connection } from "@/types/connection";
@@ -329,6 +334,8 @@ const emit = defineEmits<{
 }>();
 
 const store = useConnectionStore();
+const engineLabel = computed(() => databaseEngines[props.connection.database.engine].label);
+const isAvailable = computed(() => store.availableDrivers.some(driver => driver.engine === props.connection.database.engine));
 
 const sshEnabled = ref(false);
 const sshAuthType = ref<"password" | "key">("password");
@@ -382,11 +389,13 @@ watch(
 
 function buildConn(): Connection {
   const conn = { ...props.connection };
-  conn.mysql = { ...props.connection.mysql };
-  const password = conn.mysql.password?.trim() ?? "";
-  const database = conn.mysql.database?.trim() ?? "";
-  conn.mysql.password = password || undefined;
-  conn.mysql.database = database || undefined;
+  conn.database = structuredClone(toRaw(props.connection.database));
+  if (conn.database.engine !== "sqlite") {
+    // Whitespace can be part of a password; preserve it exactly.
+    conn.database.settings.password ||= undefined;
+    const database = conn.database.settings.database?.trim();
+    if (conn.database.engine === "mysql") conn.database.settings.database = database || undefined;
+  }
 
   if (sshEnabled.value) {
     conn.ssh = {

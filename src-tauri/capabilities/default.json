@@ -28,6 +28,8 @@
     "allow-remove-connection",
     "allow-test-connection",
     "allow-connect",
+    "allow-disconnect",
+    "allow-get-available-drivers",
     "allow-get-databases",
     "allow-get-database-creation-options",
     "allow-get-tables",

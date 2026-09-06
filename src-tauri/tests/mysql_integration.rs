@@ -1,7 +1,12 @@
-use app_lib::driver::{DatabaseDriver, KeysetPage, RowChange, RowDeletion, TableChange};
+use app_lib::database::driver::{
+    CatalogDriver, DatabaseDriver, EditDriver, ImportDriver, KeysetPage, QueryDriver, RowChange,
+    RowDeletion, TableChange, TableRef,
+};
+use app_lib::database::drivers::mysql::MySqlDriver;
 use app_lib::filters::{FilterRow, FilterSet, Operator};
-use app_lib::mysql::{export_table_file, MySqlDriver};
-use app_lib::schema::{export_database_file, import_sql_file, ExportOptions};
+use app_lib::services::transfers::{
+    export_database_file, export_table_file, import_sql_file, ExportOptions,
+};
 use serde_json::{json, Value};
 use sqlx::{MySqlPool, Row};
 use std::sync::{Arc, Mutex};
@@ -14,6 +19,208 @@ async fn test_pool() -> MySqlPool {
     MySqlPool::connect(&url)
         .await
         .expect("connect to TUPLEDB_TEST_MYSQL_URL")
+}
+
+fn key_part(column: &str, value: Value) -> TableChange {
+    TableChange {
+        column: column.into(),
+        value,
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
+async fn composite_identity_edits_one_row_and_rejects_incomplete_keys() {
+    let pool = test_pool().await;
+    let db = setup_database(&pool).await;
+    let driver = MySqlDriver::new(pool.clone(), false);
+    let target = TableRef::new(&db, "compound`table");
+    sqlx::raw_sql(&format!(
+        "CREATE TABLE `{db}`.`compound``table` (
+            id INT NOT NULL, tenant INT NOT NULL, note VARCHAR(64),
+            generated_id INT GENERATED ALWAYS AS (id + 1) STORED,
+            PRIMARY KEY (tenant, id));
+         INSERT INTO `{db}`.`compound``table` (id, tenant, note) VALUES (2,1,'second'), (1,1,'first'), (1,2,'other');"
+    )).execute(&pool).await.unwrap();
+    let structure = driver.get_table_structure(&target).await.unwrap();
+    assert_eq!(structure[0].primary_key_position, Some(2));
+    assert_eq!(structure[1].primary_key_position, Some(1));
+    assert!(structure[3].is_generated);
+    assert_eq!(
+        serde_json::to_value(&structure[0].value_kind).unwrap(),
+        json!("integer")
+    );
+    let page = driver
+        .get_table_data(&target, 1, 1, None, None, None, true, None)
+        .await
+        .unwrap();
+    assert_eq!(page.rows[0]["note"], json!("second"));
+    assert!(driver
+        .get_table_data(
+            &target,
+            0,
+            1,
+            None,
+            None,
+            None,
+            true,
+            Some(KeysetPage {
+                column: "tenant".into(),
+                value: json!(1),
+                direction: "next".into(),
+            })
+        )
+        .await
+        .is_err());
+
+    let error = driver
+        .apply_table_changes(
+            &target,
+            vec![],
+            vec![RowDeletion {
+                key: vec![key_part("tenant", json!(1))],
+            }],
+            false,
+        )
+        .await
+        .unwrap_err();
+    assert!(error.contains("complete"));
+    assert!(driver
+        .apply_table_changes(
+            &target,
+            vec![],
+            vec![RowDeletion {
+                key: vec![key_part("tenant", json!(1)), key_part("tenant", json!(1))],
+            }],
+            false
+        )
+        .await
+        .is_err());
+    assert!(driver
+        .apply_table_changes(
+            &target,
+            vec![RowChange {
+                key: vec![key_part("tenant", json!(1)), key_part("id", json!(1))],
+                changes: vec![key_part("generated_id", json!(99))],
+            }],
+            vec![],
+            false
+        )
+        .await
+        .is_err());
+
+    driver
+        .apply_table_changes(
+            &target,
+            vec![RowChange {
+                key: vec![key_part("tenant", json!(1)), key_part("id", json!(1))],
+                // Changing the PK and another column must be one atomic UPDATE.
+                changes: vec![key_part("id", json!(3)), key_part("note", json!("changed"))],
+            }],
+            vec![RowDeletion {
+                key: vec![key_part("tenant", json!(1)), key_part("id", json!(2))],
+            }],
+            false,
+        )
+        .await
+        .unwrap();
+    let result = driver.get_all_rows(&target).await.unwrap();
+    assert_eq!(result.1.len(), 2);
+    assert!(result
+        .1
+        .iter()
+        .any(|r| r["tenant"] == 1 && r["id"] == 3 && r["note"] == "changed"));
+    assert!(result
+        .1
+        .iter()
+        .any(|r| r["tenant"] == 2 && r["id"] == 1 && r["note"] == "other"));
+
+    let invalid = TableRef {
+        schema: Some("public".into()),
+        ..target.clone()
+    };
+    assert!(driver.get_all_rows(&invalid).await.is_err());
+    assert!(driver.drop_table(&invalid, false).await.is_err());
+    driver.get_table_ddl(&target).await.unwrap();
+    driver.drop_table(&target, false).await.unwrap();
+    drop_database(&pool, &db).await;
+}
+
+#[tokio::test]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
+async fn exact_values_and_literal_insert_text_round_trip() {
+    let pool = test_pool().await;
+    let db = setup_database(&pool).await;
+    let driver = MySqlDriver::new(pool.clone(), false);
+    let target = TableRef::new(&db, "exact_values");
+    sqlx::query(&format!(
+        "CREATE TABLE `{db}`.exact_values (
+        id BIGINT UNSIGNED PRIMARY KEY, signed_value BIGINT,
+        amount DECIMAL(65,30), note VARCHAR(64), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let amount = "12345678901234567890123456789012345.123456789012345678901234567890";
+    driver
+        .insert_row(
+            &target,
+            vec![
+                key_part("id", json!("18446744073709551615")),
+                key_part("signed_value", json!("-9223372036854775808")),
+                key_part("amount", json!(amount)),
+                key_part("note", json!("NOW()")),
+            ],
+            false,
+        )
+        .await
+        .unwrap();
+    let (_, rows) = driver.get_all_rows(&target).await.unwrap();
+    assert_eq!(rows[0]["id"], json!("18446744073709551615"));
+    assert_eq!(rows[0]["signed_value"], json!("-9223372036854775808"));
+    assert_eq!(rows[0]["amount"], json!(amount));
+    assert_eq!(rows[0]["note"], json!("NOW()"));
+    assert!(!rows[0]["created_at"].is_null());
+    driver
+        .apply_table_changes(
+            &target,
+            vec![RowChange {
+                key: vec![key_part("id", json!("18446744073709551615"))],
+                changes: vec![key_part("note", json!("NULL"))],
+            }],
+            vec![],
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        driver.get_all_rows(&target).await.unwrap().1[0]["note"],
+        json!("NULL")
+    );
+    drop_database(&pool, &db).await;
+}
+
+#[tokio::test]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
+async fn foreign_key_metadata_preserves_constraint_order_and_catalog() {
+    let pool = test_pool().await;
+    let db = setup_database(&pool).await;
+    let driver = MySqlDriver::new(pool.clone(), false);
+    sqlx::raw_sql(&format!("CREATE TABLE `{db}`.parent (tenant INT, id INT, PRIMARY KEY(tenant,id));
+        CREATE TABLE `{db}`.child (tenant INT, parent_id INT,
+        CONSTRAINT related_parent FOREIGN KEY (tenant, parent_id) REFERENCES `{db}`.parent(tenant,id));"))
+        .execute(&pool).await.unwrap();
+    let keys = driver
+        .get_foreign_keys(&TableRef::new(&db, "child"))
+        .await
+        .unwrap();
+    assert_eq!(keys.len(), 2);
+    assert_eq!(keys[0].constraint_name, "related_parent");
+    assert_eq!(keys[1].constraint_name, keys[0].constraint_name);
+    assert_eq!((keys[0].position, keys[1].position), (1, 2));
+    assert_eq!(keys[0].referenced, TableRef::new(&db, "parent"));
+    assert_eq!(keys[1].referenced_column, "id");
+    drop_database(&pool, &db).await;
 }
 
 async fn setup_database(pool: &MySqlPool) -> String {
@@ -77,8 +284,7 @@ async fn get_table_data_preserves_null_empty_and_common_types() {
 
     let result = driver
         .get_table_data(
-            &db,
-            "people",
+            &TableRef::new(&db, "people"),
             0,
             10,
             None,
@@ -127,8 +333,7 @@ async fn filters_and_sort_are_applied_by_driver() {
 
     let result = driver
         .get_table_data(
-            &db,
-            "people",
+            &TableRef::new(&db, "people"),
             0,
             10,
             Some(filters),
@@ -161,8 +366,7 @@ async fn keyset_pagination_fetches_next_page_after_cursor() {
 
     let first_page = driver
         .get_table_data(
-            &db,
-            "people",
+            &TableRef::new(&db, "people"),
             0,
             2,
             None,
@@ -177,8 +381,7 @@ async fn keyset_pagination_fetches_next_page_after_cursor() {
 
     let second_page = driver
         .get_table_data(
-            &db,
-            "people",
+            &TableRef::new(&db, "people"),
             1,
             2,
             None,
@@ -225,8 +428,7 @@ async fn views_are_listed_as_views_and_readable() {
 
     let result = driver
         .get_table_data(
-            &db,
-            "active_people",
+            &TableRef::new(&db, "active_people"),
             0,
             10,
             None,
@@ -253,7 +455,7 @@ async fn get_table_structure_marks_primary_key_and_nullable_columns() {
     seed_people(&pool, &db).await;
 
     let structure = driver
-        .get_table_structure(&db, "people")
+        .get_table_structure(&TableRef::new(&db, "people"))
         .await
         .expect("fetch table structure");
     let id = structure.iter().find(|col| col.field == "id").unwrap();
@@ -317,8 +519,7 @@ async fn import_session_executes_representative_dump_in_batches() {
 
     let result = driver
         .get_table_data(
-            &db,
-            "imported",
+            &TableRef::new(&db, "imported"),
             0,
             10,
             None,
@@ -353,7 +554,7 @@ async fn import_sql_file_runs_dump_and_reports_metrics() {
     let import_id = format!("import_file_{}", Uuid::new_v4().simple());
     let path = std::env::temp_dir().join(format!("{}.sql", import_id));
     let large_note = "x".repeat(700_000);
-    let dump = format!(
+    let mut dump = format!(
         "-- leading comment
         CREATE TABLE imported_file (
             id INT PRIMARY KEY,
@@ -369,6 +570,9 @@ async fn import_sql_file_runs_dump_and_reports_metrics() {
         ",
         large_note, large_note
     );
+    // Force statement-count batching independently of the server packet limit.
+    let extra_statements = 5_001;
+    dump.push_str(&"SET @tupledb_test_batch = 1;\n".repeat(extra_statements));
     std::fs::write(&path, dump).expect("write import dump");
 
     let progress_statuses = Arc::new(Mutex::new(Vec::new()));
@@ -386,9 +590,9 @@ async fn import_sql_file_runs_dump_and_reports_metrics() {
     .await
     .expect("import sql file");
 
-    assert_eq!(result.executed, 6);
+    assert_eq!(result.executed, 6 + extra_statements);
     assert!(result.errors.is_empty());
-    assert_eq!(result.metrics.parsed_statements, 6);
+    assert_eq!(result.metrics.parsed_statements, 6 + extra_statements);
     assert!(result.metrics.compacted_statements >= 2);
     assert!(result.metrics.executed_batches >= 2);
     assert!(result.metrics.sql_blocks >= 2);
@@ -400,8 +604,7 @@ async fn import_sql_file_runs_dump_and_reports_metrics() {
 
     let rows = driver
         .get_table_data(
-            &db,
-            "imported_file",
+            &TableRef::new(&db, "imported_file"),
             0,
             10,
             None,
@@ -474,7 +677,7 @@ async fn export_table_file_writes_csv_json_sql_and_sql_can_be_reimported() {
         let rows = export_table_file(
             driver.clone(),
             db.clone(),
-            "exported_table".to_string(),
+            TableRef::new(&db, "exported_table"),
             format.to_string(),
             path.to_str()
                 .expect("temp path should be utf-8")
@@ -528,8 +731,7 @@ async fn export_table_file_writes_csv_json_sql_and_sql_can_be_reimported() {
 
     let reimported = driver
         .get_table_data(
-            &reimport_db,
-            "exported_table",
+            &TableRef::new(&reimport_db, "exported_table"),
             0,
             10,
             None,
@@ -593,7 +795,7 @@ async fn export_database_file_writes_full_dump_and_sql_can_be_reimported() {
     .execute(&pool)
     .await
     .expect("create books");
-    sqlx::query(&format!(
+    sqlx::raw_sql(&format!(
         "INSERT INTO `{}`.`authors` (id, name) VALUES
             (1, 'Ada'),
             (2, 'Grace');
@@ -652,8 +854,7 @@ async fn export_database_file_writes_full_dump_and_sql_can_be_reimported() {
 
     let authors = driver
         .get_table_data(
-            &reimport_db,
-            "authors",
+            &TableRef::new(&reimport_db, "authors"),
             0,
             10,
             None,
@@ -666,8 +867,7 @@ async fn export_database_file_writes_full_dump_and_sql_can_be_reimported() {
         .expect("read reimported authors");
     let books = driver
         .get_table_data(
-            &reimport_db,
-            "books",
+            &TableRef::new(&reimport_db, "books"),
             0,
             10,
             None,
@@ -722,7 +922,7 @@ async fn destructive_operations_handle_fk_checks_and_unusual_names() {
     .execute(&pool)
     .await
     .expect("create child table");
-    sqlx::query(&format!(
+    sqlx::raw_sql(&format!(
         "INSERT INTO `{}`.`parent table` (id) VALUES (1);
          INSERT INTO `{}`.`child-table` (parent_id) VALUES (1)",
         db, db
@@ -732,7 +932,7 @@ async fn destructive_operations_handle_fk_checks_and_unusual_names() {
     .expect("insert fk rows");
 
     driver
-        .truncate_table(&db, "child-table", true)
+        .truncate_table(&TableRef::new(&db, "child-table"), true)
         .await
         .expect("truncate child with fk checks disabled");
     let remaining: i64 = sqlx::query(&format!("SELECT COUNT(*) FROM `{}`.`child-table`", db))
@@ -744,11 +944,11 @@ async fn destructive_operations_handle_fk_checks_and_unusual_names() {
     assert_eq!(remaining, 0);
 
     driver
-        .drop_table(&db, "parent table", true)
+        .drop_table(&TableRef::new(&db, "parent table"), true)
         .await
         .expect("drop parent with unusual name");
     driver
-        .drop_tables(&db, &["child-table".to_string()], true)
+        .drop_tables(&db, &[TableRef::new(&db, "child-table")], true)
         .await
         .expect("drop child in bulk");
 
@@ -786,7 +986,7 @@ async fn insert_row_and_apply_table_changes_preserve_edit_semantics() {
             id INT PRIMARY KEY,
             note VARCHAR(64) NULL,
             active TINYINT(1) NOT NULL,
-            created_at DATETIME NULL
+            created_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP
         )",
         db
     ))
@@ -796,8 +996,7 @@ async fn insert_row_and_apply_table_changes_preserve_edit_semantics() {
 
     driver
         .insert_row(
-            &db,
-            "edits",
+            &TableRef::new(&db, "edits"),
             vec![
                 TableChange {
                     column: "id".into(),
@@ -811,19 +1010,14 @@ async fn insert_row_and_apply_table_changes_preserve_edit_semantics() {
                     column: "active".into(),
                     value: json!(true),
                 },
-                TableChange {
-                    column: "created_at".into(),
-                    value: json!("NOW()"),
-                },
             ],
             false,
         )
         .await
-        .expect("insert row with expression");
+        .expect("insert row with server default");
     driver
         .insert_row(
-            &db,
-            "edits",
+            &TableRef::new(&db, "edits"),
             vec![
                 TableChange {
                     column: "id".into(),
@@ -845,11 +1039,12 @@ async fn insert_row_and_apply_table_changes_preserve_edit_semantics() {
 
     driver
         .apply_table_changes(
-            &db,
-            "edits",
+            &TableRef::new(&db, "edits"),
             vec![RowChange {
-                pk_column: "id".into(),
-                pk_value: json!(1),
+                key: vec![TableChange {
+                    column: "id".into(),
+                    value: json!(1),
+                }],
                 changes: vec![
                     TableChange {
                         column: "note".into(),
@@ -862,8 +1057,10 @@ async fn insert_row_and_apply_table_changes_preserve_edit_semantics() {
                 ],
             }],
             vec![RowDeletion {
-                pk_column: "id".into(),
-                pk_value: json!(2),
+                key: vec![TableChange {
+                    column: "id".into(),
+                    value: json!(2),
+                }],
             }],
             false,
         )
@@ -872,8 +1069,7 @@ async fn insert_row_and_apply_table_changes_preserve_edit_semantics() {
 
     let rows = driver
         .get_table_data(
-            &db,
-            "edits",
+            &TableRef::new(&db, "edits"),
             0,
             10,
             None,
@@ -939,8 +1135,7 @@ async fn rare_mysql_types_are_parsed_to_stable_json_values() {
 
     let result = driver
         .get_table_data(
-            &db,
-            "rare_types",
+            &TableRef::new(&db, "rare_types"),
             0,
             10,
             None,
@@ -1029,15 +1224,9 @@ async fn execute_query_streams_select_results_in_chunks() {
         let columns = columns
             .as_ref()
             .expect("first chunk should include columns");
-        columns
-            .iter()
-            .map(|c| c.name.clone())
-            .collect::<Vec<_>>()
+        columns.iter().map(|c| c.name.clone()).collect::<Vec<_>>()
     };
-    assert_eq!(
-        column_names,
-        vec!["id".to_string(), "label".to_string()]
-    );
+    assert_eq!(column_names, vec!["id".to_string(), "label".to_string()]);
     assert!(driver.get_thread_id_for_query("streaming-test").is_none());
 
     drop_database(&pool, &db).await;
@@ -1048,6 +1237,7 @@ async fn execute_query_streams_select_results_in_chunks() {
 async fn cancel_query_kills_running_select_and_cleans_tracking() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;
+    seed_people(&pool, &db).await;
     let driver = Arc::new(MySqlDriver::new(pool.clone(), false));
     let query_id = format!("cancel_{}", Uuid::new_v4().simple());
 
@@ -1058,7 +1248,7 @@ async fn cancel_query_kills_running_select_and_cleans_tracking() {
         query_driver
             .execute_query(
                 Some(&query_db),
-                "SELECT SLEEP(10) AS slept",
+                "SELECT id FROM people WHERE SLEEP(10) = 0",
                 Some(&query_id_for_task),
                 None,
                 None,
@@ -1079,8 +1269,9 @@ async fn cancel_query_kills_running_select_and_cleans_tracking() {
         tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
     };
 
+    wait_for_server_sleep(&pool, thread_id).await;
     driver
-        .kill_query(thread_id)
+        .cancel_query(&query_id)
         .await
         .expect("kill running query");
 
@@ -1129,14 +1320,11 @@ async fn abort_import_session_kills_running_batch_and_cleans_tracking() {
         tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
     };
 
+    wait_for_server_sleep(&pool, thread_id).await;
     driver
-        .abort_import_session(&import_id)
+        .cancel_import(&import_id)
         .await
         .expect("abort import session");
-    driver
-        .kill_connection(thread_id)
-        .await
-        .expect("kill import connection");
 
     let results = handle.await.expect("import task should not panic");
     assert_eq!(results.len(), 1);
@@ -1144,4 +1332,27 @@ async fn abort_import_session_kills_running_batch_and_cleans_tracking() {
     assert!(driver.get_thread_id_for_import(&import_id).is_none());
 
     drop_database(&pool, &db).await;
+}
+
+// Tracking is installed before USE / execution. Synchronize against server state
+// so these tests cancel an executing statement, not the setup preceding it.
+async fn wait_for_server_sleep(pool: &MySqlPool, thread_id: u64) {
+    let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(5);
+    loop {
+        let sleeping: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE ID = ? AND STATE = 'User sleep'"
+        )
+        .bind(thread_id)
+        .fetch_one(pool)
+        .await
+        .expect("inspect running test statement");
+        if sleeping > 0 {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "statement never started sleeping"
+        );
+        tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
+    }
 }

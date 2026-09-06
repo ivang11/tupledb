@@ -75,7 +75,7 @@
                   {{ virtualColumn.column.name }}
                 </span>
                 <span
-                  v-if="primaryKey === virtualColumn.column.name"
+                  v-if="isPrimaryKeyColumn(primaryKey, virtualColumn.column.name)"
                   class="text-[8px] font-black text-amber-500/90 border border-amber-500/30 bg-amber-500/8 px-1 py-px rounded shrink-0 leading-none"
                 >
                   PK
@@ -111,7 +111,7 @@
       <div role="rowgroup" class="relative" :style="{ height: bodyHeight + 'px' }">
         <div
           v-for="virtualRow in virtualRows"
-          :key="rowKey(virtualRow)"
+          :key="virtualRowKey(virtualRow)"
           role="row"
           class="group/row absolute left-0 transition-colors"
           :class="rowClasses(rows[virtualRow.index], virtualRow.index)"
@@ -126,8 +126,8 @@
             v-memo="[
               rows[virtualRow.index],
               virtualColumn.index,
-              pendingChanges[String(rawCellValue(rows[virtualRow.index], primaryKey || ''))],
-              pendingDeletions[String(rawCellValue(rows[virtualRow.index], primaryKey || ''))],
+              pendingChanges[rowKey(rows[virtualRow.index], primaryKey, columns)],
+              pendingDeletions[rowKey(rows[virtualRow.index], primaryKey, columns)],
               pendingTruncate,
               pendingDrop,
               selectedRowPk,
@@ -170,9 +170,9 @@
             />
 
             <!-- Inline edit -->
-            <template v-if="primaryKey && inlineEditColumn === virtualColumn.column.name && selectedRowPk === String(rawCellValue(rows[virtualRow.index], primaryKey))">
+            <template v-if="primaryKey && inlineEditColumn === virtualColumn.column.name && selectedRowPk === rowKey(rows[virtualRow.index], primaryKey, columns)">
               <input
-                :data-grid-edit="String(rawCellValue(rows[virtualRow.index], primaryKey))"
+                :data-grid-edit="rowKey(rows[virtualRow.index], primaryKey, columns)"
                 :data-col="virtualColumn.column.name"
                 :value="getCellValue(rows[virtualRow.index], virtualColumn.column.name)"
                 @input="(e) => emit('cell-input', rows[virtualRow.index], virtualColumn.column.name, (e.target as HTMLInputElement).value)"
@@ -215,7 +215,7 @@
                   type="button"
                   @click.stop="emit('navigate-related', fkMap[virtualColumn.column.name].table, fkMap[virtualColumn.column.name].column, rawCellValue(rows[virtualRow.index], virtualColumn.column.name))"
                   class="ml-1 shrink-0 text-foreground/80 hover:text-foreground transition-colors"
-                  :title="`Go to ${fkMap[virtualColumn.column.name].table}`"
+                  :title="`Go to ${tableLabel(fkMap[virtualColumn.column.name].table)}`"
                 >
                   <ArrowRightIcon class="size-3" />
                 </button>
@@ -268,6 +268,11 @@
 </template>
 
 <script setup lang="ts">
+import { tableLabel } from '@/lib/tableReference'
+import type { TableRef } from '@/types/database'
+
+import { rowKey, isPrimaryKeyColumn, type PrimaryKey } from '@/lib/tableIdentity'
+
 import { ref, computed, nextTick, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { ArrowUpIcon, ArrowDownIcon, ArrowUpDownIcon, ArrowRightIcon, DatabaseIcon } from 'lucide-vue-next'
@@ -277,7 +282,7 @@ import { rowValue } from '@/lib/rowAccess'
 const props = defineProps<{
   columns: any[]
   rows: any[]
-  primaryKey: string | null
+  primaryKey: PrimaryKey
   totalCount: number
   pendingChanges: Record<string, Record<string, any>>
   pendingDeletions: Record<string, boolean>
@@ -292,7 +297,7 @@ const props = defineProps<{
   insertRowValues: Record<string, string>
   pendingInserts: Array<{ values: Array<{ column: string; value: any }> }>
   columnWidths: Record<string, number>
-  fkMap: Record<string, { table: string; column: string }>
+  fkMap: Record<string, { table: string | TableRef; column: string }>
   bottomInset?: number
   isColAutoIncrement: (colName: string) => boolean
   isBooleanCol: (colName: string) => boolean
@@ -309,7 +314,7 @@ const emit = defineEmits<{
   'cell-input': [row: any, colName: string, value: string]
   'sort': [colName: string]
   'start-col-resize': [e: MouseEvent, colName: string]
-  'navigate-related': [table: string, column: string, value: any]
+  'navigate-related': [table: string | TableRef, column: string, value: any]
   'insert-row-input': [colName: string, value: string]
   'insert-row-submit': []
   'insert-row-cancel': []
@@ -411,13 +416,13 @@ function rowPositionStyle(start: number) {
   }
 }
 
-function rowKey(virtualRow: any) {
+function virtualRowKey(virtualRow: any) {
   const row = props.rows[virtualRow.index]
-  return props.primaryKey ? String(rawCellValue(row, props.primaryKey)) : virtualRow.index
+  return props.primaryKey ? rowKey(row, props.primaryKey, props.columns) : virtualRow.index
 }
 
 function rowSelectionKey(row: any, index: number) {
-  return props.primaryKey ? String(rawCellValue(row, props.primaryKey)) : `__row_index:${index}`
+  return props.primaryKey ? rowKey(row, props.primaryKey, props.columns) : `__row_index:${index}`
 }
 
 function isPkRow(row: any, index: number) {
@@ -426,15 +431,15 @@ function isPkRow(row: any, index: number) {
 
 function isMultiSelected(row: any) {
   if (!props.primaryKey) return false
-  return props.selectedRowPks.includes(String(rawCellValue(row, props.primaryKey)))
+  return props.selectedRowPks.includes(rowKey(row, props.primaryKey, props.columns))
 }
 
 function isPendingDelete(row: any) {
-  return !!props.pendingDeletions[String(rawCellValue(row, props.primaryKey || ''))]
+  return !!props.pendingDeletions[rowKey(row, props.primaryKey, props.columns)]
 }
 
 function isPendingChange(row: any, col: string) {
-  return props.pendingChanges[String(rawCellValue(row, props.primaryKey || ''))]?.[col] !== undefined
+  return props.pendingChanges[rowKey(row, props.primaryKey, props.columns)]?.[col] !== undefined
 }
 
 function rowClasses(row: any, index: number) {

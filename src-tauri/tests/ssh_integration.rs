@@ -15,8 +15,8 @@
 ///   export TUPLEDB_TEST_MYSQL_VIA_SSH_PASS=secret
 ///   cargo test --test ssh_integration -- --nocapture
 use app_lib::connections::{SshAuth, SshSettings};
-use app_lib::mysql::MySqlDriver;
-use app_lib::schema::import_sql_file;
+use app_lib::database::drivers::mysql::MySqlDriver;
+use app_lib::services::transfers::import_sql_file;
 use app_lib::ssh::SshTunnel;
 use sqlx::MySqlPool;
 use std::sync::{Arc, Mutex};

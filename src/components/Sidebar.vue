@@ -204,6 +204,7 @@
 </template>
 
 <script setup lang="ts">
+import { databaseEngines } from "@/lib/databaseEngines";
 import { ref, computed, nextTick, onMounted, onUnmounted } from "vue";
 import {
   SearchIcon,
@@ -421,9 +422,9 @@ function onClickOutsideDb(e: MouseEvent) {
 onMounted(() => document.addEventListener('mousedown', onClickOutsideDb))
 onUnmounted(() => document.removeEventListener('mousedown', onClickOutsideDb))
 const activeConnectionDetail = computed(() => {
-  return activeConnection.value?.serverVersion
-    ? `MySQL ${activeConnection.value.serverVersion}`
-    : 'MySQL'
+  const engine = activeConnection.value?.connection.database.engine
+  const label = engine ? databaseEngines[engine].label : ''
+  return activeConnection.value?.serverVersion ? `${label} ${activeConnection.value.serverVersion}` : label
 })
 const activeConnectionStatus = computed(() =>
   activeConnection.value?.status === "error" ? "Connection error" : "Connected",

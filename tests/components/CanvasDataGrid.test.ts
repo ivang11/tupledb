@@ -186,6 +186,17 @@ describe('CanvasDataGrid rendering and hit testing', () => {
     expect(pending.some(input => input.element.value === 'New row')).toBe(true)
   })
 
+  it('opens the editor for the complete composite key, not the first matching component', async () => {
+    const key = JSON.stringify([{ column: 'id', value: 1 }, { column: 'name', value: 'Bob' }])
+    const wrapper = await mountGrid({
+      rows: [{ id: 1, name: 'Alice', value: 'a' }, { id: 1, name: 'Bob', value: 'b' }],
+      primaryKey: ['id', 'name'], selectedRowPk: key, inlineEditColumn: 'name',
+    })
+    const editor = wrapper.get<HTMLInputElement>('[data-grid-edit]')
+    expect(editor.attributes('data-grid-edit')).toBe(key)
+    expect(editor.element.value).toBe('Bob')
+  })
+
   it('emits deletion only when focus is outside an editor', async () => {
     const wrapper = await mountGrid()
     await wrapper.trigger('keydown', { key: 'Delete' })
