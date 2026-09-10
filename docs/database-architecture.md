@@ -333,13 +333,19 @@ the forwarded localhost endpoint. `verify_ca`/`verify_full` require a PEM CA
 certificate (`PostgreSqlSettings::ssl_root_cert`, entered in the connection
 dialog); connecting fails fast with a clear error instead of a TLS handshake
 failure when it is missing, since most self-hosted servers use a private CA
-that the OS trust store does not already know about. TLS certificates and SSH
-have not yet been covered by real-server integration tests for this adapter.
+that the OS trust store does not already know about.
+
+SQLx 0.8.6 needs a narrow upstream backport to handle rustls's contextual
+hostname-mismatch errors in `verify_ca`. The pinned local core crate, provenance,
+security guarantees and removal criteria are documented in
+[`TUPLEDB-PATCH.md`](../src-tauri/vendor/sqlx-core/TUPLEDB-PATCH.md).
+This does not disable certificate-chain, expiry or signature verification, and
+does not change `verify_full` hostname verification.
 
 ## Next engine work
 
 1. Extend coverage of the remaining advanced database-local export objects listed
-   above, and verify additional server versions, TLS/SSH and packaged desktop UI.
+   above, and verify additional server versions and packaged desktop platforms.
 2. Add SQLite as a separate adapter with file-based connection configuration and
    its own transaction, metadata and type semantics.
 3. Keep each optional capability false until both backend and UI paths are ready.
@@ -358,6 +364,7 @@ npm run build
 cargo test --manifest-path src-tauri/Cargo.toml --lib --test connection_config
 TUPLEDB_TEST_MYSQL_URL=mysql://root@127.0.0.1:3306/mysql cargo test --manifest-path src-tauri/Cargo.toml --test mysql_integration -- --ignored
 TUPLEDB_TEST_POSTGRESQL_URL=postgres://postgres@127.0.0.1:5432/postgres cargo test --manifest-path src-tauri/Cargo.toml --test postgresql_integration -- --ignored --skip import_real_pg_dump
+node scripts/test-postgresql-transport.mjs
 ```
 
 Integration tests create and remove randomly named test databases. Use an
@@ -368,10 +375,22 @@ The test invokes pg_dump inside that container against its fixture-owned databas
 as `postgres`, then restores both COPY and INSERT dumps into fresh test databases.
 
 The PostgreSQL milestone is covered by 87 frontend unit tests, 55 component/store
-tests, 53 Rust unit tests, 8 configuration tests, 18 MySQL integration tests and
-34 PostgreSQL integration tests. The real-server suites run against isolated
-MySQL 8.4, PostgreSQL 16 and PostgreSQL 17 containers. Other PostgreSQL versions and a packaged
-desktop application's end-to-end behavior have not been verified here.
+tests, 54 Rust unit tests, 8 configuration tests, 18 MySQL integration tests and
+35 PostgreSQL integration tests. The real-server suites run against isolated
+MySQL 8.4, PostgreSQL 16 and PostgreSQL 17 containers.
+
+The transport runner requires Unix, Node, Cargo, Docker, OpenSSL 3 and OpenSSH.
+It provisions a disposable PostgreSQL 17/SSH server on random loopback ports,
+generates temporary certificates/keys, and isolates SSH configuration and
+known_hosts from the user's files. Its five tests cover 18 connection scenarios:
+all TLS modes, hostname mismatch, missing/wrong CA, invalid PEM, expired
+certificates, SSH, and SQL import/export/restore across catalog pools. The runner
+removes its container, volume and temporary keys even when a test fails.
+
+A packaged macOS app smoke test covered connecting without a database, browsing,
+single-click table loading, row editing, queries, database creation with encoding
+and collation, and SQL export/import/restore. Other PostgreSQL versions, Windows,
+Linux and signed/notarized distribution have not been verified here.
 
 Regression coverage includes full/structure-only and partial exports of domain
 and view defaults, repeated restores, renamed and quoted dependencies, sequence

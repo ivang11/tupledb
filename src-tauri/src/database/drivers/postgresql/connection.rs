@@ -155,7 +155,8 @@ mod tests {
                 password: Some(" password ".into()),
                 database: Some("app".into()),
                 ssl_mode: mode,
-                ssl_root_cert: needs_cert.then(|| "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----".into()),
+                ssl_root_cert: needs_cert
+                    .then(|| "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----".into()),
             };
             let options = ConnectOptions {
                 endpoint: Some(("127.0.0.1", 6543)),
@@ -204,7 +205,8 @@ mod tests {
             .contains("verify_full"));
         settings.database = None;
         options.tunneled = false;
-        settings.ssl_root_cert = Some("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----".into());
+        settings.ssl_root_cert =
+            Some("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----".into());
         assert_eq!(
             connect_options(&settings, &options, "postgres")
                 .unwrap()
@@ -252,7 +254,8 @@ mod tests {
             .unwrap_err()
             .contains("CA certificate"));
 
-        settings.ssl_root_cert = Some("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----".into());
+        settings.ssl_root_cert =
+            Some("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----".into());
         assert!(connect_options(&settings, &options, "app").is_ok());
 
         // Modes below verify-ca never need a certificate.

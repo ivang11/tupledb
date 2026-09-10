@@ -36,6 +36,11 @@ tempfile = "3"
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+# Backport upstream SQLx #3861 without migrating the query APIs to 0.9.
+# See vendor/sqlx-core/TUPLEDB-PATCH.md for provenance and removal criteria.
+[patch.crates-io]
+sqlx-core = { path = "vendor/sqlx-core" }
+
 [profile.dev]
 opt-level = 0
 incremental = true
