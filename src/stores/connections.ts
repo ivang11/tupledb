@@ -244,11 +244,20 @@ export const useConnectionStore = defineStore('connections', () => {
   }
 
   async function fetchTableDdl(connectionId: string, database: string, tableName: string | TableRef) {
+    // An unsupported optional feature is not a failed database connection.
+    const capabilities = openConnections.value[connectionId]?.capabilities
+    if ((capabilities?.inspectDdl ?? capabilities?.exportSql) === false) return null
     try {
       const result = await invoke<string>('get_table_ddl', { connectionId, database, table: tableReference(connectionId, database, tableName) })
       markConnectionConnected(connectionId)
       return result
     } catch (error) {
+      const message = String(error)
+      if (message.startsWith('Cannot inspect ') || message === 'Circular DDL dependencies') {
+        // Object-specific export limitations must not mark a live connection
+        // offline. Show the reason in the DDL panel as non-executable comments.
+        return message.split(/[\r\n]+/).map(line => `-- ${line}`).join('\n')
+      }
       markConnectionError(connectionId, error)
       return null
     }

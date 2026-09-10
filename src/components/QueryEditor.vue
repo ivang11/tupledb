@@ -383,6 +383,7 @@
 </template>
 
 <script setup lang="ts">
+import { tableSqlName } from "@/lib/tableReference"
 import { ref, shallowRef, triggerRef, computed, markRaw, onMounted, onBeforeUnmount, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
@@ -867,7 +868,7 @@ function buildCurrentSchema(): Record<string, string[]> {
   if (!db) return {}
   const tables = connStore.openConnections[props.connectionId]?.tables[db] ?? []
   const schema: Record<string, string[]> = {}
-  for (const t of tables) schema[t.name] = []
+  for (const t of tables) schema[tableSqlName(t.reference)] = []
   // Merge column info from tabs that have loaded this table's structure
   if (props.openTabsSchema) {
     for (const [table, cols] of Object.entries(props.openTabsSchema)) {
@@ -891,11 +892,9 @@ async function ensureColumnsForTables(tableNames: string[]) {
   if (toFetch.length === 0) return
   await Promise.all(toFetch.map(async (t) => {
     try {
-      const structure = await invoke<any[]>('get_table_structure', {
-        connectionId: props.connectionId,
-        database: db,
-        table: t,
-      })
+      const table = connStore.openConnections[props.connectionId]?.tables[db]?.find(table => tableSqlName(table.reference) === t)
+      if (!table) return
+      const structure = await connStore.fetchTableStructure(props.connectionId, db, table.reference)
       columnCache.value[t] = structure.map((c: any) => c.field)
     } catch {
       columnCache.value[t] = []
@@ -930,7 +929,7 @@ function makeSqlCompletion() {
 
     // Detect tables referenced in FROM/JOIN and fetch their columns if needed
     const fullQuery = context.state.doc.toString()
-    const tableRe = /\b(?:FROM|JOIN)\s+(\w+)/gi
+    const tableRe = /\b(?:FROM|JOIN)\s+((?:"(?:[^"]|"")+"|[\w$]+)(?:\s*\.\s*(?:"(?:[^"]|"")+"|[\w$]+))?)/gi
     const referencedTables: string[] = []
     let rm: RegExpExecArray | null
     while ((rm = tableRe.exec(fullQuery)) !== null) referencedTables.push(rm[1])

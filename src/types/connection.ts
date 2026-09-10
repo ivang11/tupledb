@@ -15,8 +15,9 @@ export interface PostgreSqlSettings {
   port: number
   user: string
   password?: string
-  database: string
+  database?: string
   ssl_mode: 'disable' | 'prefer' | 'require' | 'verify_ca' | 'verify_full'
+  ssl_root_cert?: string
 }
 
 export interface SqliteSettings {
@@ -40,6 +41,7 @@ export interface DatabaseCapabilities {
   cancelQuery: boolean
   importSql: boolean
   exportSql: boolean
+  inspectDdl?: boolean
   estimatedRowCount: boolean
 }
 

@@ -26,6 +26,8 @@ pub struct DatabaseCapabilities {
     pub cancel_query: bool,
     pub import_sql: bool,
     pub export_sql: bool,
+    #[serde(default)]
+    pub inspect_ddl: bool,
     pub estimated_row_count: bool,
 }
 

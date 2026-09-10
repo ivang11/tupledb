@@ -125,7 +125,7 @@ impl DatabaseSettings {
     pub fn configured_database(&self) -> Option<&str> {
         match self {
             Self::MySql(s) => s.database.as_deref().filter(|s| !s.is_empty()),
-            Self::PostgreSql(s) => Some(s.database.as_str()),
+            Self::PostgreSql(s) => s.database.as_deref().filter(|s| !s.is_empty()),
             Self::Sqlite(_) => None,
         }
     }
@@ -170,8 +170,14 @@ pub struct PostgreSqlSettings {
     pub port: u16,
     pub user: String,
     pub password: Option<String>,
-    pub database: String,
+    #[serde(default)]
+    pub database: Option<String>,
     pub ssl_mode: PostgreSqlSslMode,
+    /// PEM-encoded CA certificate used to validate the server under
+    /// `verify_ca`/`verify_full`. Not a secret: it is the public certificate
+    /// that signed the server's certificate, not a private key.
+    #[serde(default)]
+    pub ssl_root_cert: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -10,6 +10,24 @@ pub trait DatabaseDriver: CatalogDriver + QueryDriver + EditDriver + ImportDrive
     fn capabilities(&self) -> super::capabilities::DatabaseCapabilities;
     async fn close(&self);
 
+    fn handles_sql_export(&self) -> bool {
+        false
+    }
+
+    /// Native restore scripts can require global dependency ordering and a
+    /// consistent session snapshot, beyond row-by-row generic serialization.
+    async fn export_sql(
+        &self,
+        _database: &str,
+        _tables: &[TableRef],
+        _options: &SqlExportOptions,
+        _writer: &mut (dyn std::io::Write + Send),
+        _is_canceled: &(dyn Fn() -> bool + Send + Sync),
+        _on_progress: &(dyn Fn(usize, usize, String) + Send + Sync),
+    ) -> Result<usize, String> {
+        Err("Native SQL export is not supported by this driver".into())
+    }
+
     async fn cancel_query(&self, _query_id: &str) -> Result<(), String> {
         Err("Query cancellation is not supported by this driver".into())
     }
@@ -79,7 +97,9 @@ pub trait QueryDriver: Send + Sync {
     ) -> Result<(Vec<ColumnInfo>, Vec<Value>), String>;
 
     /// Streams all rows with bounded buffering. Send `(Some(columns), row)` for
-    /// the first row and `(None, row)` afterwards. No buffered fallback is provided:
+    /// the first row and `(None, row)` afterwards. An empty table may send
+    /// `(Some(columns), Value::Null)` as metadata only, never as a data row.
+    /// No buffered fallback is provided:
     /// each adapter must implement actual streaming for large exports.
     async fn stream_all_rows(
         &self,
@@ -154,6 +174,24 @@ pub trait EditDriver: Send + Sync {
 
 #[async_trait]
 pub trait ImportDriver: Send + Sync {
+    /// Engines with protocol-level data sections (e.g. PostgreSQL COPY) may own
+    /// the import loop. Services still open files and publish UI progress.
+    fn handles_import_stream(&self) -> bool {
+        false
+    }
+
+    async fn import_stream(
+        &self,
+        _database: &str,
+        _reader: &mut (dyn std::io::BufRead + Send),
+        _total_bytes: usize,
+        _import_id: &str,
+        _is_canceled: &(dyn Fn() -> bool + Send + Sync),
+        _on_progress: &(dyn Fn(usize, usize, String) + Send + Sync),
+    ) -> Result<ImportResult, String> {
+        Err("Native SQL import streaming is not supported by this driver".into())
+    }
+
     fn import_parser(&self) -> Result<Box<dyn super::sql::SqlImportParser>, String> {
         Err("SQL import is not supported by this driver".into())
     }

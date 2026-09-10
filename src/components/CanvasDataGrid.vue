@@ -709,10 +709,15 @@ watch(
   },
 )
 
+// The canvas is conditional: initial async loads and empty filtered results
+// remove it. Bind the context whenever Vue creates a new canvas, not just once
+// when the grid itself mounts, or draws target a missing/detached element.
+watch(canvas, (element) => {
+  context = element?.getContext('2d', { alpha: false }) ?? null
+  if (element) updateViewport()
+}, { flush: 'post' })
+
 onMounted(() => {
-  const element = canvas.value
-  if (!element) return
-  context = element.getContext('2d', { alpha: false })
   if (typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(updateViewport)
     resizeObserver.observe(scrollContainer.value!)

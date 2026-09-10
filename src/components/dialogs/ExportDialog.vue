@@ -68,16 +68,16 @@
 
             <label
               v-for="t in filteredTables"
-              :key="t.name"
+              :key="tableHandle(t)"
               class="grid grid-cols-[16px_1fr_auto_auto] items-center gap-2.5 px-3 py-1.5 text-[13px] cursor-pointer rounded hover:bg-(--bg-2)/50 transition-colors"
             >
               <input
                 type="checkbox"
-                :checked="isSelected(t.name)"
+                :checked="isSelected(tableHandle(t))"
                 class="size-3.5 accent-(--acc)"
-                @change="toggleTable(t.name)"
+                @change="toggleTable(tableHandle(t))"
               />
-              <span class="font-mono text-(--fg-1) truncate">{{ t.name }}</span>
+              <span class="font-mono text-(--fg-1) truncate">{{ tableLabel(t.reference ?? t.name) }}</span>
               <span class="font-mono text-[11px] text-(--fg-3) tabular-nums">
                 {{ t.rows != null ? t.rows.toLocaleString() : "" }}
               </span>
@@ -95,7 +95,7 @@
           <div class="text-[11px] tracking-widest uppercase text-(--fg-3) font-semibold mb-2">Format</div>
           <div class="grid grid-cols-3 gap-1.5 mb-5">
             <button
-              v-for="f in FORMATS"
+              v-for="f in FORMATS.filter(f => supportsSql !== false || f.id !== 'sql')"
               :key="f.id"
               type="button"
               class="px-3 py-3 h-16 rounded-md text-left transition-all flex flex-col justify-center border"
@@ -173,7 +173,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { tableHandle, tableLabel } from '@/lib/tableReference'
+
+import { computed, ref, watch } from "vue";
 import {
   Dialog,
   DialogContent,
@@ -189,7 +191,8 @@ import {
 const props = defineProps<{
   open: boolean;
   database: string;
-  tables: { name: string; rows?: number; size?: string }[];
+  supportsSql?: boolean;
+  tables: { name: string; reference?: import('@/types/database').TableRef; rows?: number; size?: string }[];
   loadingTables?: boolean;
   selectedTables: string[];
   currentMode: string;
@@ -220,7 +223,10 @@ const FORMATS = [
   { id: "json", name: "JSON", sub: "array per table" },
 ] as const;
 
-const format = ref<typeof FORMATS[number]["id"]>("sql");
+const format = ref<typeof FORMATS[number]["id"]>(props.supportsSql === false ? "csv" : "sql");
+watch(() => props.supportsSql, (supported) => {
+  if (supported === false && format.value === "sql") format.value = "csv";
+});
 
 const CONTENT_MODES = [
   { id: "full",      label: "Schema + data" },
@@ -244,7 +250,7 @@ const search = ref("");
 const filteredTables = computed(() => {
   const q = search.value.trim().toLowerCase();
   if (!q) return props.tables;
-  return props.tables.filter((t) => t.name.toLowerCase().includes(q));
+  return props.tables.filter((t) => tableLabel(t.reference ?? t.name).toLowerCase().includes(q));
 });
 
 const totalCount = computed(() => props.tables.length);
@@ -263,14 +269,14 @@ function toggleTable(name: string) {
 }
 
 function selectAll() {
-  emit("update:selectedTables", props.tables.map((t) => t.name));
+  emit("update:selectedTables", props.tables.map((t) => tableHandle(t)));
 }
 function selectNone() {
   emit("update:selectedTables", []);
 }
 function selectInvert() {
   const set = new Set(props.selectedTables);
-  emit("update:selectedTables", props.tables.filter((t) => !set.has(t.name)).map((t) => t.name));
+  emit("update:selectedTables", props.tables.filter((t) => !set.has(tableHandle(t))).map((t) => tableHandle(t)));
 }
 
 // ── Footer ────────────────────────────────────────────────────────────────────
@@ -286,6 +292,7 @@ function close() {
 }
 
 function handleExportStart() {
+  if (format.value === "sql" && props.supportsSql === false) return;
   emit("start", {
     format: format.value,
     options: { ...options.value },

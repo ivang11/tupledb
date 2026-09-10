@@ -21,6 +21,7 @@ pub async fn open(connection: &Connection) -> Result<(ActiveConnection, Connecti
     let opened = registry::open(
         &connection.database,
         ConnectOptions {
+            read_only: !connection.allow_writes,
             endpoint,
             timeout_secs: connection.timeout_secs.unwrap_or(30),
             tunneled: tunnel.is_some(),

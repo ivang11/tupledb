@@ -198,7 +198,8 @@ export function useRowEditing(ctx: RowEditingContext) {
     const tab = getPaneTab(pane)
     const pk = getPrimaryKey(pane)
     if (!tab || !pk) return
-    if (tab.tableStructure.find(c => c.field === column)?.is_generated) return
+    const columnMeta = tab.tableStructure.find(c => c.field === column)
+    if (columnMeta?.is_generated || columnMeta?.is_identity) return
     const pkVal = rowKey(row, pk, tab.queryResult?.columns ?? [])
     const originalValue = rowValue(row, column, tab.queryResult?.columns ?? [])
     if (newValue === originalValue) {
@@ -327,7 +328,8 @@ export function useRowEditing(ctx: RowEditingContext) {
     const tab = getPaneTab(pane)
     const pk = getPrimaryKey(pane)
     if (!tab || !pk) return
-    if (tab.tableStructure.find(c => c.field === colName)?.is_generated) return
+    const columnMeta = tab.tableStructure.find(c => c.field === colName)
+    if (columnMeta?.is_generated || columnMeta?.is_identity) return
     const pkVal = rowKey(row, pk, tab.queryResult?.columns ?? [])
     if (tab.pendingDeletions[pkVal]) return
     tab.selectedRowPk = pkVal
@@ -452,7 +454,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     if (tab.pendingDrop) {
       await invoke('drop_table', {
         connectionId: tab.connectionId, database: tab.database,
-        table: tab.reference ?? store.tableReference(tab.connectionId, tab.database, tab.tableName), disableFkChecks: disableFkChecks.value,
+        table: tab.reference ?? store.tableReference(tab.connectionId, tab.database, tab.tableName), disableFkChecks: (disableFkChecks.value && !!store.openConnections[tab.connectionId]?.capabilities.disableForeignKeyChecks),
       })
       closeMatchingTableTabs(tab)
       await store.fetchTablesForConnection(tab.connectionId, tab.database)
@@ -462,7 +464,7 @@ export function useRowEditing(ctx: RowEditingContext) {
     if (tab.pendingTruncate) {
       await invoke('truncate_table', {
         connectionId: tab.connectionId, database: tab.database,
-        table: tab.reference ?? store.tableReference(tab.connectionId, tab.database, tab.tableName), disableFkChecks: disableFkChecks.value,
+        table: tab.reference ?? store.tableReference(tab.connectionId, tab.database, tab.tableName), disableFkChecks: (disableFkChecks.value && !!store.openConnections[tab.connectionId]?.capabilities.disableForeignKeyChecks),
       })
       tab.pendingTruncate = false
     }
@@ -484,7 +486,7 @@ export function useRowEditing(ctx: RowEditingContext) {
       if (updates.length > 0 || deletions.length > 0) {
         await invoke('apply_table_changes', {
           connectionId: tab.connectionId, database: tab.database, table: tab.reference ?? store.tableReference(tab.connectionId, tab.database, tab.tableName),
-          updates, deletions, disableFkChecks: disableFkChecks.value,
+          updates, deletions, disableFkChecks: (disableFkChecks.value && !!store.openConnections[tab.connectionId]?.capabilities.disableForeignKeyChecks),
         })
         tab.pendingChanges = {}
         tab.pendingDeletions = {}
@@ -498,7 +500,7 @@ export function useRowEditing(ctx: RowEditingContext) {
         database: tab.database,
         table: tab.reference ?? store.tableReference(tab.connectionId, tab.database, tab.tableName),
         values: insert.values,
-        disableFkChecks: disableFkChecks.value,
+        disableFkChecks: (disableFkChecks.value && !!store.openConnections[tab.connectionId]?.capabilities.disableForeignKeyChecks),
       })
       tab.pendingInserts.shift()
     }

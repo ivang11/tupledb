@@ -145,6 +145,7 @@
 
 <script setup lang="ts">
 import type { TableRef } from '@/types/database'
+import { normalizeType } from '@/lib/schemaEditing'
 import { tableLabel } from '@/lib/tableReference'
 import { nextTick, ref } from "vue";
 import { ArrowRightIcon, CodeIcon } from "lucide-vue-next";
@@ -207,7 +208,7 @@ function isFieldPending(column: ColumnStructure, field: EditableField) {
   const value = pendingValue(column, field);
   return field === "name"
     ? value !== column.field
-    : value.toLowerCase() !== column.field_type.toLowerCase();
+    : normalizeType(value) !== normalizeType(column.field_type);
 }
 
 function isEditing(column: ColumnStructure, field: EditableField) {

@@ -1,3 +1,4 @@
+import { tableHandle, tableLabel, tableSelectionKey, parseTableSelectionKey } from '@/lib/tableReference'
 import { ref, computed, onMounted, watch, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -20,7 +21,7 @@ interface SidebarContext {
   closeTab: (tabId: string, paneId?: string, event?: MouseEvent) => void;
   refreshActiveTab: (paneId?: string) => Promise<void>;
   loadTableData: (
-    tableName: string,
+    tableName: string | import('@/types/database').TableRef,
     connectionId: string,
     database: string,
     filter?: any,
@@ -111,7 +112,9 @@ export function useSidebarManager(ctx: SidebarContext) {
     newDbOptionsError.value = "";
     newDbCharacterSet.value = DATABASE_OPTION_DEFAULT;
     newDbCollation.value = DATABASE_OPTION_DEFAULT;
+    isLoadingNewDbOptions.value = false;
     if (!connectionId) return;
+    if (store.openConnections[connectionId]?.capabilities?.databaseCollations === false) return;
 
     isLoadingNewDbOptions.value = true;
     try {
@@ -225,7 +228,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     const tbls = store.openConnections[connectionId]?.tables[db] ?? [];
     if (!search.value) return tbls;
     return tbls.filter((t: any) =>
-      t.name.toLowerCase().includes(search.value.toLowerCase()),
+      tableLabel(t.reference ?? t.name).toLowerCase().includes(search.value.toLowerCase()),
     );
   }
 
@@ -242,11 +245,11 @@ export function useSidebarManager(ctx: SidebarContext) {
         connectionId,
         name: databaseName,
         characterSet:
-          newDbCharacterSet.value === DATABASE_OPTION_DEFAULT
+          store.openConnections[connectionId]?.capabilities?.databaseCollations === false || newDbCharacterSet.value === DATABASE_OPTION_DEFAULT
             ? null
             : newDbCharacterSet.value,
         collation:
-          newDbCollation.value === DATABASE_OPTION_DEFAULT
+          store.openConnections[connectionId]?.capabilities?.databaseCollations === false || newDbCollation.value === DATABASE_OPTION_DEFAULT
             ? null
             : newDbCollation.value,
       });
@@ -267,7 +270,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     try {
       await store.fetchDatabasesForConnection(connectionId);
       const tables = await store.fetchTablesForConnection(connectionId, database);
-      const currentTableNames = new Set((tables ?? []).map((t: any) => t.name));
+      const currentTableNames = new Set((tables ?? []).map((t: any) => tableHandle(t)));
 
       for (const pane of panes.value) {
         const relatedTabs = pane.tabs.filter(
@@ -278,16 +281,16 @@ export function useSidebarManager(ctx: SidebarContext) {
         );
 
         for (const tab of relatedTabs) {
-          if (!currentTableNames.has(tab.tableName)) {
+          if (!currentTableNames.has(tableHandle(tab.reference ?? { name: tab.tableName }))) {
             closeTab(tab.id, pane.id);
             continue;
           }
 
           const [tableStructure, tableIndexes, foreignKeys, ddl] = await Promise.all([
-            store.fetchTableStructure(connectionId, database, tab.tableName).catch(() => []),
-            store.fetchTableIndexes(connectionId, database, tab.tableName).catch(() => []),
-            store.fetchForeignKeys(connectionId, database, tab.tableName).catch(() => []),
-            store.fetchTableDdl(connectionId, database, tab.tableName).catch(() => null),
+            store.fetchTableStructure(connectionId, database, tab.reference ?? tab.tableName).catch(() => []),
+            store.fetchTableIndexes(connectionId, database, tab.reference ?? tab.tableName).catch(() => []),
+            store.fetchForeignKeys(connectionId, database, tab.reference ?? tab.tableName).catch(() => []),
+            store.fetchTableDdl(connectionId, database, tab.reference ?? tab.tableName).catch(() => null),
           ]);
 
           tab.tableStructure = tableStructure;
@@ -299,7 +302,7 @@ export function useSidebarManager(ctx: SidebarContext) {
             tab.queryResult = await store.fetchTableData(
               connectionId,
               database,
-              tab.tableName,
+              tab.reference ?? tab.tableName,
               tab.page,
               tab.pageSize,
               tab.filters ?? null,
@@ -416,7 +419,7 @@ export function useSidebarManager(ctx: SidebarContext) {
       await store.fetchTablesForConnection(connectionId, database);
       const tab = getPaneTab(getPane());
       if (tab && tab.connectionId === connectionId && tab.database === database)
-        await loadTableData(tab.tableName, connectionId, database);
+        await loadTableData(tab.reference ?? tab.tableName, connectionId, database);
       const toastSummary = `Completed in ${formatImportDuration(result.metrics.total_ms)}. ${result.executed.toLocaleString()} statements imported.`;
       const detailedSummary = `${toastSummary} ${formatImportSummary(result.metrics)}.`;
       recordQueryLogEntry({
@@ -471,6 +474,7 @@ export function useSidebarManager(ctx: SidebarContext) {
   const importContext = ref<{ connectionId: string; database: string } | null>(null);
 
   function openImportSelector(connectionId: string, database: string) {
+    if (!store.openConnections[connectionId]?.capabilities.importSql) { toastError("SQL import unavailable", "This adapter does not support SQL imports yet."); return; }
     importContext.value = { connectionId, database };
     showImportDialog.value = true;
   }
@@ -530,7 +534,7 @@ export function useSidebarManager(ctx: SidebarContext) {
 
     selectedExportTables.value = (
       store.openConnections[connectionId]?.tables[database] ?? []
-    ).map((t: any) => t.name);
+    ).map((t: any) => tableHandle(t));
   }
 
   async function startExport(payload: ExportStartPayload) {
@@ -538,10 +542,11 @@ export function useSidebarManager(ctx: SidebarContext) {
     showTableSelector.value = false;
     if (selectedExportTables.value.length === 0) return;
     const { connectionId, database } = exportContext.value;
+    if (payload.format === "sql" && !store.openConnections[connectionId]?.capabilities.exportSql) { toastError("SQL export unavailable", "Use CSV/JSON or the native database backup tool."); return; }
     const selectedTables = payload.options.includeViews
       ? selectedExportTables.value
       : selectedExportTables.value.filter((name) => {
-          const table = exportContextTables.value.find((t: any) => t.name === name);
+          const table = exportContextTables.value.find((t: any) => tableHandle(t) === name);
           return !String(table?.table_type ?? "").toUpperCase().includes("VIEW");
         });
     if (selectedTables.length === 0) return;
@@ -564,7 +569,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     progressStore.isExporting = true;
     progressStore.exportExpanded = true;
     progressStore.exportProgress = { current: 0, total: 0, status: "" };
-    progressStore.exportTables = [...selectedTables];
+    progressStore.exportTables = selectedTables.map(name => tableLabel(store.tableReference(connectionId, database, name)));
     progressStore.exportDoneCount = 0;
     progressStore.exportStartTime = Date.now();
     progressStore.exportConnectionId = connectionId;
@@ -591,7 +596,7 @@ export function useSidebarManager(ctx: SidebarContext) {
         database,
         mode: currentExportMode.value,
         path,
-        tables: selectedTables,
+        tables: selectedTables.map(name => store.tableReference(connectionId, database, name)),
         exportId: progressStore.exportId,
         format: payload.format,
         dropIfExists: payload.options.dropIfExists,
@@ -651,7 +656,7 @@ export function useSidebarManager(ctx: SidebarContext) {
       !tab ||
       tab.connectionId !== connectionId ||
       tab.database !== database ||
-      tab.tableName !== tableName
+      tableHandle(tab.reference ?? { name: tab.tableName }) !== tableName
     ) {
       return;
     }
@@ -682,13 +687,6 @@ export function useSidebarManager(ctx: SidebarContext) {
   // ── Multiple table selection ────────────────────────────────────────────────
 
   const selectedTables = ref<Set<string>>(new Set());
-  function tableSelectionKey(
-    connectionId: string,
-    database: string,
-    tableName: string,
-  ): string {
-    return `${connectionId}:${database}:${tableName}`;
-  }
 
   function isTableSelected(
     connectionId: string,
@@ -710,7 +708,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     // If there's an existing selection from a different db/connection, clear it first
     const firstKey = [...selectedTables.value][0];
     if (firstKey) {
-      const [existingConn, existingDb] = firstKey.split(':');
+      const [existingConn, existingDb] = parseTableSelectionKey(firstKey);
       if (existingConn !== connectionId || existingDb !== database) {
         selectedTables.value.clear();
       }
@@ -732,9 +730,9 @@ export function useSidebarManager(ctx: SidebarContext) {
     database: string,
     tableName: string,
   ) {
-    const tables = filteredTables(connectionId, database).map((table: any) => table.name);
+    const tables = filteredTables(connectionId, database).map((table: any) => tableHandle(table));
     const firstKey = [...selectedTables.value][0];
-    const firstTableName = firstKey?.split(":")[2] ?? tableName;
+    const firstTableName = firstKey ? parseTableSelectionKey(firstKey)[2] : tableName;
     const start = tables.indexOf(firstTableName);
     const end = tables.indexOf(tableName);
     const tableNames =
@@ -744,7 +742,7 @@ export function useSidebarManager(ctx: SidebarContext) {
 
     const firstSelection = [...selectedTables.value][0];
     if (firstSelection) {
-      const [existingConn, existingDb] = firstSelection.split(":");
+      const [existingConn, existingDb] = parseTableSelectionKey(firstSelection);
       if (existingConn !== connectionId || existingDb !== database) {
         selectedTables.value.clear();
       }
@@ -760,7 +758,7 @@ export function useSidebarManager(ctx: SidebarContext) {
 
     try {
       for (const key of selectedTables.value) {
-        const [connectionId, database, tableName] = key.split(":");
+        const [connectionId, database, tableName] = parseTableSelectionKey(key);
         await stageTableAction("drop", connectionId, database, tableName);
       }
 
@@ -775,7 +773,7 @@ export function useSidebarManager(ctx: SidebarContext) {
 
     try {
       for (const key of selectedTables.value) {
-        const [connectionId, database, tableName] = key.split(":");
+        const [connectionId, database, tableName] = parseTableSelectionKey(key);
         await stageTableAction("truncate", connectionId, database, tableName);
       }
 
@@ -881,7 +879,7 @@ export function useSidebarManager(ctx: SidebarContext) {
       await invoke("drop_tables", {
         connectionId,
         database,
-        tables: tableNames,
+        tables: tableNames.map(name => store.tableReference(connectionId, database, name)),
         disableFkChecks: disableFk,
       });
 
@@ -895,7 +893,7 @@ export function useSidebarManager(ctx: SidebarContext) {
             return false;
           }
 
-          return tableNames.includes((t as TableTab).tableName);
+          return tableNames.includes(tableHandle((t as TableTab).reference ?? { name: (t as TableTab).tableName }));
         });
         related.forEach((t) => closeTab(t.id, pane.id));
       }

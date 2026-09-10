@@ -87,6 +87,7 @@ impl DatabaseDriver for MySqlDriver {
             cancel_query: true,
             import_sql: true,
             export_sql: true,
+            inspect_ddl: true,
             estimated_row_count: true,
         }
     }

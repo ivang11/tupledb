@@ -209,24 +209,44 @@ impl QueryDriver for MySqlDriver {
             .await
             .map_err(|e| format!("Failed to set sql_mode: {}", e))?;
         }
-        let mut stream = sqlx::query(&query).fetch(&mut *conn);
         let mut columns: Vec<ColumnInfo> = Vec::new();
-        while let Some(row_result) = stream.next().await {
-            let row = row_result.map_err(|e| format!("Failed to stream data: {}", e))?;
-            let col_opt = if columns.is_empty() {
-                for col in row.columns() {
-                    columns.push(ColumnInfo {
-                        name: col.name().to_string(),
-                        type_name: col.type_info().name().to_string(),
-                    });
+        {
+            let mut stream = sqlx::query(&query).fetch(&mut *conn);
+            while let Some(row_result) = stream.next().await {
+                let row = row_result.map_err(|e| format!("Failed to stream data: {}", e))?;
+                let col_opt = if columns.is_empty() {
+                    for col in row.columns() {
+                        columns.push(ColumnInfo {
+                            name: col.name().to_string(),
+                            type_name: col.type_info().name().to_string(),
+                        });
+                    }
+                    Some(columns.clone())
+                } else {
+                    None
+                };
+                if tx.send((col_opt, parse_mysql_row(&row))).await.is_err() {
+                    break; // receiver dropped (export cancelled)
                 }
-                Some(columns.clone())
-            } else {
-                None
-            };
-            if tx.send((col_opt, parse_mysql_row(&row))).await.is_err() {
-                break; // receiver dropped (export cancelled)
             }
+        }
+        // Empty tables never populate `columns` above; describe the query so
+        // callers still get header metadata (matches the PostgreSQL driver).
+        if columns.is_empty() {
+            use sqlx::Executor;
+            let description = (&mut *conn)
+                .describe(&query)
+                .await
+                .map_err(|e| e.to_string())?;
+            let columns = description
+                .columns()
+                .iter()
+                .map(|c| ColumnInfo {
+                    name: c.name().into(),
+                    type_name: c.type_info().name().into(),
+                })
+                .collect();
+            let _ = tx.send((Some(columns), Value::Null)).await;
         }
         Ok(())
     }

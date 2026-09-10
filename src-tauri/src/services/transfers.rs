@@ -130,11 +130,15 @@ enum ExportWriter {
 impl ExportWriter {
     fn new(path: &str, compress_gzip: bool) -> Result<Self, String> {
         let file = File::create(path).map_err(|e| format!("Failed to create file: {}", e))?;
+        Ok(Self::from_file(file, compress_gzip))
+    }
+
+    fn from_file(file: File, compress_gzip: bool) -> Self {
         let writer = BufWriter::new(file);
         if compress_gzip {
-            Ok(Self::Gzip(GzEncoder::new(writer, Compression::default())))
+            Self::Gzip(GzEncoder::new(writer, Compression::default()))
         } else {
-            Ok(Self::Plain(writer))
+            Self::Plain(writer)
         }
     }
 
@@ -165,6 +169,60 @@ impl Write for ExportWriter {
             Self::Gzip(writer) => writer.flush(),
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn export_native_sql_file(
+    driver: Arc<dyn DatabaseDriver>,
+    database: &str,
+    tables: &[TableRef],
+    mode: &str,
+    path: &str,
+    options: ExportOptions,
+    is_canceled: &(dyn Fn() -> bool + Send + Sync),
+    on_progress: &(dyn Fn(usize, usize, String) + Send + Sync),
+) -> Result<usize, String> {
+    if !["full", "structure", "data"].contains(&mode) {
+        return Err("Unknown SQL export mode".into());
+    }
+    if is_canceled() {
+        return Err("Export cancelled".into());
+    }
+    // Publish atomically only after the entire dump and compression finish.
+    // Errors/cancellation never replace an existing user file with a partial dump.
+    let target = std::path::Path::new(path);
+    let parent = target
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(std::path::Path::new("."));
+    let temporary = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
+    let mut writer = ExportWriter::from_file(
+        temporary.reopen().map_err(|e| e.to_string())?,
+        options.compress_gzip,
+    );
+    let rows = driver
+        .export_sql(
+            database,
+            tables,
+            &crate::database::driver::SqlExportOptions {
+                mode: mode.into(),
+                drop_if_exists: options.drop_if_exists,
+                use_transactions: options.use_transactions,
+            },
+            &mut writer,
+            is_canceled,
+            on_progress,
+        )
+        .await?;
+    writer.finish()?;
+    if is_canceled() {
+        return Err("Export cancelled".into());
+    }
+    temporary
+        .persist(target)
+        .map_err(|e| format!("Cannot publish SQL export: {}", e.error))?;
+    on_progress(tables.len(), tables.len(), "Export complete".into());
+    Ok(rows)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -213,12 +271,40 @@ pub async fn export_database_file(
             .map(|table| table.reference.clone())
             .collect(),
     };
+    if tables_to_export.iter().any(|table| {
+        !table_metadata
+            .iter()
+            .any(|metadata| metadata.reference == *table)
+    }) {
+        return Err("Export selection contains an unknown table reference".into());
+    }
+
     if !options.include_views {
         tables_to_export.retain(|table| base_table_names.contains(table));
     }
 
     let total_tables = tables_to_export.len();
     let mut total_rows = 0usize;
+
+    if format == "sql" && driver.handles_sql_export() {
+        return export_native_sql_file(
+            driver,
+            &database,
+            &tables_to_export,
+            &mode,
+            &path,
+            options,
+            is_canceled,
+            &|current, total, status| {
+                emit_progress(Progress {
+                    current,
+                    total,
+                    status,
+                })
+            },
+        )
+        .await;
+    }
 
     match format {
         // ── CSV: one file per table ──────────────────────────────────────────
@@ -245,7 +331,7 @@ pub async fn export_database_file(
                 let table_path = dir.join(format!(
                     "{}_{}.csv{}",
                     stem,
-                    table,
+                    export_file_stem(table),
                     if options.compress_gzip { ".gz" } else { "" }
                 ));
                 let mut writer = ExportWriter::new(
@@ -335,7 +421,7 @@ pub async fn export_database_file(
                 write!(
                     writer,
                     "\n  {}: [",
-                    serde_json::to_string(&table.to_string()).map_err(|e| e.to_string())?
+                    serde_json::to_string(&export_object_key(table)).map_err(|e| e.to_string())?
                 )
                 .map_err(|e| format!("Write error: {}", e))?;
 
@@ -531,10 +617,28 @@ pub async fn import_sql_file(
     use std::time::{Duration, Instant};
 
     crate::database::capabilities::require(driver.capabilities().import_sql, "SQL import")?;
-    let mut splitter = driver.import_parser()?;
     let file = File::open(path).map_err(|e| format!("Failed to read file: {}", e))?;
     let total_bytes = file.metadata().map(|m| m.len() as usize).unwrap_or(0);
     let mut reader = BufReader::with_capacity(1024 * 1024, file);
+    if driver.handles_import_stream() {
+        return driver
+            .import_stream(
+                database,
+                &mut reader,
+                total_bytes,
+                import_id,
+                is_canceled,
+                &|current, total, status| {
+                    emit_progress(Progress {
+                        current,
+                        total,
+                        status,
+                    })
+                },
+            )
+            .await;
+    }
+    let mut splitter = driver.import_parser()?;
     driver.begin_import_session(database, import_id).await?;
 
     emit_progress(Progress {
@@ -814,6 +918,23 @@ pub async fn export_table_file(
         return Err(format!("Unknown format: {}", format));
     }
 
+    if format == "sql" && driver.handles_sql_export() {
+        return export_native_sql_file(
+            driver,
+            &database,
+            &[table],
+            "data",
+            &path,
+            ExportOptions {
+                drop_if_exists: false,
+                ..Default::default()
+            },
+            &|| false,
+            emit_progress,
+        )
+        .await;
+    }
+
     emit_progress(0, 100, format!("Streaming data from {}...", table));
 
     // Channel: producer streams rows, consumer writes to disk
@@ -835,6 +956,16 @@ pub async fn export_table_file(
             columns = cols;
         }
 
+        // Empty-table metadata preserves CSV headers without inventing a row.
+        if row.is_null() {
+            if format == "csv" && !header_written {
+                let header: Vec<String> = columns.iter().map(|c| escape_csv(&c.name)).collect();
+                writeln!(writer, "{}", header.join(","))
+                    .map_err(|e| format!("Write error: {}", e))?;
+                header_written = true;
+            }
+            continue;
+        }
         row_count += 1;
 
         if row_count.is_multiple_of(5000) {
@@ -852,12 +983,7 @@ pub async fn export_table_file(
                 if let Value::Object(ref map) = row {
                     let values: Vec<String> = columns
                         .iter()
-                        .map(|c| match map.get(&c.name) {
-                            Some(Value::Null) | None => String::new(),
-                            Some(Value::String(s)) => escape_csv(s),
-                            Some(Value::Bool(b)) => b.to_string(),
-                            Some(v) => v.to_string(),
-                        })
+                        .map(|c| csv_export_value(map.get(&c.name)))
                         .collect();
                     writeln!(writer, "{}", values.join(","))
                         .map_err(|e| format!("Write error: {}", e))?;
@@ -1165,3 +1291,31 @@ mod tests {
     }
 }
 use crate::database::types::TableRef;
+
+fn export_object_key(table: &TableRef) -> String {
+    match &table.schema {
+        Some(schema) => {
+            serde_json::to_string(&(schema, &table.name)).expect("string tuple is serializable")
+        }
+        None => table.name.clone(),
+    }
+}
+
+fn export_file_stem(table: &TableRef) -> String {
+    fn encode(value: &str) -> String {
+        value
+            .bytes()
+            .map(|b| {
+                if b.is_ascii_alphanumeric() || b == b'_' {
+                    (b as char).to_string()
+                } else {
+                    format!("%{b:02X}")
+                }
+            })
+            .collect()
+    }
+    match &table.schema {
+        Some(schema) => format!("{}--{}", encode(schema), encode(&table.name)),
+        None => encode(&table.name),
+    }
+}

@@ -1,3 +1,4 @@
+import { tableHandle } from '@/lib/tableReference'
 import type { TableRef } from '@/types/database'
 import { primaryKeyColumns } from '@/lib/tableIdentity'
 import { ref, type Ref } from 'vue'
@@ -118,14 +119,14 @@ export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
 
   function isTableOpenInAnyPane(tableName: string, database: string, connectionId: string): boolean {
     return panes.value.some(pane =>
-      pane.tabs.some(t => t.type === 'table' && (t as TableTab).tableName === tableName && (t as TableTab).database === database && t.connectionId === connectionId)
+      pane.tabs.some(t => t.type === 'table' && tableHandle((t as TableTab).reference ?? { name: (t as TableTab).tableName }) === tableName && (t as TableTab).database === database && t.connectionId === connectionId)
     )
   }
 
   function isTableActiveInAnyPane(tableName: string, database: string, connectionId: string): boolean {
     return panes.value.some(pane => {
       const tab = getPaneTab(pane)
-      return tab?.tableName === tableName && tab?.database === database && tab?.connectionId === connectionId
+      return !!tab && tableHandle(tab.reference ?? { name: tab.tableName }) === tableName && tab?.database === database && tab?.connectionId === connectionId
     })
   }
 

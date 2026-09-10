@@ -1,3 +1,4 @@
+import { tableHandle, tableSelectionKey } from '@/lib/tableReference'
 import { ref, nextTick } from 'vue'
 import type { TableTab } from '@/types/workspace'
 
@@ -48,7 +49,7 @@ export function usePanelResizing() {
   const LS_KEY = 'tupledb:column-widths'
 
   function tableColKey(tab: TableTab): string {
-    return `${tab.connectionId}:${tab.database}:${tab.tableName}`
+    return tableSelectionKey(tab.connectionId, tab.database, tableHandle(tab.reference ?? {name: tab.tableName}))
   }
 
   function loadColumnWidths(): Record<string, Record<string, number>> {

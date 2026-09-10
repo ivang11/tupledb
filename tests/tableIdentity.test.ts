@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { rowKey, decodeRowKey, primaryKeyColumns } from '../src/lib/tableIdentity.js'
 import { resolveKeysetColumn } from '../src/lib/rowSelection.js'
-import { resolveTableReference, tableReferenceKey } from '../src/lib/tableReference.js'
+import { resolveTableReference, tableReferenceKey, tableHandle, tableSqlName } from '../src/lib/tableReference.js'
 import { normalizeChangeValue, normalizeInsertValue, buildDuplicateInsertValues } from '../src/lib/tableEditing.js'
 
 test('composite row identities preserve every column, its type and exact value', () => {
@@ -43,6 +43,8 @@ test('table identities preserve catalog, schema and punctuation without collisio
   assert.throws(() => resolveTableReference('other', b))
   const tables = [a, b].map(reference => ({ reference, name: reference.name, table_type: 'BASE TABLE' }))
   assert.throws(() => resolveTableReference('app', 'users', tables), /ambiguous/)
+  assert.deepEqual(resolveTableReference('app', tableHandle(tables[1]), tables), b)
+  assert.equal(tableSqlName({ catalog: 'app', schema: 'odd.schema', name: 'a"b' }), '"odd.schema"."a""b"')
 })
 
 test('metadata-driven edits preserve text and exact numeric values', () => {

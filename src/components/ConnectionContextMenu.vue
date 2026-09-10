@@ -19,6 +19,7 @@
     <template v-if="isConnected">
       <button
         class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-muted transition-colors text-left"
+        v-if="canCreateDatabase !== false"
         @click="emit('new-database', connection.id)"
       >
         <PlusIcon class="size-3.5 text-muted-foreground" /> New Database
@@ -51,6 +52,7 @@ defineProps<{
   y: number
   connection: Connection | null
   isConnected: boolean
+  canCreateDatabase?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -61,4 +63,3 @@ const emit = defineEmits<{
   'new-database': [id: string]
 }>()
 </script>
-

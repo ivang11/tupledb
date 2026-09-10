@@ -54,6 +54,31 @@ fn reads_engine_specific_settings_without_mysql_fields() {
 }
 
 #[test]
+fn postgresql_database_can_be_omitted_null_or_empty_without_becoming_configured() {
+    for database in [
+        None,
+        Some(Value::Null),
+        Some(json!("")),
+        Some(json!("selected database")),
+    ] {
+        let mut settings = json!({"engine":"postgresql", "settings": {
+            "host":"localhost", "port":5432, "user":"postgres", "ssl_mode":"prefer"
+        }});
+        if let Some(database) = database {
+            settings["settings"]["database"] = database;
+        }
+        let connection: DatabaseSettings = serde_json::from_value(settings.clone()).unwrap();
+        let expected = settings["settings"]["database"]
+            .as_str()
+            .filter(|db| !db.is_empty());
+        assert_eq!(connection.configured_database(), expected);
+        let restored: DatabaseSettings =
+            serde_json::from_value(serde_json::to_value(&connection).unwrap()).unwrap();
+        assert_eq!(restored.configured_database(), expected);
+    }
+}
+
+#[test]
 fn rejects_ambiguous_missing_and_unknown_engines() {
     let mut input = legacy();
     input["database"] = json!({"engine": "sqlite", "settings": {"path": "/tmp/test.db"}});
@@ -92,11 +117,10 @@ fn never_copies_database_passwords_between_engines() {
 
 #[tokio::test]
 async fn unavailable_engines_are_rejected_before_opening_ssh_or_files() {
-    assert_eq!(registry::AVAILABLE_DRIVERS.len(), 1);
+    assert_eq!(registry::AVAILABLE_DRIVERS.len(), 2);
     assert_eq!(registry::AVAILABLE_DRIVERS[0].engine, DatabaseEngine::MySql);
-    for engine in [DatabaseEngine::PostgreSql, DatabaseEngine::Sqlite] {
-        assert!(registry::ensure_available(engine).is_err());
-    }
+    assert!(registry::ensure_available(DatabaseEngine::PostgreSql).is_ok());
+    assert!(registry::ensure_available(DatabaseEngine::Sqlite).is_err());
     let mut input = legacy();
     input.as_object_mut().unwrap().remove("mysql");
     input["database"] = json!({"engine": "sqlite", "settings": {"path": "/unavailable/path.db"}});

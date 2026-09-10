@@ -185,6 +185,12 @@ pub struct ImportResult {
     pub metrics: ImportMetrics,
 }
 
+pub struct SqlExportOptions {
+    pub mode: String,
+    pub drop_if_exists: bool,
+    pub use_transactions: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DatabaseCollation {

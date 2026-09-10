@@ -180,6 +180,7 @@
         :pending-deletions-count="pendingSummaryForPane(pane).pendingDeletionsCount"
         :pending-insertions-count="pendingSummaryForPane(pane).pendingInsertionsCount"
         :disable-fk-checks="disableFkChecks"
+        :supports-fk-checks="supports(pane, 'disableForeignKeyChecks')"
         :is-saving="isSaving"
         @update:disable-fk-checks="disableFkChecks = $event"
         @discard="discardChanges(pane)"

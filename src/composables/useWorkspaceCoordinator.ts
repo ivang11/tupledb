@@ -1,3 +1,4 @@
+import { tableHandle, tableSelectionKey, parseTableSelectionKey } from '@/lib/tableReference'
 import { computed, nextTick, ref, watch, type Ref } from "vue";
 import { useConnectionStore } from "@/stores/connections";
 import type { AnyTab, PaneState, QueryTab, TableTab } from "@/types/workspace";
@@ -428,11 +429,11 @@ export function useWorkspaceCoordinator(ctx: WorkspaceCoordinatorContext) {
     () => {
       const pane = ctx.getPane(ctx.activePaneId.value);
       const tab = ctx.getPaneTab(pane);
-      return tab ? `${tab.connectionId}:${tab.database}:${tab.tableName}` : null;
+      return tab ? tableSelectionKey(tab.connectionId, tab.database, tableHandle(tab.reference ?? {name: tab.tableName})) : null;
     },
     (key) => {
       if (!key) return;
-      const [connId, db, tableName] = key.split(":");
+      const [connId, db, tableName] = parseTableSelectionKey(key);
       syncSidebarToActiveTab(connId, db, tableName);
     },
   );
