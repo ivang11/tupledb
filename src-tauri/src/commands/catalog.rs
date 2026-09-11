@@ -11,6 +11,7 @@ pub async fn get_databases(
     let configured_db = {
         let configs = state.connections_config.read();
         configs
+            .data()?
             .get(&connection_id)
             .and_then(|c| c.database.configured_database().map(str::to_owned))
     };
@@ -57,6 +58,7 @@ pub async fn create_database(
     let allow_writes = {
         let configs = state.connections_config.read();
         configs
+            .data()?
             .get(&connection_id)
             .map(|c| c.allow_writes)
             .unwrap_or(true)
@@ -81,6 +83,7 @@ pub async fn drop_database(
     let allow_writes = {
         let configs = state.connections_config.read();
         configs
+            .data()?
             .get(&connection_id)
             .map(|c| c.allow_writes)
             .unwrap_or(true)

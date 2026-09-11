@@ -20,6 +20,7 @@ pub fn execute_query(
     let (env, allow_writes) = {
         let configs = state.connections_config.read();
         configs
+            .data()?
             .get(&connection_id)
             .map(|c| (c.environment, c.allow_writes))
             .unwrap_or((crate::connections::Environment::Local, true))

@@ -61,12 +61,16 @@ pub async fn get_table_data(
     result.map(compact_query_result_for_ipc)
 }
 
-fn connection_allows_writes(state: &State<'_, AppState>, connection_id: Uuid) -> bool {
+fn connection_allows_writes(
+    state: &State<'_, AppState>,
+    connection_id: Uuid,
+) -> Result<bool, String> {
     let configs = state.connections_config.read();
-    configs
+    Ok(configs
+        .data()?
         .get(&connection_id)
         .map(|c| c.allow_writes)
-        .unwrap_or(true)
+        .unwrap_or(true))
 }
 
 #[tauri::command]
@@ -83,7 +87,7 @@ pub async fn apply_table_changes(
     let n_updates = updates.len();
     let n_deletions = deletions.len();
     if n_updates > 0 || n_deletions > 0 {
-        crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id))?;
+        crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id)?)?;
     }
     let driver = state.get_driver(&connection_id)?;
     crate::database::capabilities::require(
@@ -135,7 +139,7 @@ pub async fn insert_row(
     disable_fk_checks: bool,
 ) -> Result<(), String> {
     let table = table.resolve(&database)?;
-    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id))?;
+    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id)?)?;
     let driver = state.get_driver(&connection_id)?;
     crate::database::capabilities::require(
         !disable_fk_checks || driver.capabilities().disable_foreign_key_checks,
@@ -167,7 +171,7 @@ pub async fn alter_table_column(
     new_type: String,
 ) -> Result<(), String> {
     let table = table.resolve(&database)?;
-    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id))?;
+    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id)?)?;
     let driver = state.get_driver(&connection_id)?;
     crate::database::capabilities::require(
         driver.capabilities().alter_columns,
@@ -208,7 +212,7 @@ pub async fn drop_table(
     disable_fk_checks: bool,
 ) -> Result<(), String> {
     let table = table.resolve(&database)?;
-    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id))?;
+    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id)?)?;
     let driver = state.get_driver(&connection_id)?;
     crate::database::capabilities::require(
         !disable_fk_checks || driver.capabilities().disable_foreign_key_checks,
@@ -236,7 +240,7 @@ pub async fn drop_tables(
     tables: Vec<TableTarget>,
     disable_fk_checks: bool,
 ) -> Result<(), String> {
-    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id))?;
+    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id)?)?;
     let driver = state.get_driver(&connection_id)?;
     crate::database::capabilities::require(
         !disable_fk_checks || driver.capabilities().disable_foreign_key_checks,
@@ -271,7 +275,7 @@ pub async fn truncate_table(
     disable_fk_checks: bool,
 ) -> Result<(), String> {
     let table = table.resolve(&database)?;
-    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id))?;
+    crate::security::ensure_writes_allowed(connection_allows_writes(&state, connection_id)?)?;
     let driver = state.get_driver(&connection_id)?;
     crate::database::capabilities::require(
         !disable_fk_checks || driver.capabilities().disable_foreign_key_checks,

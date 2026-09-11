@@ -24,6 +24,7 @@
     "allow-benchmark-config",
     "allow-report-benchmark-metrics",
     "allow-get-connections",
+    "allow-get-connection-storage-info",
     "allow-add-connection",
     "allow-remove-connection",
     "allow-test-connection",

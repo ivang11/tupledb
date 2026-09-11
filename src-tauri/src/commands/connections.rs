@@ -6,9 +6,30 @@ use crate::state::AppState;
 use tauri::State;
 use uuid::Uuid;
 
+#[derive(serde::Serialize)]
+pub struct ConnectionStorageInfo {
+    development: bool,
+    directory: String,
+}
+
+#[tauri::command]
+pub fn get_connection_storage_info(state: State<'_, AppState>) -> ConnectionStorageInfo {
+    ConnectionStorageInfo {
+        development: crate::connection_store::development_profile(),
+        directory: state
+            .connections_config
+            .read()
+            .directory()
+            .display()
+            .to_string(),
+    }
+}
+
 #[tauri::command]
 pub async fn get_connections(state: State<'_, AppState>) -> Result<Vec<Connection>, String> {
-    let connections = state.connections_config.read();
+    let mut store = state.connections_config.write();
+    store.reload()?;
+    let connections = store.data()?;
     // Strip passwords before sending to frontend
     Ok(connections
         .values()
@@ -33,38 +54,22 @@ pub async fn get_connections(state: State<'_, AppState>) -> Result<Vec<Connectio
 #[tauri::command]
 pub async fn add_connection(
     state: State<'_, AppState>,
-    mut connection: Connection,
+    connection: Connection,
 ) -> Result<(), String> {
     println!(
         "Saving connection: {} (Env: {:?})",
         connection.name, connection.environment
     );
 
-    // If editing and a password field is empty, preserve the existing stored password
-    {
-        let existing = state.connections_config.read();
-        if let Some(existing_conn) = existing.get(&connection.id) {
-            connection.preserve_secrets_from(existing_conn);
-        }
-    }
-
-    let mut connections = state.connections_config.write();
-    connections.insert(connection.id, connection);
-    drop(connections);
-    state.save()
+    state.connections_config.write().upsert(connection)
 }
 
 #[tauri::command]
 pub async fn remove_connection(state: State<'_, AppState>, id: Uuid) -> Result<(), String> {
     println!("Removing connection: {}", id);
 
-    disconnect(state.clone(), id).await?;
-
-    let mut connections = state.connections_config.write();
-    connections.remove(&id);
-    drop(connections);
-
-    state.save()
+    state.connections_config.write().remove(id)?;
+    disconnect(state.clone(), id).await
 }
 
 #[tauri::command]
@@ -80,6 +85,7 @@ pub async fn connect(
     let connection = state
         .connections_config
         .read()
+        .data()?
         .get(&connection.id)
         .cloned()
         .unwrap_or(connection);
@@ -102,27 +108,17 @@ pub async fn disconnect(state: State<'_, AppState>, connection_id: Uuid) -> Resu
 
 #[tauri::command]
 pub async fn export_connections(state: State<'_, AppState>, path: String) -> Result<(), String> {
-    let connections = state.connections_config.read();
-    let content = serde_json::to_string_pretty(&*connections)
-        .map_err(|e| format!("Failed to serialize connections: {}", e))?;
-    std::fs::write(&path, content).map_err(|e| format!("Failed to write file: {}", e))?;
-    Ok(())
+    state
+        .connections_config
+        .read()
+        .export(std::path::Path::new(&path))
 }
 
 #[tauri::command]
 pub async fn import_connections(state: State<'_, AppState>, path: String) -> Result<usize, String> {
     let content =
         std::fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?;
-    let imported: std::collections::HashMap<Uuid, Connection> =
-        serde_json::from_str(&content).map_err(|e| format!("Invalid connections file: {}", e))?;
-    let count = imported.len();
-    let mut connections = state.connections_config.write();
-    for (id, conn) in imported {
-        connections.insert(id, conn);
-    }
-    drop(connections);
-    state.save()?;
-    Ok(count)
+    state.connections_config.write().import(content.as_bytes())
 }
 
 #[tauri::command]
@@ -130,7 +126,7 @@ pub async fn test_connection(
     state: State<'_, AppState>,
     mut connection: Connection,
 ) -> Result<String, String> {
-    if let Some(stored) = state.connections_config.read().get(&connection.id) {
+    if let Some(stored) = state.connections_config.read().data()?.get(&connection.id) {
         connection.preserve_secrets_from(stored);
     }
     let (session, _) = sessions::open(&connection).await?;

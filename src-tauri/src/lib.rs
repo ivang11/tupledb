@@ -1,5 +1,6 @@
 pub mod benchmark;
 pub mod commands;
+pub mod connection_store;
 pub mod connections;
 pub mod database;
 pub mod filters;
@@ -35,6 +36,7 @@ pub fn run() {
             crate::benchmark::benchmark_config,
             crate::benchmark::report_benchmark_metrics,
             crate::commands::connections::get_connections,
+            crate::commands::connections::get_connection_storage_info,
             crate::commands::connections::add_connection,
             crate::commands::connections::remove_connection,
             crate::commands::connections::test_connection,

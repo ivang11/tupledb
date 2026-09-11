@@ -72,12 +72,59 @@ Saved connections now use a tagged value:
 }
 ```
 
-The Rust deserializer also accepts the former `mysql: { ... }` field. On the next
-save/export it writes the tagged format. It preserves IDs, SSH configuration,
-passwords, database selection, timeouts and read-only settings. Ambiguous or
-unknown engine configurations are rejected. No existing user file is rewritten
-by the source-code refactor itself. Older app versions cannot read the new
-format, so retain an export from the old version if downgrade is needed.
+The Rust deserializer also accepts the former `mysql: { ... }` field. It preserves
+IDs, SSH configuration, passwords, database selection, timeouts and read-only
+settings. Ambiguous or unknown engine configurations are rejected.
+
+### Storage safety and development isolation
+
+New builds save `connections.v2.json` inside Tauri's application configuration
+directory. On first use, a valid `connections.json` in that directory is copied
+into the new format; the original file is **never rewritten or removed**. This
+also migrates tagged configurations saved by earlier builds of this branch.
+Older versions continue using their original file, so they cannot overwrite the
+new version's connections. Later edits made in old versions are not automatically
+merged; export/import explicitly when switching versions. New exports still use
+the tagged format and cannot be read by old versions.
+
+Development/debug builds (including `tauri dev --release` and `cargo run`) use the `development/`
+subdirectory for connections and saved queries. They do not automatically read
+or migrate the installed application's files. A fresh development profile is
+intentionally empty: import an export to copy connections into it. Release builds
+keep their existing configuration directory. Already-built older development
+binaries do not acquire these protections; avoid running those against live data.
+
+`connection_store.rs` owns connection persistence:
+
+- Parse/read failures are retained and returned to the UI, which shows a persistent
+  warning with a reload action. Add, remove, import and export never use a silent
+  empty fallback. An invalid entry blocks the whole file rather than dropping it.
+- Writers hold an OS lock on `connections.lock` and compare the on-disk bytes with
+  their loaded snapshot. A stale instance must reload before saving; it cannot
+  replace another instance's changes. The lock is released on process exit.
+- Every mutation first creates a unique snapshot in `connection-backups/`.
+  Migration also backs up the original bytes. Snapshots are not automatically
+  rotated away, so subsequent saves cannot erase the last recoverable state.
+- Writes use a private temporary file in the destination directory, flush it,
+  atomically replace the destination and sync the directory on Unix. In-memory
+  mutations are published only after persistence succeeds. If a backup cannot be
+  created, saving stops before replacing the connections file.
+- If the versioned file disappears after initialization, startup blocks instead
+  of silently restoring an old legacy file or treating the profile as empty.
+- Exports cannot target the active connection storage directory or its backups.
+
+Snapshots and exports contain credentials, like the original connection file.
+New files use mode 0600 on Unix; on Windows they inherit the user's directory ACLs.
+Keep them private. To recover from a damaged/missing versioned file, close the app,
+retain a separate copy of the damaged file, copy a known-good snapshot to
+`connections.v2.json`, then reopen. Do not delete the entire configuration directory
+to clear an error. The app does not automatically choose a backup because doing so
+could silently discard newer connections. Missing historical data cannot be
+reconstructed without a surviving copy.
+
+Rust 1.89+ is required for the standard library's cross-process file locking API.
+Run `cargo test --manifest-path src-tauri/Cargo.toml --test connection_storage` for
+isolated regression tests; they never access real application configuration.
 
 Connecting and testing use the same pool setup and both validate an explicitly
 configured database. Empty password fields preserve existing credentials for the
@@ -361,7 +408,7 @@ npm run test:unit
 npm run test:component
 ./node_modules/.bin/vue-tsc --noEmit
 npm run build
-cargo test --manifest-path src-tauri/Cargo.toml --lib --test connection_config
+cargo test --manifest-path src-tauri/Cargo.toml --lib --test connection_config --test connection_storage
 TUPLEDB_TEST_MYSQL_URL=mysql://root@127.0.0.1:3306/mysql cargo test --manifest-path src-tauri/Cargo.toml --test mysql_integration -- --ignored
 TUPLEDB_TEST_POSTGRESQL_URL=postgres://postgres@127.0.0.1:5432/postgres cargo test --manifest-path src-tauri/Cargo.toml --test postgresql_integration -- --ignored --skip import_real_pg_dump
 node scripts/test-postgresql-transport.mjs
@@ -374,8 +421,9 @@ the Docker container serving that same PostgreSQL URL and omit `--skip`.
 The test invokes pg_dump inside that container against its fixture-owned database
 as `postgres`, then restores both COPY and INSERT dumps into fresh test databases.
 
-The PostgreSQL milestone is covered by 87 frontend unit tests, 55 component/store
-tests, 54 Rust unit tests, 8 configuration tests, 18 MySQL integration tests and
+The PostgreSQL milestone is covered by 87 frontend unit tests, 62 component/store
+tests, 54 Rust unit tests, 8 configuration tests, 19 connection-storage tests,
+18 MySQL integration tests and
 35 PostgreSQL integration tests. The real-server suites run against isolated
 MySQL 8.4, PostgreSQL 16 and PostgreSQL 17 containers.
 

@@ -14,6 +14,11 @@ description = "Allows retrieving the list of connections"
 commands.allow = ["get_connections"]
 
 [[permission]]
+identifier = "allow-get-connection-storage-info"
+description = "Allows reading the active connection storage profile and directory"
+commands.allow = ["get_connection_storage_info"]
+
+[[permission]]
 identifier = "allow-add-connection"
 description = "Allows adding a new connection"
 commands.allow = ["add_connection"]

@@ -1,4 +1,4 @@
-use crate::connections::Connection;
+use crate::connection_store::{config_directory, development_profile, ConnectionStore};
 use crate::database::driver::DatabaseDriver;
 use crate::saved_queries::SavedQuery;
 use crate::ssh::SshTunnel;
@@ -16,7 +16,7 @@ pub struct ActiveConnection {
 }
 
 pub struct AppState {
-    pub connections_config: RwLock<HashMap<Uuid, Connection>>,
+    pub connections_config: RwLock<ConnectionStore>,
     pub active_sessions: RwLock<HashMap<Uuid, ActiveConnection>>,
     pub saved_queries: RwLock<HashMap<Uuid, SavedQuery>>,
     pub canceled_imports: RwLock<HashSet<String>>,
@@ -55,24 +55,12 @@ impl AppState {
     }
 
     pub fn new(app_handle: &tauri::AppHandle) -> Self {
-        let config_dir = app_handle
+        let base = app_handle
             .path()
             .app_config_dir()
             .expect("failed to get config dir");
-        if !config_dir.exists() {
-            fs::create_dir_all(&config_dir).expect("failed to create config dir");
-        }
-
-        let mut connections = HashMap::new();
-        let config_file = config_dir.join("connections.json");
-
-        if config_file.exists() {
-            if let Ok(content) = fs::read_to_string(&config_file) {
-                if let Ok(loaded) = serde_json::from_str::<HashMap<Uuid, Connection>>(&content) {
-                    connections = loaded;
-                }
-            }
-        }
+        let config_dir = config_directory(base.clone(), development_profile());
+        let connections = ConnectionStore::open_profile(base, development_profile());
 
         let mut saved_queries = HashMap::new();
         let sq_file = config_dir.join("saved_queries.json");
@@ -94,18 +82,6 @@ impl AppState {
             app_handle: app_handle.clone(),
             config_dir,
         }
-    }
-
-    pub fn save(&self) -> Result<(), String> {
-        let config_file = self.config_dir.join("connections.json");
-        let connections = self.connections_config.read();
-        let content = serde_json::to_string_pretty(&*connections)
-            .map_err(|e| format!("Failed to serialize connections: {}", e))?;
-
-        fs::write(config_file, content)
-            .map_err(|e| format!("Failed to write connections to disk: {}", e))?;
-
-        Ok(())
     }
 
     pub fn save_queries(&self) -> Result<(), String> {

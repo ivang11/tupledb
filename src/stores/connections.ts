@@ -19,6 +19,8 @@ interface OpenConnectionState {
 
 export const useConnectionStore = defineStore('connections', () => {
   const connections = ref<Connection[]>([])
+  const storageError = ref<string | null>(null)
+  const storageInfo = ref<{ development: boolean; directory: string } | null>(null)
   const availableDrivers = ref<DriverDescriptor[]>([])
   const openConnections = ref<Record<string, OpenConnectionState>>({})
 
@@ -38,20 +40,34 @@ export const useConnectionStore = defineStore('connections', () => {
 
   async function fetchConnections() {
     try {
+      storageInfo.value = await invoke('get_connection_storage_info')
       availableDrivers.value = await invoke<DriverDescriptor[]>('get_available_drivers')
       connections.value = await invoke<Connection[]>('get_connections')
+      storageError.value = null
       for (const connection of connections.value) {
         if (openConnections.value[connection.id]) {
           openConnections.value[connection.id].connection = connection
         }
       }
     } catch (error) {
+      storageError.value = String(error)
       console.error('Failed to fetch connections:', error)
     }
   }
 
+  async function writeConnections(command: string, args: Record<string, unknown>) {
+    try {
+      const result = await invoke(command, args)
+      storageError.value = null
+      return result
+    } catch (error) {
+      storageError.value = String(error)
+      throw error
+    }
+  }
+
   async function addConnection(connection: Connection) {
-    await invoke('add_connection', { connection })
+    await writeConnections('add_connection', { connection })
     await fetchConnections()
     if (openConnections.value[connection.id]) {
       openConnections.value[connection.id].connection =
@@ -60,7 +76,7 @@ export const useConnectionStore = defineStore('connections', () => {
   }
 
   async function removeConnection(id: string) {
-    await invoke('remove_connection', { id })
+    await writeConnections('remove_connection', { id })
     delete openConnections.value[id]
     await fetchConnections()
   }
@@ -74,7 +90,7 @@ export const useConnectionStore = defineStore('connections', () => {
   }
 
   async function importConnections(path: string) {
-    const count = await invoke<number>('import_connections', { path })
+    const count = await writeConnections('import_connections', { path }) as number
     await fetchConnections()
     return count
   }
@@ -294,6 +310,8 @@ export const useConnectionStore = defineStore('connections', () => {
   return {
     tableReference,
     connections,
+    storageError,
+    storageInfo,
     availableDrivers,
     openConnections,
     fetchConnections,

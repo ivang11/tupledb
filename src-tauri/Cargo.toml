@@ -5,6 +5,7 @@ description = "A secure MySQL client built with Tauri and Vue"
 authors = ["Ivan"]
 license = "MIT"
 edition = "2021"
+rust-version = "1.89"
 
 [lib]
 name = "app_lib"

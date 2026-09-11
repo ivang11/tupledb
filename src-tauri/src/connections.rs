@@ -46,7 +46,8 @@ impl Connection {
 }
 
 /// Read both the original MySQL-only format and the tagged format. Serialization
-/// always writes the tagged format, so the next save/export migrates old files.
+/// always writes the tagged format. ConnectionStore migrates into a separate
+/// versioned file and leaves the original file untouched for older versions.
 #[derive(Deserialize)]
 struct StoredConnection {
     id: Uuid,

@@ -27,6 +27,7 @@ beforeEach(() => {
     if (command === 'get_databases') return ['app']
     if (command === 'get_available_drivers') return [{ engine: 'mysql', label: 'MySQL', defaultPort: 3306 }]
     if (command === 'get_connections') return [structuredClone(connection)]
+    if (command === 'get_connection_storage_info') return { development: true, directory: '/isolated/development' }
   })
 })
 
@@ -56,6 +57,52 @@ describe('database connection IPC contract', () => {
     await store.fetchConnections()
     expect(store.availableDrivers.map(driver => driver.engine)).toEqual(['mysql'])
     expect(store.connections[0].database.engine).toBe('mysql')
+    expect(store.storageInfo?.development).toBe(true)
+  })
+
+  it('surfaces storage load errors without replacing the last known connections', async () => {
+    const store = useConnectionStore()
+    await store.fetchConnections()
+    invoke.mockRejectedValueOnce('Cannot read saved connections; saving is blocked')
+    await store.fetchConnections()
+    expect(store.connections).toHaveLength(1)
+    expect(store.storageError).toContain('saving is blocked')
+    await store.fetchConnections()
+    expect(store.storageError).toBeNull()
+  })
+
+  it('keeps a persistent startup error instead of pretending an empty list loaded successfully', async () => {
+    const store = useConnectionStore()
+    invoke.mockImplementation(async (command: string) => {
+      if (command === 'get_available_drivers') return []
+      throw 'Cannot read saved connections; saving is blocked'
+    })
+    await store.fetchConnections()
+    expect(store.storageError).toContain('Cannot read saved connections')
+    expect(store.connections).toEqual([])
+  })
+
+  it('does not remove UI connections or sessions when persistence fails', async () => {
+    const store = useConnectionStore()
+    await store.fetchConnections()
+    await store.connect(connection)
+    invoke.mockRejectedValueOnce('Saved connections changed. Reload connections before saving')
+    await expect(store.removeConnection(connection.id)).rejects.toContain('Reload connections')
+    expect(store.connections).toHaveLength(1)
+    expect(store.openConnections[connection.id]).toBeDefined()
+    expect(store.storageError).toContain('Reload connections')
+  })
+
+  it('does not publish failed additions or imports in the UI', async () => {
+    const store = useConnectionStore()
+    await store.fetchConnections()
+    invoke.mockRejectedValueOnce('Cannot create backup')
+    await expect(store.addConnection({ ...connection, id: 'new' })).rejects.toBe('Cannot create backup')
+    expect(store.connections).toHaveLength(1)
+    expect(store.storageError).toBe('Cannot create backup')
+    invoke.mockRejectedValueOnce('Cannot import while storage is blocked')
+    await expect(store.importConnections('fixture.json')).rejects.toContain('blocked')
+    expect(store.connections).toHaveLength(1)
   })
 
   it('stores server metadata and replaces capabilities on reconnection', async () => {
