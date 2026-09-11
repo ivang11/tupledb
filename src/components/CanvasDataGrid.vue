@@ -116,6 +116,10 @@
 </template>
 
 <script setup lang="ts">
+import type { TableRef } from '@/types/database'
+
+import { rowKey, isPrimaryKeyColumn, type PrimaryKey } from '@/lib/tableIdentity'
+
 import {
   computed,
   nextTick,
@@ -141,7 +145,7 @@ interface PendingInsert {
 const props = defineProps<{
   columns: GridColumn[]
   rows: any[]
-  primaryKey: string | null
+  primaryKey: PrimaryKey
   totalCount: number
   pendingChanges: Record<string, Record<string, any>>
   pendingDeletions: Record<string, boolean>
@@ -156,7 +160,7 @@ const props = defineProps<{
   insertRowValues: Record<string, string>
   pendingInserts: PendingInsert[]
   columnWidths: Record<string, number>
-  fkMap: Record<string, { table: string; column: string }>
+  fkMap: Record<string, { table: string | TableRef; column: string }>
   bottomInset?: number
   isColAutoIncrement: (colName: string) => boolean
   isBooleanCol: (colName: string) => boolean
@@ -170,7 +174,7 @@ const emit = defineEmits<{
   'cell-input': [row: any, colName: string, value: string]
   'sort': [colName: string]
   'start-col-resize': [e: MouseEvent, colName: string]
-  'navigate-related': [table: string, column: string, value: any]
+  'navigate-related': [table: string | TableRef, column: string, value: any]
   'insert-row-input': [colName: string, value: string]
   'insert-row-submit': []
   'insert-row-cancel': []
@@ -321,7 +325,7 @@ function refreshColors() {
 }
 
 function rowSelectionKey(row: any, index: number) {
-  return props.primaryKey ? String(rawCellValue(row, props.primaryKey)) : `__row_index:${index}`
+  return props.primaryKey ? rowKey(row, props.primaryKey, props.columns) : `__row_index:${index}`
 }
 
 function isSelected(row: any, index: number) {
@@ -330,11 +334,11 @@ function isSelected(row: any, index: number) {
 }
 
 function isDeleted(row: any) {
-  return !!props.pendingDeletions[String(rawCellValue(row, props.primaryKey || ''))]
+  return !!props.pendingDeletions[rowKey(row, props.primaryKey, props.columns)]
 }
 
 function isChanged(row: any, column: string) {
-  return props.pendingChanges[String(rawCellValue(row, props.primaryKey || ''))]?.[column] !== undefined
+  return props.pendingChanges[rowKey(row, props.primaryKey, props.columns)]?.[column] !== undefined
 }
 
 function truncate(value: string, width: number) {
@@ -356,7 +360,7 @@ function drawHeader(ctx: CanvasRenderingContext2D, range: ReturnType<typeof visi
     }
     ctx.fillStyle = colors.foreground
     ctx.font = `700 12px ${colors.mono}`
-    const suffix = props.primaryKey === item.column.name ? '  PK' : ''
+    const suffix = isPrimaryKeyColumn(props.primaryKey, item.column.name) ? '  PK' : ''
     ctx.fillText(truncate(`${item.column.name}${suffix}`, item.size), x + 12, 17)
     ctx.fillStyle = colors.secondary
     ctx.font = `600 9px ${colors.mono}`
@@ -617,7 +621,7 @@ function pendingValue(insert: PendingInsert, columnName: string) {
 
 const inlineEditor = computed(() => {
   if (!props.primaryKey || !props.inlineEditColumn || props.selectedRowPk === null) return null
-  const rowIndex = props.rows.findIndex(row => String(rawCellValue(row, props.primaryKey!)) === props.selectedRowPk)
+  const rowIndex = props.rows.findIndex(row => rowKey(row, props.primaryKey, props.columns) === props.selectedRowPk)
   const column = columnLayout.value.find(item => item.column.name === props.inlineEditColumn)
   if (rowIndex < 0 || !column) return null
   const left = column.start - scrollLeft.value
@@ -627,7 +631,7 @@ const inlineEditor = computed(() => {
   return {
     row,
     rowIndex,
-    rowKey: String(rawCellValue(row, props.primaryKey)),
+    rowKey: rowKey(row, props.primaryKey, props.columns),
     column: column.column,
     value: props.getCellValue(row, column.column.name),
     style: {
@@ -705,10 +709,15 @@ watch(
   },
 )
 
+// The canvas is conditional: initial async loads and empty filtered results
+// remove it. Bind the context whenever Vue creates a new canvas, not just once
+// when the grid itself mounts, or draws target a missing/detached element.
+watch(canvas, (element) => {
+  context = element?.getContext('2d', { alpha: false }) ?? null
+  if (element) updateViewport()
+}, { flush: 'post' })
+
 onMounted(() => {
-  const element = canvas.value
-  if (!element) return
-  context = element.getContext('2d', { alpha: false })
   if (typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(updateViewport)
     resizeObserver.observe(scrollContainer.value!)

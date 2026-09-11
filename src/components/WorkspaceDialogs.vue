@@ -4,6 +4,7 @@
     :open="showTableSelector"
     :database="exportContext?.database ?? ''"
     :tables="exportContextTables"
+    :supports-sql="!!exportContext && store.openConnections[exportContext.connectionId]?.capabilities.exportSql"
     :loading-tables="isLoadingExportTables"
     :selected-tables="selectedExportTables"
     :current-mode="currentExportMode"
@@ -33,6 +34,8 @@
     v-if="!!showNewDb"
     :open="!!showNewDb"
     :connection-name="showNewDb ? (store.openConnections[showNewDb]?.connection.name ?? '') : ''"
+    :supports-collations="!!showNewDb && store.openConnections[showNewDb]?.capabilities.databaseCollations"
+    :encoding-label="showNewDb && store.openConnections[showNewDb]?.connection.database.engine === 'postgresql' ? 'Encoding' : 'Character Set'"
     :name="newDbName"
     :character-set="newDbCharacterSet"
     :collation="newDbCollation"
@@ -76,6 +79,7 @@
     :x="sidebarContextMenu.x"
     :y="sidebarContextMenu.y"
     :connection="sidebarContextMenu.connection"
+    :can-create-database="!!sidebarContextMenu.connection && store.openConnections[sidebarContextMenu.connection.id]?.capabilities.createDatabase"
     :is-connected="!!sidebarContextMenu.connection && !!store.openConnections[sidebarContextMenu.connection.id]"
     @edit="
       (conn) => {
@@ -108,6 +112,7 @@
     :y="sidebarTableContextMenu.y"
     :table-name="sidebarTableContextMenu.tableName"
     :selected-count="sidebarTableContextMenu.selectedCount"
+    :can-write="store.openConnections[sidebarTableContextMenu.connectionId]?.connection.allow_writes !== false"
     @truncate="
       stageSidebarTableAction(
         'truncate',
@@ -141,6 +146,8 @@
     :x="sidebarDatabaseContextMenu.x"
     :y="sidebarDatabaseContextMenu.y"
     :database-name="sidebarDatabaseContextMenu.databaseName"
+    :can-import="store.openConnections[sidebarDatabaseContextMenu.connectionId]?.capabilities.importSql"
+    :can-drop-database="store.openConnections[sidebarDatabaseContextMenu.connectionId]?.capabilities.createDatabase"
     @open-query="openQueryTab(sidebarDatabaseContextMenu.connectionId, sidebarDatabaseContextMenu.databaseName)"
     @open-in-split="openDatabaseInSplit(sidebarDatabaseContextMenu.connectionId, sidebarDatabaseContextMenu.databaseName)"
     @refresh-schema="refreshDatabaseSchema(sidebarDatabaseContextMenu.connectionId, sidebarDatabaseContextMenu.databaseName)"
@@ -155,6 +162,8 @@
     :open="showDeleteTablesDialog"
     :database="deleteTablesContext?.database ?? ''"
     :tables="deleteTablesDialogTables"
+    :supports-fk-checks="!!deleteTablesContext && store.openConnections[deleteTablesContext.connectionId]?.capabilities.disableForeignKeyChecks"
+    :can-drop-database="!!deleteTablesContext && store.openConnections[deleteTablesContext.connectionId]?.capabilities.createDatabase"
     :loading-tables="isLoadingDeleteTables"
     :is-executing="isExecutingDeleteTables"
     :error="deleteTablesError"
@@ -183,7 +192,7 @@
     :description="deleteRowTarget && (getPaneTab(deleteRowTarget.pane)?.selectedRowPks?.length ?? 0) > 1
       ? `Mark ${getPaneTab(deleteRowTarget.pane)?.selectedRowPks?.length} rows for deletion? They will not be deleted until you apply changes.`
       : 'Mark this row for deletion? It will not be deleted until you apply changes.'"
-    :show-fk-option="true"
+    :show-fk-option="!!deleteRowTarget && !!store.openConnections[getPaneTab(deleteRowTarget.pane)?.connectionId ?? '']?.capabilities.disableForeignKeyChecks"
     :disable-fk-checks="disableFkChecks"
     @update:open="(val) => { if (!val) showDeleteRowDialog = false }"
     @update:disable-fk-checks="disableFkChecks = $event"

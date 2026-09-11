@@ -27,10 +27,12 @@
     </button>
     <button
       class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-primary/10 text-foreground transition-colors text-left"
-      title="Import SQL"
+      :disabled="canImport === false"
+      :class="{ 'opacity-50 cursor-not-allowed': canImport === false }"
+      :title="canImport === false ? 'SQL import is not implemented for this database engine yet' : 'Import SQL'"
       @click="emit('import-sql')"
     >
-      <UploadIcon class="size-3.5" /> Import SQL
+      <UploadIcon class="size-3.5" /> Import SQL<span v-if="canImport === false" class="text-muted-foreground">(not available yet)</span>
     </button>
     <button
       class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-primary/10 text-foreground transition-colors text-left"
@@ -55,6 +57,7 @@
     </button>
     <button
       class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-destructive/10 text-destructive transition-colors text-left"
+      v-if="canDropDatabase !== false"
       @click="emit('drop')"
     >
       <Trash2Icon class="size-3.5" /> Drop Database
@@ -79,6 +82,8 @@ defineProps<{
   x: number;
   y: number;
   databaseName: string;
+  canImport?: boolean;
+  canDropDatabase?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -92,4 +97,3 @@ const emit = defineEmits<{
   drop: [];
 }>();
 </script>
-

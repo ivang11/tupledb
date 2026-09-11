@@ -36,22 +36,22 @@
           <div v-else class="grid grid-cols-1 gap-0.5">
             <div
               v-for="(table, idx) in tables"
-              :key="table.name"
+              :key="tableHandle(table)"
               @click="handleTableClick(idx, $event)"
               :class="['flex items-center gap-3 px-2.5 py-2 rounded-lg cursor-pointer select-none transition-all border',
-                selectedTables.includes(table.name)
+                selectedTables.includes(tableHandle(table))
                   ? 'bg-destructive/10 border-destructive/30 shadow-sm'
                   : 'border-transparent hover:bg-muted/50']"
             >
               <div :class="['size-4 rounded border-2 flex items-center justify-center shrink-0 transition-all',
-                selectedTables.includes(table.name)
+                selectedTables.includes(tableHandle(table))
                   ? 'bg-destructive border-destructive shadow-sm shadow-destructive/20'
                   : 'border-muted-foreground/25']">
-                <CheckIcon v-if="selectedTables.includes(table.name)" class="size-2.5 text-destructive-foreground stroke-3" />
+                <CheckIcon v-if="selectedTables.includes(tableHandle(table))" class="size-2.5 text-destructive-foreground stroke-3" />
               </div>
               <span :class="['text-sm truncate transition-colors',
-                selectedTables.includes(table.name) ? 'text-destructive font-semibold' : 'font-medium']">
-                {{ table.name }}
+                selectedTables.includes(tableHandle(table)) ? 'text-destructive font-semibold' : 'font-medium']">
+                {{ tableLabel(table.reference ?? table.name) }}
               </span>
             </div>
           </div>
@@ -82,6 +82,7 @@
       <!-- FK checks option -->
       <div v-if="!loadingTables && tables.length > 0" class="px-8 py-3 border-t bg-muted/10">
         <button
+          v-if="supportsFkChecks !== false"
           @click="disableFkChecks = !disableFkChecks"
           class="flex items-center gap-3 cursor-pointer"
         >
@@ -102,6 +103,7 @@
             variant="outline"
             class="text-xs font-bold h-9 border-destructive/40 text-destructive hover:bg-destructive/10 hover:border-destructive"
             :disabled="isExecuting || loadingTables"
+            v-if="canDropDatabase !== false"
             @click="handleDropDatabase"
           >
             <span v-if="!confirmDropDb">Drop Database</span>
@@ -123,6 +125,8 @@
 </template>
 
 <script setup lang="ts">
+import { tableHandle, tableLabel } from '@/lib/tableReference'
+
 import { ref } from 'vue'
 import { CheckIcon, Trash2Icon, AlertTriangleIcon, XCircleIcon } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -138,7 +142,9 @@ import {
 const props = defineProps<{
   open: boolean
   database: string
-  tables: { name: string }[]
+  supportsFkChecks?: boolean
+  canDropDatabase?: boolean
+  tables: { name: string; reference?: import('@/types/database').TableRef }[]
   loadingTables?: boolean
   isExecuting?: boolean
   error?: string | null
@@ -159,16 +165,16 @@ function toggleAll() {
   if (selectedTables.value.length === props.tables.length) {
     selectedTables.value = []
   } else {
-    selectedTables.value = props.tables.map(t => t.name)
+    selectedTables.value = props.tables.map(t => tableHandle(t))
   }
 }
 
 function handleTableClick(idx: number, event: MouseEvent) {
-  const name = props.tables[idx].name
+  const name = tableHandle(props.tables[idx])
   if (event.shiftKey && lastClickedIndex.value >= 0) {
     const start = Math.min(lastClickedIndex.value, idx)
     const end = Math.max(lastClickedIndex.value, idx)
-    const rangeNames = props.tables.slice(start, end + 1).map(t => t.name)
+    const rangeNames = props.tables.slice(start, end + 1).map(t => tableHandle(t))
     const isSelecting = !selectedTables.value.includes(name)
     if (isSelecting) {
       selectedTables.value = [...new Set([...selectedTables.value, ...rangeNames])]
@@ -196,10 +202,11 @@ function handleClose() {
 }
 
 function handleDeleteTables() {
-  emit('delete-tables', [...selectedTables.value], disableFkChecks.value)
+  emit('delete-tables', [...selectedTables.value], props.supportsFkChecks !== false && disableFkChecks.value)
 }
 
 function handleDropDatabase() {
+  if (props.canDropDatabase === false) return
   if (!confirmDropDb.value) {
     confirmDropDb.value = true
     return

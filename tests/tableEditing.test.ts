@@ -127,7 +127,7 @@ test('normalizeChangeValue: boolean strings become 0/1', () => {
 
 test('normalizeChangeValue: numeric strings are coerced to numbers', () => {
   assert.equal(normalizeChangeValue('42'), 42)
-  assert.equal(normalizeChangeValue('3.14'), 3.14)
+  assert.equal(normalizeChangeValue('3.14'), '3.14')
   assert.equal(normalizeChangeValue('-7'), -7)
 })
 

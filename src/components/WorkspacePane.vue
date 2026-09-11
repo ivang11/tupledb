@@ -65,7 +65,7 @@
       <TableSubTabs
         :active-mode="pane.viewMode"
         :index-count="(getPaneTab(pane)?.tableIndexes ?? []).length || null"
-        :can-insert-row="pane.viewMode === 'content' && !!getPrimaryKey(pane)"
+        :can-insert-row="pane.viewMode === 'content' && !!getPrimaryKey(pane) && supports(pane, 'editRows') && getPaneConnection(pane)?.allow_writes !== false"
         :show-row-detail-toggle="pane.viewMode === 'content'"
         :row-detail-on-click="rowDetailOnClick"
         @set-mode="
@@ -97,7 +97,7 @@
         :metadata-loaded="getPaneTab(pane)?.metadataLoaded ?? false"
         :pane-id="pane.id"
         :index-panel-height="structureIndexHeights[pane.id]"
-        :can-edit="getPaneConnection(pane)?.allow_writes !== false"
+        :can-edit="getPaneConnection(pane)?.allow_writes !== false && supports(pane, 'alterColumns')"
         :edit-disabled-reason="'This connection is read-only'"
         :pending-column-changes="getPaneTab(pane)?.pendingStructureChanges ?? {}"
         :has-pending-changes="hasPendingChangesInPane(pane)"
@@ -180,6 +180,7 @@
         :pending-deletions-count="pendingSummaryForPane(pane).pendingDeletionsCount"
         :pending-insertions-count="pendingSummaryForPane(pane).pendingInsertionsCount"
         :disable-fk-checks="disableFkChecks"
+        :supports-fk-checks="supports(pane, 'disableForeignKeyChecks')"
         :is-saving="isSaving"
         @update:disable-fk-checks="disableFkChecks = $event"
         @discard="discardChanges(pane)"
@@ -197,6 +198,8 @@
 
 <script setup lang="ts">
 import { defineAsyncComponent } from "vue";
+import { useConnectionStore } from '@/stores/connections';
+import type { DatabaseCapabilities } from '@/types/connection';
 import type { PaneState } from "@/types/workspace";
 import { useWorkspacePaneContext } from "@/composables/useWorkspacePaneContext";
 import TabBar from "@/components/TabBar.vue";
@@ -210,6 +213,12 @@ import TableExplorerEmptyState from "@/components/TableExplorerEmptyState.vue";
 import TableSubTabs from "@/components/TableSubTabs.vue";
 
 const QueryEditor = defineAsyncComponent(() => import("@/components/QueryEditor.vue"));
+
+const connectionStore = useConnectionStore();
+function supports(pane: PaneState, capability: keyof DatabaseCapabilities): boolean {
+  const tab = getPaneTab(pane);
+  return !!(tab && connectionStore.openConnections[tab.connectionId]?.capabilities[capability]);
+}
 
 defineProps<{
   pane: PaneState;

@@ -249,6 +249,7 @@
 </template>
 
 <script setup lang="ts">
+import { databaseEngines, connectionAddress } from "@/lib/databaseEngines";
 import { computed, nextTick, ref } from "vue";
 import {
   FileInputIcon,
@@ -331,21 +332,14 @@ function envDot(env: Environment): string {
   }
 }
 
-const ENG_ABBR: Record<string, string> = {
-  mysql: "My",
-  postgres: "Pg",
-  sqlite: "Sl",
-  mssql: "Ms",
-  mongo: "Mo",
-};
+const ENG_ABBR: Record<string, string> = Object.fromEntries(Object.entries(databaseEngines).map(([engine, info]) => [engine, info.abbreviation]));
 
-function engineOf(_conn: Connection): string {
-  // For now only MySQL is supported, but the design wants engine glyphs ready for multi-DB.
-  return "mysql";
+function engineOf(conn: Connection): string {
+  return conn.database.engine;
 }
 
 function hostOf(conn: Connection): string {
-  return `${conn.mysql.user}@${conn.mysql.host}:${conn.mysql.port}`;
+  return connectionAddress(conn);
 }
 
 const filteredConnections = computed(() => {
@@ -354,8 +348,7 @@ const filteredConnections = computed(() => {
   return props.connections.filter(
     (c) =>
       c.name.toLowerCase().includes(q) ||
-      c.mysql.host.toLowerCase().includes(q) ||
-      c.mysql.user.toLowerCase().includes(q) ||
+      connectionAddress(c).toLowerCase().includes(q) ||
       c.environment.toLowerCase().includes(q) ||
       engineOf(c).toLowerCase().includes(q),
   );

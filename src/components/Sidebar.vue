@@ -93,6 +93,7 @@
           type="button"
           class="size-9 shrink-0 rounded-lg bg-black/20 hover:bg-black/30 text-white/80 hover:text-white transition-colors flex items-center justify-center"
           title="New Database"
+          v-if="activeConnection?.capabilities?.createDatabase"
           @click="emit('new-database', selectedConnectionId)"
         >
           <PlusIcon class="size-4" :stroke-width="2.5" />
@@ -150,32 +151,33 @@
       <template v-if="selectedConnectionId && openConnections[selectedConnectionId] && activeDatabase">
         <div class="px-4 mt-1 pb-3">
           <div class="space-y-0.5">
+              <template v-for="(table, index) in visibleTables" :key="tableHandle(table)">
+              <div v-if="table.reference?.schema && (index === 0 || table.reference.schema !== visibleTables[index - 1]?.reference?.schema)" class="pt-3 pb-1 text-xs font-semibold text-muted-foreground">{{ table.reference.schema }}</div>
               <button
-                v-for="table in filteredTables(activeConnId, activeDb)"
-                :key="table.name"
-                :ref="(el) => setTableRef(el as HTMLElement | null, table.name, activeDb, activeConnId)"
-                @click="handleTableClick($event, activeConnId, activeDb, table.name)"
-                @contextmenu="emit('context-menu-table', $event, activeConnId, activeDb, table.name)"
-	                :class="tableButtonClasses(table.name, activeDb, activeConnId)"
+                :ref="(el) => setTableRef(el as HTMLElement | null, tableHandle(table), activeDb, activeConnId)"
+                @click="handleTableClick($event, activeConnId, activeDb, tableHandle(table))"
+                @contextmenu="emit('context-menu-table', $event, activeConnId, activeDb, tableHandle(table))"
+	                :class="tableButtonClasses(tableHandle(table), activeDb, activeConnId)"
               >
                 <EyeIcon
                   v-if="isView(table)"
-                  :class="tableIconClasses(table.name, activeDb, activeConnId)"
+                  :class="tableIconClasses(tableHandle(table), activeDb, activeConnId)"
                 />
                 <TableIcon
                   v-else
-                  :class="tableIconClasses(table.name, activeDb, activeConnId)"
+                  :class="tableIconClasses(tableHandle(table), activeDb, activeConnId)"
                 />
                 <span class="flex-1 truncate text-sm font-semibold">{{ table.name }}</span>
                 <!-- Open indicator -->
                 <span
-                  v-if="isTableOpen(table.name, activeDb, activeConnId) && !isTableActive(table.name, activeDb, activeConnId)"
+                  v-if="isTableOpen(tableHandle(table), activeDb, activeConnId) && !isTableActive(tableHandle(table), activeDb, activeConnId)"
                   class="size-1.5 rounded-full shrink-0 bg-primary/30"
                 />
               </button>
+              </template>
 
               <div
-                v-if="filteredTables(activeConnId, activeDb).length === 0 && search"
+                v-if="visibleTables.length === 0 && search"
                 class="px-2 py-1 text-[10px] text-sidebar-foreground/30 italic"
               >
                 No matches
@@ -204,6 +206,9 @@
 </template>
 
 <script setup lang="ts">
+import { tableHandle, tableSelectionKey } from '@/lib/tableReference'
+
+import { databaseEngines } from "@/lib/databaseEngines";
 import { ref, computed, nextTick, onMounted, onUnmounted } from "vue";
 import {
   SearchIcon,
@@ -233,6 +238,7 @@ const props = defineProps<{
       status?: "connected" | "error";
       statusMessage?: string | null;
       tables: Record<string, any[]>;
+      capabilities?: import("@/types/connection").DatabaseCapabilities;
     }
   >;
   isTableActive: (name: string, db: string, connId: string) => boolean;
@@ -305,13 +311,13 @@ function handleTableClick(
 const tableRefs = ref<Record<string, HTMLElement>>({});
 
 function setTableRef(el: HTMLElement | null, tableName: string, db: string, connId: string) {
-  const key = `${connId}:${db}:${tableName}`;
+  const key = tableSelectionKey(connId, db, tableName);
   if (el) tableRefs.value[key] = el;
   else delete tableRefs.value[key];
 }
 
 function scrollToTable(tableName: string, db: string, connId: string) {
-  const key = `${connId}:${db}:${tableName}`;
+  const key = tableSelectionKey(connId, db, tableName);
   const el = tableRefs.value[key];
   el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
@@ -378,6 +384,7 @@ const activeConnection = computed(() =>
 )
 const activeDatabase = computed(() => activeConnection.value?.selectedDatabase ?? null)
 const activeDb = computed(() => activeDatabase.value ?? '')
+const visibleTables = computed(() => props.filteredTables(activeConnId.value, activeDb.value))
 
 // ── Database dropdown ─────────────────────────────────────────────────────────
 const dbDropdownOpen = ref(false)
@@ -421,9 +428,9 @@ function onClickOutsideDb(e: MouseEvent) {
 onMounted(() => document.addEventListener('mousedown', onClickOutsideDb))
 onUnmounted(() => document.removeEventListener('mousedown', onClickOutsideDb))
 const activeConnectionDetail = computed(() => {
-  return activeConnection.value?.serverVersion
-    ? `MySQL ${activeConnection.value.serverVersion}`
-    : 'MySQL'
+  const engine = activeConnection.value?.connection.database.engine
+  const label = engine ? databaseEngines[engine].label : ''
+  return activeConnection.value?.serverVersion ? `${label} ${activeConnection.value.serverVersion}` : label
 })
 const activeConnectionStatus = computed(() =>
   activeConnection.value?.status === "error" ? "Connection error" : "Connected",

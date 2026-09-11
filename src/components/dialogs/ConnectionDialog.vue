@@ -12,12 +12,19 @@
           {{
             isEdit
               ? "Update your connection settings"
-              : "Configure your MySQL connection settings"
+              : `Configure your ${engineLabel} connection settings`
           }}
         </DialogDescription>
       </DialogHeader>
 
       <div class="space-y-5 py-2">
+        <div class="space-y-2">
+          <Label>Database engine</Label>
+          <select :value="connection.database.engine" :disabled="isEdit" @change="changeEngine(($event.target as HTMLSelectElement).value)"
+            class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+            <option v-for="driver in store.availableDrivers" :key="driver.engine" :value="driver.engine">{{ driver.label }}</option>
+          </select>
+        </div>
         <div class="grid grid-cols-2 gap-4">
           <div class="space-y-2">
             <Label>Connection Name</Label>
@@ -66,31 +73,31 @@
 
         <Separator />
 
-        <div class="space-y-4">
+        <div v-if="connection.database.engine !== 'sqlite'" class="space-y-4">
           <div
             class="flex items-center gap-2 text-xs font-bold text-muted-foreground uppercase tracking-wider"
           >
-            <HardDriveIcon class="size-3.5" /> MySQL Settings
+            <HardDriveIcon class="size-3.5" /> {{ engineLabel }} Settings
           </div>
           <div class="grid grid-cols-12 gap-3">
             <div class="col-span-8 space-y-2">
               <Label>Host</Label>
-              <Input v-model="connection.mysql.host" placeholder="127.0.0.1" />
+              <Input v-model="connection.database.settings.host" placeholder="127.0.0.1" />
             </div>
             <div class="col-span-4 space-y-2">
               <Label>Port</Label>
-              <Input v-model.number="connection.mysql.port" type="number" />
+              <Input v-model.number="connection.database.settings.port" type="number" />
             </div>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div class="space-y-2">
               <Label>User</Label>
-              <Input v-model="connection.mysql.user" placeholder="root" />
+              <Input v-model="connection.database.settings.user" placeholder="root" />
             </div>
             <div class="space-y-2">
               <Label>Password</Label>
               <Input
-                v-model="connection.mysql.password"
+                v-model="connection.database.settings.password"
                 type="password"
                 :placeholder="
                   isEdit ? 'Leave blank to keep existing' : '••••••••'
@@ -107,7 +114,7 @@
                 ></Label
               >
               <Input
-                v-model="connection.mysql.database"
+                v-model="connection.database.settings.database"
                 placeholder="Leave blank to pick after connecting"
               />
             </div>
@@ -126,9 +133,30 @@
               />
             </div>
           </div>
+          <div v-if="connection.database.engine === 'postgresql'" class="space-y-2">
+            <Label>TLS mode</Label>
+            <select v-model="connection.database.settings.ssl_mode" class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+              <option value="disable">Disable</option><option value="prefer">Prefer</option>
+              <option value="require">Require encryption</option><option value="verify_ca">Verify CA</option><option value="verify_full">Verify CA and hostname</option>
+            </select>
+            <div v-if="['verify_ca', 'verify_full'].includes(connection.database.settings.ssl_mode)" class="space-y-1">
+              <Label>CA certificate <span class="text-muted-foreground font-normal">(PEM)</span></Label>
+              <textarea
+                v-model="connection.database.settings.ssl_root_cert"
+                rows="4"
+                placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
+                class="w-full rounded-md border border-input px-3 py-2 text-xs font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring resize-y"
+              />
+              <p class="text-xs text-muted-foreground">Required unless the server's certificate already chains to a CA your OS trusts. Paste the CA (not the server) certificate that signed it — most self-hosted PostgreSQL servers use a private CA, so leaving this blank will fail to connect. If you don't have one, use "Require encryption" instead.</p>
+            </div>
+          </div>
         </div>
 
         <Separator />
+
+        <p v-if="!isAvailable" class="text-xs text-muted-foreground">
+          {{ engineLabel }} connections are not available in this version.
+        </p>
 
         <!-- SSH Tunnel -->
         <div class="space-y-4">
@@ -263,7 +291,7 @@
         <div class="flex gap-2">
           <Button
             variant="outline"
-            :disabled="isTesting || isSaving"
+            :disabled="isTesting || isSaving || !isAvailable"
             @click="test"
           >
             {{ isTesting ? "Testing..." : "Test" }}
@@ -277,7 +305,7 @@
           </Button>
           <Button
             v-if="showConnectButton"
-            :disabled="isSaving || !connection.name"
+            :disabled="isSaving || !connection.name || !isAvailable"
             @click="emit('save', buildConn(), true)"
           >
             {{ isSaving ? "Saving..." : "Save & Connect" }}
@@ -289,7 +317,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { computed, toRaw, ref, watch } from "vue";
+import { databaseEngines } from '@/lib/databaseEngines';
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useConnectionStore } from "@/stores/connections";
 import type { Connection } from "@/types/connection";
@@ -329,6 +358,8 @@ const emit = defineEmits<{
 }>();
 
 const store = useConnectionStore();
+const engineLabel = computed(() => databaseEngines[props.connection.database.engine].label);
+const isAvailable = computed(() => store.availableDrivers.some(driver => driver.engine === props.connection.database.engine));
 
 const sshEnabled = ref(false);
 const sshAuthType = ref<"password" | "key">("password");
@@ -344,6 +375,14 @@ const isTesting = ref(false);
 const testResult = ref<{ ok: boolean; msg: string } | null>(null);
 
 const isEdit = ref(false);
+
+function changeEngine(engine: string) {
+  if (isEdit.value || !store.availableDrivers.some(d => d.engine === engine)) return
+  props.connection.database = engine === 'postgresql'
+    ? { engine, settings: { host: '127.0.0.1', port: 5432, user: 'postgres', ssl_mode: 'prefer' } }
+    : { engine: 'mysql', settings: { host: '127.0.0.1', port: 3306, user: 'root' } }
+  testResult.value = null
+}
 
 watch(
   () => [props.open, props.connection] as const,
@@ -382,11 +421,13 @@ watch(
 
 function buildConn(): Connection {
   const conn = { ...props.connection };
-  conn.mysql = { ...props.connection.mysql };
-  const password = conn.mysql.password?.trim() ?? "";
-  const database = conn.mysql.database?.trim() ?? "";
-  conn.mysql.password = password || undefined;
-  conn.mysql.database = database || undefined;
+  conn.database = structuredClone(toRaw(props.connection.database));
+  if (conn.database.engine !== "sqlite") {
+    // Whitespace can be part of a password; preserve it exactly.
+    conn.database.settings.password ||= undefined;
+    const database = conn.database.settings.database?.trim();
+    conn.database.settings.database = database || undefined;
+  }
 
   if (sshEnabled.value) {
     conn.ssh = {

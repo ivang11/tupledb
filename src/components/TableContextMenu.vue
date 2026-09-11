@@ -12,13 +12,13 @@
 
     <!-- Single table options -->
     <template v-if="!selectedCount || selectedCount <= 1">
-      <button
+      <button :disabled="canWrite === false"
         class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-muted transition-colors text-left"
         @click="emit('truncate')"
       >
         <Trash2Icon class="size-3.5 text-muted-foreground" /> Truncate Table
       </button>
-      <button
+      <button :disabled="canWrite === false"
         class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-muted transition-colors text-left"
         @click="emit('drop')"
       >
@@ -28,13 +28,13 @@
 
 <!-- Multiple tables options -->
     <template v-else>
-      <button
+      <button :disabled="canWrite === false"
         class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-muted transition-colors text-left"
         @click="emit('truncate-selected')"
       >
         <Trash2Icon class="size-3.5 text-muted-foreground" /> Truncate {{ selectedCount }} Tables
       </button>
-      <button
+      <button :disabled="canWrite === false"
         class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-muted transition-colors text-left"
         @click="emit('drop-selected')"
       >
@@ -53,6 +53,7 @@ defineProps<{
   y: number
   tableName: string
   selectedCount?: number
+  canWrite?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -62,4 +63,3 @@ const emit = defineEmits<{
   'drop-selected': []
 }>()
 </script>
-

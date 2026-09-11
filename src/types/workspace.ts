@@ -1,3 +1,4 @@
+import type { TableRef, ColumnStructure, ForeignKeyColumn } from './database.js'
 export type TableViewMode =
   | 'content'
   | 'structure'
@@ -7,6 +8,8 @@ export interface TableTab {
   type: 'table'
   id: string
   connectionId: string
+  /** Present on newly opened tabs; optional for legacy workspace snapshots. */
+  reference?: TableRef
   tableName: string
   database: string
   queryResult: any | null
@@ -14,9 +17,9 @@ export interface TableTab {
   metadataLoading?: boolean
   metadataLoaded?: boolean
   keysetPage?: number
-  tableStructure: any[]
+  tableStructure: ColumnStructure[]
   tableIndexes: any[]
-  foreignKeys: any[]
+  foreignKeys: ForeignKeyColumn[]
   ddl: string | null
   page: number
   pageSize: number

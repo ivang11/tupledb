@@ -59,6 +59,7 @@ function defaults() {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   vi.useFakeTimers()
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(drawContext as any)
   vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue({
@@ -100,6 +101,37 @@ async function mountGrid(overrides: Record<string, unknown> = {}) {
 }
 
 describe('CanvasDataGrid rendering and hit testing', () => {
+  it('draws asynchronous results when mounted before the first rows arrive', async () => {
+    const wrapper = await mountGrid({ columns: [], rows: [], totalCount: 0 })
+    expect(wrapper.text()).toContain('No records')
+    expect(wrapper.find('canvas').exists()).toBe(false)
+
+    await wrapper.setProps({ columns, rows, totalCount: rows.length })
+    await vi.runAllTimersAsync()
+
+    expect(HTMLCanvasElement.prototype.getContext).toHaveBeenCalled()
+    expect(drawContext.fillText).toHaveBeenCalledWith('Alice', expect.any(Number), expect.any(Number))
+    expect(wrapper.get<HTMLCanvasElement>('canvas').element.width).toBeGreaterThan(0)
+    wrapper.unmount()
+  })
+
+  it('binds drawing to the new canvas after empty results become populated again', async () => {
+    const wrapper = await mountGrid()
+    const originalCanvas = wrapper.get('canvas').element
+    await wrapper.setProps({ rows: [], totalCount: 0 })
+    await vi.runAllTimersAsync()
+    expect(wrapper.find('canvas').exists()).toBe(false)
+
+    const nextContext = { ...drawContext, fillText: vi.fn() }
+    vi.mocked(HTMLCanvasElement.prototype.getContext).mockReturnValue(nextContext as any)
+    await wrapper.setProps({ rows, totalCount: rows.length })
+    await vi.runAllTimersAsync()
+
+    expect(wrapper.get('canvas').element).not.toBe(originalCanvas)
+    expect(nextContext.fillText).toHaveBeenCalledWith('Alice', expect.any(Number), expect.any(Number))
+    wrapper.unmount()
+  })
+
   it('draws visible headers and values without creating cell DOM', async () => {
     const wrapper = await mountGrid()
     expect(drawContext.fillText).toHaveBeenCalledWith(expect.stringContaining('id'), expect.any(Number), expect.any(Number))
@@ -184,6 +216,17 @@ describe('CanvasDataGrid rendering and hit testing', () => {
     expect(wrapper.get<HTMLInputElement>('[data-grid-edit="1"]').element.value).toBe('Alice')
     const pending = wrapper.findAll<HTMLInputElement>('.pending-insert-input')
     expect(pending.some(input => input.element.value === 'New row')).toBe(true)
+  })
+
+  it('opens the editor for the complete composite key, not the first matching component', async () => {
+    const key = JSON.stringify([{ column: 'id', value: 1 }, { column: 'name', value: 'Bob' }])
+    const wrapper = await mountGrid({
+      rows: [{ id: 1, name: 'Alice', value: 'a' }, { id: 1, name: 'Bob', value: 'b' }],
+      primaryKey: ['id', 'name'], selectedRowPk: key, inlineEditColumn: 'name',
+    })
+    const editor = wrapper.get<HTMLInputElement>('[data-grid-edit]')
+    expect(editor.attributes('data-grid-edit')).toBe(key)
+    expect(editor.element.value).toBe('Bob')
   })
 
   it('emits deletion only when focus is outside an editor', async () => {

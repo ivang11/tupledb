@@ -34,9 +34,9 @@
           />
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div v-if="supportsCollations !== false" class="grid grid-cols-2 gap-3">
           <div class="space-y-2 min-w-0">
-            <Label for="new-database-character-set">Character Set</Label>
+            <Label for="new-database-character-set">{{ encodingLabel ?? 'Character Set' }}</Label>
             <Select
               :model-value="characterSet"
               :disabled="isCreating || isLoadingOptions || !options"
@@ -78,8 +78,11 @@
           </div>
         </div>
 
-        <div v-if="optionsError" class="space-y-1 text-xs text-destructive">
-          <p>Could not load character sets and collations. The server defaults will be used.</p>
+        <p v-if="supportsCollations === false" class="text-xs text-muted-foreground">
+          Uses the server's default database template and encoding.
+        </p>
+        <div v-if="supportsCollations !== false && optionsError" class="space-y-1 text-xs text-destructive">
+          <p>Could not load encoding and collation options. The server defaults will be used.</p>
           <p class="break-words opacity-80">{{ optionsError }}</p>
         </div>
 
@@ -138,6 +141,8 @@ const DATABASE_OPTION_DEFAULT = "__server_default__";
 const props = defineProps<{
   open: boolean;
   connectionName: string;
+  supportsCollations?: boolean;
+  encodingLabel?: string;
   name: string;
   characterSet: string;
   collation: string;
@@ -151,11 +156,9 @@ const characterSets = computed(() => [
   ...new Set(props.options?.collations.map((option) => option.characterSet) ?? []),
 ]);
 const collations = computed(() =>
-  props.characterSet === DATABASE_OPTION_DEFAULT
-    ? []
-    : (props.options?.collations.filter(
-        (option) => option.characterSet === props.characterSet,
-      ) ?? []),
+  props.options?.collations.filter(
+    (option) => option.characterSet === (props.characterSet === DATABASE_OPTION_DEFAULT ? props.options?.defaultCharacterSet : props.characterSet),
+  ) ?? [],
 );
 const emit = defineEmits<{
   "update:open": [val: boolean];

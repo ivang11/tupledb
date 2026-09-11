@@ -54,7 +54,7 @@ Requirements:
 
 - Node.js 18 or newer
 - npm
-- Stable Rust toolchain
+- Stable Rust toolchain (1.89 or newer)
 - Platform dependencies required by Tauri
 
 Install dependencies:

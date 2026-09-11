@@ -11,7 +11,7 @@
 
     <div class="flex items-center gap-2">
       <div v-if="hasDataChanges" class="flex items-center gap-2 mr-2">
-        <label class="flex items-center gap-2 cursor-pointer group">
+        <label v-if="supportsFkChecks !== false" class="flex items-center gap-2 cursor-pointer group">
           <input
             type="checkbox"
             :checked="disableFkChecks"
@@ -43,6 +43,7 @@ const props = defineProps<{
   pendingDeletionsCount: number
   pendingInsertionsCount: number
   disableFkChecks: boolean
+  supportsFkChecks?: boolean
   isSaving: boolean
 }>()
 

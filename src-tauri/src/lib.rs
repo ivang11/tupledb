@@ -1,13 +1,12 @@
 pub mod benchmark;
 pub mod commands;
+pub mod connection_store;
 pub mod connections;
-pub mod driver;
+pub mod database;
 pub mod filters;
-pub mod mysql;
-pub mod query_builder;
 pub mod saved_queries;
-pub mod schema;
 pub mod security;
+pub mod services;
 pub mod ssh;
 pub mod state;
 
@@ -36,36 +35,39 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             crate::benchmark::benchmark_config,
             crate::benchmark::report_benchmark_metrics,
-            crate::commands::get_connections,
-            crate::commands::add_connection,
-            crate::commands::remove_connection,
-            crate::commands::test_connection,
-            crate::commands::connect,
-            crate::commands::export_connections,
-            crate::commands::import_connections,
-            crate::schema::get_databases,
-            crate::schema::get_database_creation_options,
-            crate::schema::create_database,
-            crate::schema::drop_database,
-            crate::schema::get_tables,
-            crate::schema::get_table_structure,
-            crate::schema::export_database,
-            crate::schema::cancel_export,
-            crate::schema::import_sql,
-            crate::schema::cancel_import,
-            crate::mysql::get_table_data,
-            crate::mysql::export_table,
-            crate::mysql::apply_table_changes,
-            crate::mysql::insert_row,
-            crate::mysql::alter_table_column,
-            crate::mysql::drop_table,
-            crate::mysql::drop_tables,
-            crate::mysql::truncate_table,
-            crate::schema::get_foreign_keys,
-            crate::schema::get_table_indexes,
-            crate::schema::get_table_ddl,
-            crate::mysql::execute_query,
-            crate::mysql::cancel_query,
+            crate::commands::connections::get_connections,
+            crate::commands::connections::get_connection_storage_info,
+            crate::commands::connections::add_connection,
+            crate::commands::connections::remove_connection,
+            crate::commands::connections::test_connection,
+            crate::commands::connections::connect,
+            crate::commands::connections::disconnect,
+            crate::commands::connections::get_available_drivers,
+            crate::commands::connections::export_connections,
+            crate::commands::connections::import_connections,
+            crate::commands::catalog::get_databases,
+            crate::commands::catalog::get_database_creation_options,
+            crate::commands::catalog::create_database,
+            crate::commands::catalog::drop_database,
+            crate::commands::catalog::get_tables,
+            crate::commands::catalog::get_table_structure,
+            crate::commands::transfers::export_database,
+            crate::commands::transfers::cancel_export,
+            crate::commands::transfers::import_sql,
+            crate::commands::transfers::cancel_import,
+            crate::commands::tables::get_table_data,
+            crate::commands::transfers::export_table,
+            crate::commands::tables::apply_table_changes,
+            crate::commands::tables::insert_row,
+            crate::commands::tables::alter_table_column,
+            crate::commands::tables::drop_table,
+            crate::commands::tables::drop_tables,
+            crate::commands::tables::truncate_table,
+            crate::commands::catalog::get_foreign_keys,
+            crate::commands::catalog::get_table_indexes,
+            crate::commands::catalog::get_table_ddl,
+            crate::commands::queries::execute_query,
+            crate::commands::queries::cancel_query,
             crate::saved_queries::get_saved_queries,
             crate::saved_queries::upsert_saved_query,
             crate::saved_queries::delete_saved_query,

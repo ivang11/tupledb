@@ -37,7 +37,7 @@
         :title="
           tab.type === 'query'
             ? `Query · ${connectionNames[tab.connectionId] ?? ''}`
-            : `${tab.tableName} · ${connectionNames[tab.connectionId] ?? ''} · ${tab.database}`
+            : `${tableLabel(tab.reference ?? tab.tableName ?? '')} · ${connectionNames[tab.connectionId] ?? ''} · ${tab.database}`
         "
       >
         <!-- Icon -->
@@ -60,7 +60,7 @@
 
         <!-- Label -->
         <span class="flex-1 min-w-0 truncate text-left">
-          {{ tab.type === "query" ? "Query" : tab.tableName }}
+          {{ tab.type === "query" ? "Query" : tableLabel(tab.reference ?? tab.tableName ?? "") }}
         </span>
 
         <!-- Close -->
@@ -156,6 +156,8 @@
 </template>
 
 <script setup lang="ts">
+import { tableLabel } from '@/lib/tableReference'
+
 import { computed } from "vue";
 import { useKeybindings, formatKeybinding } from "@/composables/useKeybindings";
 import {
@@ -177,6 +179,7 @@ interface AnyTab {
   connectionId: string;
   database: string | null;
   tableName?: string;
+  reference?: import('@/types/database').TableRef;
 }
 
 defineProps<{

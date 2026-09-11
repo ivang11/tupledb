@@ -1,3 +1,4 @@
+import { primaryKeyColumns } from './tableIdentity.js'
 // ── Sort / keyset utilities ──────────────────────────────────────────────────
 
 export function buildSortPayload(
@@ -11,12 +12,13 @@ export function buildSortPayload(
 // Returns the PK column to use for keyset pagination, or null when keyset is
 // unsafe (active sort or filters change the natural order).
 export function resolveKeysetColumn(
-  structure: Array<{ field: string; key: string }>,
+  structure: Array<{ field: string; key?: string; primary_key_position?: number | null }>,
   sortColumn: string | null,
   filters: unknown | null,
 ): string | null {
   if (sortColumn || filters) return null
-  return structure.find(c => c.key === 'PRI')?.field ?? null
+  const keys = primaryKeyColumns(structure)
+  return keys?.length === 1 ? keys[0] : null
 }
 
 // ── Row click selection ──────────────────────────────────────────────────────

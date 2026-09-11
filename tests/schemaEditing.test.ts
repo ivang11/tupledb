@@ -2,6 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { stageStructureChange } from '../src/lib/schemaEditing.js'
 
+test('stageStructureChange preserves case in quoted PostgreSQL types', () => {
+  const pending = {}
+  stageStructureChange(pending, 'state', 'public."Mood"', 'state', 'public."mood"')
+  assert.deepEqual(pending, { state: { newName: 'state', newType: 'public."mood"' } })
+  stageStructureChange(pending, 'state', 'public."Mood"', 'state', 'PUBLIC."Mood"')
+  assert.deepEqual(pending, {})
+})
+
 test('stageStructureChange stores a normalized pending rename and type change', () => {
   const pending = {}
   stageStructureChange(pending, 'display_name', 'varchar(100)', ' name ', ' varchar(180) ')

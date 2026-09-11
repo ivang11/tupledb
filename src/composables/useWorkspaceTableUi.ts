@@ -1,3 +1,4 @@
+import { tableHandle, tableSqlName } from '@/lib/tableReference'
 import { computed, ref, watch, type Ref } from "vue";
 import { useConnectionStore } from "@/stores/connections";
 import type { AnyTab, PaneState, TableTab } from "@/types/workspace";
@@ -56,7 +57,7 @@ export function useWorkspaceTableUi(ctx: WorkspaceTableUiContext) {
         t.type === "table" &&
         t.connectionId === connectionId &&
         t.database === database &&
-        t.tableName === tableName,
+        tableHandle(t.reference ?? {name:t.tableName}) === tableName,
       );
       if (tab?.pendingDrop) return "drop";
       if (tab?.pendingTruncate) return "truncate";
@@ -70,7 +71,7 @@ export function useWorkspaceTableUi(ctx: WorkspaceTableUiContext) {
     if (resultColumns.length > 0) return resultColumns;
     return (tab?.tableStructure ?? []).map((col: any) => ({
       name: col.field,
-      type_name: col.type,
+      type_name: col.field_type,
     }));
   }
 
@@ -92,7 +93,7 @@ export function useWorkspaceTableUi(ctx: WorkspaceTableUiContext) {
     t.queryResult = await store.fetchTableData(
       t.connectionId,
       t.database,
-      t.tableName,
+      t.reference ?? t.tableName,
       pane.page,
       pane.pageSize,
       filters,
@@ -122,13 +123,13 @@ export function useWorkspaceTableUi(ctx: WorkspaceTableUiContext) {
     const tables = store.openConnections[connectionId]?.tables[database] ?? [];
     const schema: Record<string, string[]> = {};
     for (const t of tables) {
-      schema[t.name] = [];
+      schema[tableSqlName(t.reference)] = [];
     }
     for (const pane of ctx.panes.value) {
       for (const tab of pane.tabs) {
         if (tab.type === "table" && tab.connectionId === connectionId && tab.database === database) {
           if (tab.tableStructure?.length) {
-            schema[tab.tableName] = tab.tableStructure.map((c: any) => c.field);
+            schema[tab.reference ? tableSqlName(tab.reference) : tab.tableName] = tab.tableStructure.map((c: any) => c.field);
           }
         }
       }

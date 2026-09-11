@@ -14,6 +14,11 @@ description = "Allows retrieving the list of connections"
 commands.allow = ["get_connections"]
 
 [[permission]]
+identifier = "allow-get-connection-storage-info"
+description = "Allows reading the active connection storage profile and directory"
+commands.allow = ["get_connection_storage_info"]
+
+[[permission]]
 identifier = "allow-add-connection"
 description = "Allows adding a new connection"
 commands.allow = ["add_connection"]
@@ -32,6 +37,16 @@ commands.allow = ["test_connection"]
 identifier = "allow-connect"
 description = "Allows establishing an active connection"
 commands.allow = ["connect"]
+
+[[permission]]
+identifier = "allow-disconnect"
+description = "Allows closing an active connection"
+commands.allow = ["disconnect"]
+
+[[permission]]
+identifier = "allow-get-available-drivers"
+description = "Allows listing implemented database adapters"
+commands.allow = ["get_available_drivers"]
 
 [[permission]]
 identifier = "allow-export-connections"

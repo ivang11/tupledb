@@ -169,6 +169,20 @@ describe('DataGrid — row selection', () => {
 })
 
 describe('DataGrid — pending deletions', () => {
+  it('distinguishes rows sharing the first component of a composite key', () => {
+    const key = JSON.stringify([{ column: 'id', value: 1 }, { column: 'name', value: 'Bob' }])
+    const wrapper = mount(DataGrid, {
+      props: {
+        ...defaults(), primaryKey: ['id', 'name'],
+        rows: [{ id: 1, name: 'Alice', value: 'a' }, { id: 1, name: 'Bob', value: 'b' }],
+        totalCount: 2, pendingDeletions: { [key]: true },
+      },
+    })
+    const rows = wrapper.findAll('[role="rowgroup"]:last-child > [role="row"]')
+    expect(rows[0].classes()).not.toContain('bg-destructive/10')
+    expect(rows[1].classes()).toContain('bg-destructive/10')
+  })
+
   const rows = [{ id: 1, name: 'Alice', value: 'a' }]
 
   it('applies strike-through class to rows marked for deletion', () => {

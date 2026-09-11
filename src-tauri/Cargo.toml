@@ -5,6 +5,7 @@ description = "A secure MySQL client built with Tauri and Vue"
 authors = ["Ivan"]
 license = "MIT"
 edition = "2021"
+rust-version = "1.89"
 
 [lib]
 name = "app_lib"
@@ -18,7 +19,7 @@ tauri-plugin-process = "2"
 tauri-plugin-updater = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-sqlx = { version = "0.8", features = ["mysql", "runtime-tokio", "tls-rustls", "chrono", "rust_decimal"] }
+sqlx = { version = "0.8", features = ["mysql", "postgres", "runtime-tokio", "tls-rustls", "chrono", "rust_decimal"] }
 rust_decimal = "1"
 chrono = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["full"] }
@@ -31,9 +32,15 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 keyring = "3"
 libc = "0.2"
 flate2 = "1"
+tempfile = "3"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+# Backport upstream SQLx #3861 without migrating the query APIs to 0.9.
+# See vendor/sqlx-core/TUPLEDB-PATCH.md for provenance and removal criteria.
+[patch.crates-io]
+sqlx-core = { path = "vendor/sqlx-core" }
 
 [profile.dev]
 opt-level = 0

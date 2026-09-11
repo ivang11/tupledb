@@ -1,6 +1,8 @@
+import type { TableRef, DatabaseTable, ColumnStructure, ForeignKeyColumn } from '@/types/database'
+import { resolveTableReference } from '@/lib/tableReference'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { Connection } from '@/types/connection'
+import type { Connection, ConnectionInfo, DatabaseCapabilities, DriverDescriptor } from '@/types/connection'
 import { invoke } from '@tauri-apps/api/core'
 
 interface OpenConnectionState {
@@ -9,13 +11,17 @@ interface OpenConnectionState {
   selectedDatabase: string | null
   openedDatabases: string[]
   serverVersion: string | null
+  capabilities: DatabaseCapabilities
   status: 'connected' | 'error'
   statusMessage: string | null
-  tables: Record<string, any[]>
+  tables: Record<string, DatabaseTable[]>
 }
 
 export const useConnectionStore = defineStore('connections', () => {
   const connections = ref<Connection[]>([])
+  const storageError = ref<string | null>(null)
+  const storageInfo = ref<{ development: boolean; directory: string } | null>(null)
+  const availableDrivers = ref<DriverDescriptor[]>([])
   const openConnections = ref<Record<string, OpenConnectionState>>({})
 
   function markConnectionConnected(connectionId: string) {
@@ -34,19 +40,34 @@ export const useConnectionStore = defineStore('connections', () => {
 
   async function fetchConnections() {
     try {
+      storageInfo.value = await invoke('get_connection_storage_info')
+      availableDrivers.value = await invoke<DriverDescriptor[]>('get_available_drivers')
       connections.value = await invoke<Connection[]>('get_connections')
+      storageError.value = null
       for (const connection of connections.value) {
         if (openConnections.value[connection.id]) {
           openConnections.value[connection.id].connection = connection
         }
       }
     } catch (error) {
+      storageError.value = String(error)
       console.error('Failed to fetch connections:', error)
     }
   }
 
+  async function writeConnections(command: string, args: Record<string, unknown>) {
+    try {
+      const result = await invoke(command, args)
+      storageError.value = null
+      return result
+    } catch (error) {
+      storageError.value = String(error)
+      throw error
+    }
+  }
+
   async function addConnection(connection: Connection) {
-    await invoke('add_connection', { connection })
+    await writeConnections('add_connection', { connection })
     await fetchConnections()
     if (openConnections.value[connection.id]) {
       openConnections.value[connection.id].connection =
@@ -55,7 +76,7 @@ export const useConnectionStore = defineStore('connections', () => {
   }
 
   async function removeConnection(id: string) {
-    await invoke('remove_connection', { id })
+    await writeConnections('remove_connection', { id })
     delete openConnections.value[id]
     await fetchConnections()
   }
@@ -69,13 +90,14 @@ export const useConnectionStore = defineStore('connections', () => {
   }
 
   async function importConnections(path: string) {
-    const count = await invoke<number>('import_connections', { path })
+    const count = await writeConnections('import_connections', { path }) as number
     await fetchConnections()
     return count
   }
 
   async function connect(connection: Connection) {
-    const serverVersion = await invoke<string>('connect', { connection })
+    const info = await invoke<ConnectionInfo>('connect', { connection })
+    const serverVersion = info.serverVersion
     if (!openConnections.value[connection.id]) {
       openConnections.value[connection.id] = {
         connection,
@@ -83,6 +105,7 @@ export const useConnectionStore = defineStore('connections', () => {
         selectedDatabase: null,
         openedDatabases: [],
         serverVersion,
+        capabilities: info.capabilities,
         status: 'connected',
         statusMessage: null,
         tables: {},
@@ -91,6 +114,7 @@ export const useConnectionStore = defineStore('connections', () => {
       openConnections.value[connection.id].connection = connection
       openConnections.value[connection.id].openedDatabases ??= []
       openConnections.value[connection.id].serverVersion = serverVersion
+      openConnections.value[connection.id].capabilities = info.capabilities
       markConnectionConnected(connection.id)
     }
     await fetchDatabasesForConnection(connection.id)
@@ -98,6 +122,7 @@ export const useConnectionStore = defineStore('connections', () => {
 
   function disconnectConnection(id: string) {
     delete openConnections.value[id]
+    void invoke('disconnect', { connectionId: id }).catch(console.error)
   }
 
   function closeDatabase(connectionId: string, database: string) {
@@ -155,7 +180,7 @@ export const useConnectionStore = defineStore('connections', () => {
 
   async function fetchTablesForConnection(connectionId: string, database: string) {
     try {
-      const tbls = await invoke<any[]>('get_tables', { connectionId, database })
+      const tbls = await invoke<DatabaseTable[]>('get_tables', { connectionId, database })
       if (openConnections.value[connectionId]) {
         markConnectionConnected(connectionId)
         openConnections.value[connectionId].tables[database] = tbls
@@ -172,7 +197,7 @@ export const useConnectionStore = defineStore('connections', () => {
   async function fetchTableData(
     connectionId: string,
     database: string,
-    tableName: string,
+    tableName: string | TableRef,
     page = 0,
     pageSize = 300,
     filters: any = null,
@@ -184,7 +209,7 @@ export const useConnectionStore = defineStore('connections', () => {
       const result = await invoke<any>('get_table_data', {
         connectionId,
         database,
-        table: tableName,
+        table: tableReference(connectionId, database, tableName),
         page,
         pageSize,
         filters,
@@ -201,9 +226,9 @@ export const useConnectionStore = defineStore('connections', () => {
     }
   }
 
-  async function fetchTableStructure(connectionId: string, database: string, tableName: string) {
+  async function fetchTableStructure(connectionId: string, database: string, tableName: string | TableRef) {
     try {
-      const result = await invoke<any[]>('get_table_structure', { connectionId, database, table: tableName })
+      const result = await invoke<ColumnStructure[]>('get_table_structure', { connectionId, database, table: tableReference(connectionId, database, tableName) })
       markConnectionConnected(connectionId)
       return result
     } catch (error) {
@@ -212,9 +237,9 @@ export const useConnectionStore = defineStore('connections', () => {
     }
   }
 
-  async function fetchTableIndexes(connectionId: string, database: string, tableName: string) {
+  async function fetchTableIndexes(connectionId: string, database: string, tableName: string | TableRef) {
     try {
-      const result = await invoke<any[]>('get_table_indexes', { connectionId, database, table: tableName })
+      const result = await invoke<any[]>('get_table_indexes', { connectionId, database, table: tableReference(connectionId, database, tableName) })
       markConnectionConnected(connectionId)
       return result
     } catch (error) {
@@ -223,9 +248,9 @@ export const useConnectionStore = defineStore('connections', () => {
     }
   }
 
-  async function fetchForeignKeys(connectionId: string, database: string, tableName: string) {
+  async function fetchForeignKeys(connectionId: string, database: string, tableName: string | TableRef) {
     try {
-      const result = await invoke<any[]>('get_foreign_keys', { connectionId, database, table: tableName })
+      const result = await invoke<ForeignKeyColumn[]>('get_foreign_keys', { connectionId, database, table: tableReference(connectionId, database, tableName) })
       markConnectionConnected(connectionId)
       return result
     } catch (error) {
@@ -234,12 +259,21 @@ export const useConnectionStore = defineStore('connections', () => {
     }
   }
 
-  async function fetchTableDdl(connectionId: string, database: string, tableName: string) {
+  async function fetchTableDdl(connectionId: string, database: string, tableName: string | TableRef) {
+    // An unsupported optional feature is not a failed database connection.
+    const capabilities = openConnections.value[connectionId]?.capabilities
+    if ((capabilities?.inspectDdl ?? capabilities?.exportSql) === false) return null
     try {
-      const result = await invoke<string>('get_table_ddl', { connectionId, database, table: tableName })
+      const result = await invoke<string>('get_table_ddl', { connectionId, database, table: tableReference(connectionId, database, tableName) })
       markConnectionConnected(connectionId)
       return result
     } catch (error) {
+      const message = String(error)
+      if (message.startsWith('Cannot inspect ') || message === 'Circular DDL dependencies') {
+        // Object-specific export limitations must not mark a live connection
+        // offline. Show the reason in the DDL panel as non-executable comments.
+        return message.split(/[\r\n]+/).map(line => `-- ${line}`).join('\n')
+      }
       markConnectionError(connectionId, error)
       return null
     }
@@ -248,7 +282,7 @@ export const useConnectionStore = defineStore('connections', () => {
   async function alterTableColumn(
     connectionId: string,
     database: string,
-    tableName: string,
+    tableName: string | TableRef,
     oldName: string,
     newName: string,
     newType: string,
@@ -257,7 +291,7 @@ export const useConnectionStore = defineStore('connections', () => {
       await invoke('alter_table_column', {
         connectionId,
         database,
-        table: tableName,
+        table: tableReference(connectionId, database, tableName),
         oldName,
         newName,
         newType,
@@ -269,8 +303,16 @@ export const useConnectionStore = defineStore('connections', () => {
     }
   }
 
+  function tableReference(connectionId: string, database: string, table: string | TableRef): TableRef {
+    return resolveTableReference(database, table, openConnections.value[connectionId]?.tables[database])
+  }
+
   return {
+    tableReference,
     connections,
+    storageError,
+    storageInfo,
+    availableDrivers,
     openConnections,
     fetchConnections,
     addConnection,

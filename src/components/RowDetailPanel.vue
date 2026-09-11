@@ -17,7 +17,7 @@
           {{ isReadOnly() ? 'Read-only row' : 'Selected row' }}
         </p>
         <p class="text-[11px] font-mono font-semibold text-foreground truncate">
-          {{ primaryKey ? `${primaryKey} = ${rawValue(primaryKey)}` : 'No primary key' }}
+          {{ primaryKey ? (Array.isArray(primaryKey) ? primaryKey : [primaryKey]).map(key => `${key} = ${rawValue(key)}`).join(', ') : 'No primary key' }}
         </p>
       </div>
       <button
@@ -94,7 +94,7 @@
               v-if="fkMap[col.name]"
               type="button"
               class="mt-0.5 ml-1 shrink-0 flex items-center justify-center rounded text-foreground/80 hover:text-foreground transition-colors"
-              :title="`Go to ${fkMap[col.name].table}`"
+              :title="`Go to ${tableLabel(fkMap[col.name].table)}`"
               @click="emit('navigate-related', fkMap[col.name].table, fkMap[col.name].column, rawValue(col.name))"
             >
               <ArrowRightIcon class="size-3" />
@@ -108,6 +108,11 @@
 </template>
 
 <script setup lang="ts">
+import { tableLabel } from '@/lib/tableReference'
+import type { TableRef } from '@/types/database'
+
+import { rowKey, type PrimaryKey } from '@/lib/tableIdentity'
+
 import { ref, nextTick } from 'vue'
 import { SearchIcon, XIcon, CopyIcon, CheckIcon, ArrowRightIcon } from 'lucide-vue-next'
 import { Label } from '@/components/ui/label'
@@ -118,8 +123,8 @@ const props = defineProps<{
   paneId: string
   row: Record<string, any> | any[]
   columns: any[]
-  primaryKey: string | null
-  fkMap: Record<string, { table: string; column: string }>
+  primaryKey: PrimaryKey
+  fkMap: Record<string, { table: string | TableRef; column: string }>
   pendingDeletions: Record<string, boolean>
   width: number
   getCellValue: (row: any, colName: string) => string
@@ -128,7 +133,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'close': []
   'cell-input': [colName: string, value: string]
-  'navigate-related': [table: string, column: string, value: any]
+  'navigate-related': [table: string | TableRef, column: string, value: any]
   'start-resize': [e: MouseEvent]
 }>()
 
@@ -157,7 +162,7 @@ function autoResize(el: HTMLTextAreaElement | null) {
 
 const isReadOnly = () => !props.primaryKey
 const rawValue = (column: string) => rowValue(props.row, column, props.columns)
-const pkVal = () => props.primaryKey ? String(rawValue(props.primaryKey)) : ''
+const pkVal = () => props.primaryKey ? rowKey(props.row, props.primaryKey, props.columns) : ''
 const isPendingDelete = () => !!props.pendingDeletions[pkVal()]
 const fieldWidth = (row: Record<string, any> | any[], colName: string) => {
   const length = Math.max(props.getCellValue(row, colName).length, 1)

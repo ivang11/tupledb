@@ -2,6 +2,7 @@
   <div class="flex flex-col h-screen bg-background text-foreground overflow-hidden">
     <WindowResizeHandles v-if="!usesNativeMacWindowControls" />
     <TitleBar @open-keybindings="showKeybindings = true" />
+    <ConnectionStorageNotice :development="connectionStore.storageInfo?.development ?? false" />
 
     <main class="flex-1 overflow-hidden relative bg-background min-h-0">
       <WorkspaceView />
@@ -21,6 +22,10 @@ import ToastContainer from '@/components/ToastContainer.vue'
 import WorkspaceView from '@/views/WorkspaceView.vue'
 import { useUpdater } from '@/composables/useUpdater'
 import { usesNativeMacWindowControls } from '@/lib/platform'
+import ConnectionStorageNotice from '@/components/ConnectionStorageNotice.vue'
+import { useConnectionStore } from '@/stores/connections'
+
+const connectionStore = useConnectionStore()
 
 const KeybindingsDialog = defineAsyncComponent(() => import('@/components/dialogs/KeybindingsDialog.vue'))
 const UpdaterDialog = defineAsyncComponent(() => import('@/components/dialogs/UpdaterDialog.vue'))
