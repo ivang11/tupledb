@@ -14,18 +14,10 @@ beforeEach(() => {
 })
 
 describe('connection storage notices', () => {
-  it('explains why a development build has separate connections', () => {
-    const view = mount(ConnectionStorageNotice, { props: { development: true } })
-    expect(view.text()).toContain('separate saved connections')
-    expect(view.text()).toContain('Import a connections export')
-    expect(view.find('[role="alert"]').exists()).toBe(false)
-    view.unmount()
-  })
-
   it('shows a persistent error with a working reload action', async () => {
     const store = useConnectionStore()
     store.storageError = 'Invalid format at /isolated/connections.v2.json. Saving is blocked.'
-    const view = mount(ConnectionStorageNotice, { props: { development: false } })
+    const view = mount(ConnectionStorageNotice)
     expect(view.get('[role="alert"]').text()).toContain('Saving is blocked')
     await view.get('button').trigger('click')
     await flushPromises()
@@ -38,7 +30,7 @@ describe('connection storage notices', () => {
     const store = useConnectionStore()
     store.storageError = 'Initial storage failure'
     invoke.mockRejectedValue('Storage still unreadable')
-    const view = mount(ConnectionStorageNotice, { props: { development: false } })
+    const view = mount(ConnectionStorageNotice)
     await view.get('button').trigger('click')
     await flushPromises()
     expect(view.get('[role="alert"]').text()).toContain('Storage still unreadable')

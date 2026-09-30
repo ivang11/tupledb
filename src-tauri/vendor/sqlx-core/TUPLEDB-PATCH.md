@@ -2,7 +2,8 @@
 
 This directory contains the unmodified `src/`, normalized `Cargo.toml`, and
 MIT/Apache-2.0 licenses from the published `sqlx-core` 0.8.6 crate, except for
-the two upstream changes below. No registry cache or build outputs are vendored.
+the upstream changes and local lifetime annotations below. No registry cache or
+build outputs are vendored.
 
 Source: <https://crates.io/crates/sqlx-core/0.8.6>
 
@@ -13,6 +14,11 @@ Commit: `2970559e256ff11194cdc7c7aa18eb9d64fce494`
 1. Accept both `NotValidForName` and `NotValidForNameContext` in SQLx's existing
    `NoHostnameTlsVerifier` (used by PostgreSQL `verify_ca`).
 2. Set the minimum rustls version to 0.23.24, which exposes the contextual error.
+
+Local compiler cleanup: use the existing `'q` lifetime explicitly for statement
+arguments in `query_statement`, `query_statement_as` and `query_statement_scalar`.
+This is equivalent to the previous elided lifetime and removes
+`mismatched_lifetime_syntaxes` warnings on newer Rust compilers.
 
 Certificate-chain, expiry and handshake-signature checks are unchanged. Only
 hostname mismatch is ignored in `verify_ca`; `verify_full` keeps its standard
