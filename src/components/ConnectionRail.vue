@@ -12,19 +12,19 @@
 
     <div class="flex flex-col gap-2">
       <button
-        v-for="item in openDatabases"
-        :key="`${item.connectionId}:${item.database}`"
+        v-for="item in railItems"
+        :key="item.database === null ? `connection:${item.connectionId}` : `database:${item.connectionId}:${item.database}`"
         class="relative size-11 rounded-lg flex items-center justify-center transition-colors ring-1 ring-inset"
         :class="[
           getEnvRailColor(item.connection.environment, item.active),
           item.active ? 'ring-white/18' : 'ring-white/8',
         ]"
-        :title="`${item.connection.name} / ${item.database}`"
-        @click="emit('select-database', item.connectionId, item.database)"
-        @contextmenu="emit('context-menu-database', $event, item.connectionId, item.database)"
+        :title="`${item.connection.name} / ${item.database ?? 'Choose database'}`"
+        @click="selectItem(item)"
+        @contextmenu="openItemContextMenu($event, item)"
       >
-        <span class="text-[11px] font-black uppercase">{{ dbInitial(item.database) }}</span>
-        <DatabaseIcon class="absolute right-1.5 bottom-1.5 size-2.5 opacity-55" />
+        <span class="text-[11px] font-black uppercase">{{ initial(item.database ?? item.connection.name) }}</span>
+        <component :is="item.database === null ? ServerIcon : DatabaseIcon" class="absolute right-1.5 bottom-1.5 size-2.5 opacity-55" />
       </button>
     </div>
     <div class="mt-auto" />
@@ -36,6 +36,7 @@ import { computed } from "vue";
 import {
   DatabaseIcon,
   HomeIcon,
+  ServerIcon,
 } from "lucide-vue-next";
 import type { Connection, Environment } from "@/types/connection";
 
@@ -54,6 +55,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
+  "select-connection": [connId: string];
   "select-database": [connId: string, db: string];
   home: [];
   "context-menu-connection": [e: MouseEvent, conn: Connection];
@@ -81,7 +83,14 @@ const getEnvRailColor = (env: Environment, active: boolean): string => {
   }
 };
 
-const openDatabases = computed(() =>
+interface RailItem {
+  connectionId: string;
+  connection: Connection;
+  database: string | null;
+  active: boolean;
+}
+
+const railItems = computed<RailItem[]>(() =>
   Object.entries(props.openConnections).flatMap(([connectionId, state]) => {
     const databases =
       state.openedDatabases?.length
@@ -90,17 +99,33 @@ const openDatabases = computed(() =>
           ? [state.selectedDatabase]
           : [];
 
-    return databases.map((database) => ({
+    const items: (string | null)[] = databases.length ? databases : [null];
+    return items.map((database) => ({
       connectionId,
       connection: state.connection,
       database,
-      active: props.selectedConnectionId === connectionId && state.selectedDatabase === database,
+      active: props.selectedConnectionId === connectionId && (database === null || state.selectedDatabase === database),
     }));
   }),
 );
 
-function dbInitial(database: string) {
-  return database.slice(0, 1).toUpperCase();
+function selectItem(item: RailItem) {
+  if (item.database === null) {
+    emit('select-connection', item.connectionId);
+  } else {
+    emit('select-database', item.connectionId, item.database);
+  }
+}
+
+function openItemContextMenu(event: MouseEvent, item: RailItem) {
+  if (item.database === null) {
+    emit('context-menu-connection', event, item.connection);
+  } else {
+    emit('context-menu-database', event, item.connectionId, item.database);
+  }
+}
+
+function initial(name: string) {
+  return name.slice(0, 1).toUpperCase();
 }
 </script>
-

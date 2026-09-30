@@ -4,6 +4,7 @@
     :open-connections="store.openConnections"
     :selected-connection-id="selectedSidebarConnectionId"
     @home="goHome"
+    @select-connection="selectedSidebarConnectionId = $event"
     @select-database="handleSelectDatabase"
     @context-menu-connection="openSidebarContextMenu"
     @context-menu-database="openSidebarDatabaseContextMenu"
