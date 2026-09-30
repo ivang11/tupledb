@@ -40,6 +40,7 @@ describe('PostgreSQL workspace', () => {
 
   it('labels the connection database optional and saves a blank value as unspecified', async () => {
     const draft = structuredClone(connection)
+    draft.name = 'PostgreSQL'
     if (draft.database.engine !== 'postgresql') throw new Error('Expected PostgreSQL')
     delete draft.database.settings.database
     const wrapper = mount(ConnectionDialog, { props: { open: true, connection: draft, isSaving: false }, global: { stubs: dialogStubs } })
@@ -47,10 +48,9 @@ describe('PostgreSQL workspace', () => {
     expect(wrapper.text()).not.toContain('(required)')
     const input = wrapper.find('input[placeholder="Leave blank to pick after connecting"]')
     await input.setValue('')
-    expect((wrapper.vm as any).buildConn().database.settings.database).toBeUndefined()
-    useConnectionStore().availableDrivers = [{ engine: 'postgresql', label: 'PostgreSQL', defaultPort: 5432 }]
-    ;(wrapper.vm as any).changeEngine('postgresql')
-    expect(draft.database.settings.database).toBeUndefined()
+    await wrapper.findAll('button').find(button => button.text() === 'Save only')!.trigger('click')
+    expect((wrapper.emitted('save')![0][0] as Connection).database.settings).toMatchObject({ host: draft.database.settings.host })
+    expect(((wrapper.emitted('save')![0][0] as Connection).database as typeof draft.database).settings.database).toBeUndefined()
     wrapper.unmount()
   })
 

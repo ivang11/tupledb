@@ -21,14 +21,14 @@
     @start-file="() => confirmImportFromBrowse()"
     @start-file-path="(path) => confirmImportFromFilePath(path)"
   />
-  <ConnectionDialog
+  <ConnectionEditorHost
     v-if="showNewConnDialog"
     :open="showNewConnDialog"
     :connection="newConn"
     :is-saving="isSavingConn"
     :show-connect-button="true"
     @update:open="(val) => { if (!val) showNewConnDialog = false }"
-    @save="saveNewConn"
+    :save-connection="saveNewConn"
   />
   <NewDatabaseDialog
     v-if="!!showNewDb"
@@ -209,7 +209,7 @@ const ConnectionContextMenu = defineAsyncComponent(() => import("@/components/Co
 const TableContextMenu = defineAsyncComponent(() => import("@/components/TableContextMenu.vue"));
 const DatabaseContextMenu = defineAsyncComponent(() => import("@/components/DatabaseContextMenu.vue"));
 const RowContextMenu = defineAsyncComponent(() => import("@/components/RowContextMenu.vue"));
-const ConnectionDialog = defineAsyncComponent(() => import("@/components/dialogs/ConnectionDialog.vue"));
+const ConnectionEditorHost = defineAsyncComponent(() => import("@/components/connections/ConnectionEditorHost.vue"));
 const DatabaseActionDialog = defineAsyncComponent(() => import("@/components/dialogs/DatabaseActionDialog.vue"));
 const DeleteConfirmDialog = defineAsyncComponent(() => import("@/components/dialogs/DeleteConfirmDialog.vue"));
 const DeleteTablesDialog = defineAsyncComponent(() => import("@/components/dialogs/DeleteTablesDialog.vue"));
