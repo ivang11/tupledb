@@ -3,7 +3,7 @@ use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 struct AskpassFiles {
     script_path: PathBuf,
@@ -76,6 +76,15 @@ impl SshTunnel {
         remote_host: &str,
         remote_port: u16,
     ) -> Result<Self, String> {
+        Self::new_with_timeout(settings, remote_host, remote_port, Duration::from_secs(15))
+    }
+
+    pub fn new_with_timeout(
+        settings: &SshSettings,
+        remote_host: &str,
+        remote_port: u16,
+        timeout: Duration,
+    ) -> Result<Self, String> {
         // Find a free local port
         let local_port = {
             let listener = TcpListener::bind("127.0.0.1:0")
@@ -103,6 +112,8 @@ impl SshTunnel {
 
                 let mut cmd = Command::new("ssh");
                 cmd.args(["-N", "-L", &forward])
+                    .arg("-o")
+                    .arg(format!("ConnectTimeout={}", timeout.as_secs().max(1)))
                     .args(["-i", private_key_path])
                     .args(["-p", &settings.port.to_string()])
                     .args(["-o", "StrictHostKeyChecking=accept-new"])
@@ -142,6 +153,8 @@ impl SshTunnel {
                 let files = AskpassFiles::new(password)?;
                 let mut cmd = Command::new("ssh");
                 cmd.args(["-N", "-L", &forward])
+                    .arg("-o")
+                    .arg(format!("ConnectTimeout={}", timeout.as_secs().max(1)))
                     .args(["-p", &settings.port.to_string()])
                     .args(["-o", "StrictHostKeyChecking=accept-new"])
                     .args(["-o", "ExitOnForwardFailure=yes"])
@@ -177,10 +190,16 @@ impl SshTunnel {
             }
         };
 
-        // Wait up to 15 seconds for the tunnel port to become available
+        // Bound readiness independently of OpenSSH's network/authentication wait.
+        let started = Instant::now();
         let mut ready = false;
-        for _ in 0..75 {
-            thread::sleep(Duration::from_millis(200));
+        while started.elapsed() < timeout {
+            thread::sleep(
+                Duration::from_millis(200).min(timeout.saturating_sub(started.elapsed())),
+            );
+            if child.try_wait().ok().flatten().is_some() {
+                break;
+            }
             if TcpStream::connect(format!("127.0.0.1:{}", local_port)).is_ok() {
                 ready = true;
                 break;
@@ -191,6 +210,10 @@ impl SshTunnel {
         drop(askpass_files.take());
 
         if !ready {
+            // Kill before reading the pipe: a nonresponsive SSH process can
+            // otherwise keep stderr open forever after the readiness timeout.
+            let _ = child.kill();
+            let _ = child.wait();
             // Collect SSH stderr to surface the real error
             let stderr_msg = child
                 .stderr
@@ -207,8 +230,6 @@ impl SshTunnel {
                 })
                 .unwrap_or_default();
 
-            let _ = child.kill();
-
             return Err(if stderr_msg.is_empty() {
                 "SSH tunnel did not become ready in time.\nCheck SSH credentials and server connectivity.".into()
             } else {
@@ -221,7 +242,13 @@ impl SshTunnel {
         Ok(Self { local_port, child })
     }
 
-    pub fn disconnect(mut self) {
+    pub fn disconnect(self) {
+        drop(self);
+    }
+}
+
+impl Drop for SshTunnel {
+    fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }

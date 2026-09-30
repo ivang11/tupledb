@@ -25,6 +25,8 @@ pub async fn open(connection: &Connection) -> Result<(ActiveConnection, Connecti
             endpoint,
             timeout_secs: connection.timeout_secs.unwrap_or(30),
             tunneled: tunnel.is_some(),
+            on_connected: None,
+            on_error: None,
         },
     )
     .await?;

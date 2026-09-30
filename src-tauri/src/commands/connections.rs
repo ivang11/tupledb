@@ -1,9 +1,12 @@
 use crate::connections::Connection;
 use crate::database::capabilities::ConnectionInfo;
 use crate::database::registry::{DriverDescriptor, AVAILABLE_DRIVERS};
+use crate::services::connection_test::{self, ConnectionTestProgress};
 use crate::services::connections as sessions;
 use crate::state::AppState;
-use tauri::State;
+use std::sync::Arc;
+use tauri::ipc::{Channel, JavaScriptChannelId};
+use tauri::{State, Webview};
 use uuid::Uuid;
 
 #[derive(serde::Serialize)]
@@ -124,12 +127,22 @@ pub async fn import_connections(state: State<'_, AppState>, path: String) -> Res
 #[tauri::command]
 pub async fn test_connection(
     state: State<'_, AppState>,
+    webview: Webview,
     mut connection: Connection,
+    on_progress: Option<JavaScriptChannelId>,
 ) -> Result<String, String> {
     if let Some(stored) = state.connections_config.read().data()?.get(&connection.id) {
         connection.preserve_secrets_from(stored);
     }
-    let (session, _) = sessions::open(&connection).await?;
-    sessions::close(session).await;
-    Ok("Connected successfully".into())
+    let channel: Option<Channel<ConnectionTestProgress>> =
+        on_progress.map(|id| id.channel_on(webview));
+    connection_test::test(
+        &connection,
+        Arc::new(move |progress| {
+            if let Some(channel) = &channel {
+                let _ = channel.send(progress);
+            }
+        }),
+    )
+    .await
 }

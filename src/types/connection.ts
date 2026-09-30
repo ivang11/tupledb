@@ -77,3 +77,13 @@ export interface Connection {
   timeout_secs?: number
   allow_writes?: boolean
 }
+
+export type ConnectionTestField =
+  | 'host' | 'port' | 'user' | 'password' | 'database' | 'tls'
+  | 'sshHost' | 'sshPort' | 'sshUser' | 'sshPassword' | 'sshKey' | 'sshPassphrase'
+
+export interface ConnectionTestProgress {
+  fields: ConnectionTestField[]
+  status: 'checking' | 'success' | 'error'
+  message: string
+}

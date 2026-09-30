@@ -2,8 +2,8 @@ import type { TableRef, DatabaseTable, ColumnStructure, ForeignKeyColumn } from 
 import { resolveTableReference } from '@/lib/tableReference'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { Connection, ConnectionInfo, DatabaseCapabilities, DriverDescriptor } from '@/types/connection'
-import { invoke } from '@tauri-apps/api/core'
+import type { Connection, ConnectionInfo, ConnectionTestProgress, DatabaseCapabilities, DriverDescriptor } from '@/types/connection'
+import { Channel, invoke } from '@tauri-apps/api/core'
 
 interface OpenConnectionState {
   connection: Connection
@@ -81,8 +81,10 @@ export const useConnectionStore = defineStore('connections', () => {
     await fetchConnections()
   }
 
-  async function testConnection(connection: Connection) {
-    return invoke<string>('test_connection', { connection })
+  async function testConnection(connection: Connection, onProgress?: (progress: ConnectionTestProgress) => void) {
+    const channel = onProgress ? new Channel<ConnectionTestProgress>() : undefined
+    if (channel && onProgress) channel.onmessage = onProgress
+    return invoke<string>('test_connection', { connection, onProgress: channel ?? null })
   }
 
   async function exportConnections(path: string) {

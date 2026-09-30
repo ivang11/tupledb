@@ -246,6 +246,8 @@ async fn optional_database_connection_obeys_server_and_read_only_permissions() {
         endpoint: Some((base.get_host(), base.get_port())),
         timeout_secs: 5,
         tunneled: false,
+        on_connected: None,
+        on_error: None,
         read_only,
     };
     let opened = registry::open(

@@ -82,22 +82,23 @@
           <div class="grid grid-cols-12 gap-3">
             <div class="col-span-8 space-y-2">
               <Label>Host</Label>
-              <Input v-model="connection.database.settings.host" placeholder="127.0.0.1" />
+              <Input v-model="connection.database.settings.host" v-bind="fieldAttrs('host')" placeholder="127.0.0.1" />
             </div>
             <div class="col-span-4 space-y-2">
               <Label>Port</Label>
-              <Input v-model.number="connection.database.settings.port" type="number" />
+              <Input v-model.number="connection.database.settings.port" v-bind="fieldAttrs('port')" type="number" />
             </div>
           </div>
           <div class="grid grid-cols-2 gap-3">
             <div class="space-y-2">
               <Label>User</Label>
-              <Input v-model="connection.database.settings.user" placeholder="root" />
+              <Input v-model="connection.database.settings.user" v-bind="fieldAttrs('user')" placeholder="root" />
             </div>
             <div class="space-y-2">
               <Label>Password</Label>
               <Input
                 v-model="connection.database.settings.password"
+                v-bind="fieldAttrs('password')"
                 type="password"
                 :placeholder="
                   isEdit ? 'Leave blank to keep existing' : '••••••••'
@@ -115,6 +116,7 @@
               >
               <Input
                 v-model="connection.database.settings.database"
+                v-bind="fieldAttrs('database')"
                 placeholder="Leave blank to pick after connecting"
               />
             </div>
@@ -135,7 +137,7 @@
           </div>
           <div v-if="connection.database.engine === 'postgresql'" class="space-y-2">
             <Label>TLS mode</Label>
-            <select v-model="connection.database.settings.ssl_mode" class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+            <select v-model="connection.database.settings.ssl_mode" v-bind="fieldAttrs('tls')" class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
               <option value="disable">Disable</option><option value="prefer">Prefer</option>
               <option value="require">Require encryption</option><option value="verify_ca">Verify CA</option><option value="verify_full">Verify CA and hostname</option>
             </select>
@@ -143,6 +145,7 @@
               <Label>CA certificate <span class="text-muted-foreground font-normal">(PEM)</span></Label>
               <textarea
                 v-model="connection.database.settings.ssl_root_cert"
+                v-bind="fieldAttrs('tls')"
                 rows="4"
                 placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"
                 class="w-full rounded-md border border-input px-3 py-2 text-xs font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring resize-y"
@@ -188,17 +191,18 @@
                 <Label>SSH Host</Label>
                 <Input
                   v-model="sshForm.host"
+                  v-bind="fieldAttrs('sshHost')"
                   placeholder="bastion.example.com"
                 />
               </div>
               <div class="col-span-4 space-y-2">
                 <Label>Port</Label>
-                <Input v-model.number="sshForm.port" type="number" />
+                <Input v-model.number="sshForm.port" v-bind="fieldAttrs('sshPort')" type="number" />
               </div>
             </div>
             <div class="space-y-2">
               <Label>SSH User</Label>
-              <Input v-model="sshForm.user" placeholder="ubuntu" />
+              <Input v-model="sshForm.user" v-bind="fieldAttrs('sshUser')" placeholder="ubuntu" />
             </div>
 
             <div class="flex gap-2 pt-1">
@@ -230,6 +234,7 @@
               <Label>SSH Password</Label>
               <Input
                 v-model="sshForm.password"
+                v-bind="fieldAttrs('sshPassword')"
                 type="password"
                 placeholder="••••••••"
               />
@@ -241,6 +246,7 @@
                 <div class="flex gap-1.5">
                   <Input
                     v-model="sshForm.private_key_path"
+                    v-bind="fieldAttrs('sshKey')"
                     placeholder="~/.ssh/id_rsa"
                     class="flex-1"
                   />
@@ -263,6 +269,7 @@
                 >
                 <Input
                   v-model="sshForm.passphrase"
+                  v-bind="fieldAttrs('sshPassphrase')"
                   type="password"
                   placeholder="••••••••"
                 />
@@ -273,15 +280,23 @@
       </div>
 
       <div
-        v-if="testResult"
+        v-if="testMessage"
+        role="status"
+        aria-live="polite"
         :class="[
-          'text-xs px-3 py-2 rounded-md font-medium',
-          testResult.ok
+          'flex items-start gap-2 text-xs px-3 py-2 rounded-md font-medium',
+          isTesting
+            ? 'bg-muted/50 text-foreground'
+            : testResult?.ok
             ? 'bg-green-500/10 text-green-500'
             : 'bg-destructive/10 text-destructive',
         ]"
       >
-        {{ testResult.msg }}
+        <Loader2Icon v-if="isTesting" class="mt-0.5 size-3.5 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        <CheckCircle2Icon v-else-if="testResult?.ok" class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+        <XCircleIcon v-else class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+        <span class="flex-1 break-words">{{ testMessage }}</span>
+        <span v-if="isTesting" class="shrink-0 tabular-nums text-muted-foreground">{{ elapsedSeconds }}s</span>
       </div>
 
       <div class="flex items-center justify-between pt-4 border-t">
@@ -298,14 +313,14 @@
           </Button>
           <Button
             variant="outline"
-            :disabled="isSaving || !connection.name"
+            :disabled="isTesting || isSaving || !connection.name"
             @click="emit('save', buildConn(), false)"
           >
             {{ isEdit ? "Update" : "Save only" }}
           </Button>
           <Button
             v-if="showConnectButton"
-            :disabled="isSaving || !connection.name || !isAvailable"
+            :disabled="isTesting || isSaving || !connection.name || !isAvailable"
             @click="emit('save', buildConn(), true)"
           >
             {{ isSaving ? "Saving..." : "Save & Connect" }}
@@ -321,11 +336,15 @@ import { computed, toRaw, ref, watch } from "vue";
 import { databaseEngines } from '@/lib/databaseEngines';
 import { open as openFileDialog } from "@tauri-apps/plugin-dialog";
 import { useConnectionStore } from "@/stores/connections";
+import { useConnectionTest } from "@/composables/useConnectionTest";
 import type { Connection } from "@/types/connection";
 import {
   ShieldCheckIcon,
   HardDriveIcon,
   FolderOpenIcon,
+  Loader2Icon,
+  CheckCircle2Icon,
+  XCircleIcon,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -371,8 +390,7 @@ const sshForm = ref({
   private_key_path: "",
   passphrase: "",
 });
-const isTesting = ref(false);
-const testResult = ref<{ ok: boolean; msg: string } | null>(null);
+const { isTesting, testResult, testMessage, elapsedSeconds, testConnection, resetTest, fieldAttrs } = useConnectionTest();
 
 const isEdit = ref(false);
 
@@ -381,14 +399,14 @@ function changeEngine(engine: string) {
   props.connection.database = engine === 'postgresql'
     ? { engine, settings: { host: '127.0.0.1', port: 5432, user: 'postgres', ssl_mode: 'prefer' } }
     : { engine: 'mysql', settings: { host: '127.0.0.1', port: 3306, user: 'root' } }
-  testResult.value = null
+  resetTest()
 }
 
 watch(
   () => [props.open, props.connection] as const,
   ([open]) => {
     if (!open) return;
-    testResult.value = null;
+    resetTest();
     isEdit.value = store.connections.some((c) => c.id === props.connection.id);
 
     sshEnabled.value = !!props.connection.ssh;
@@ -417,6 +435,16 @@ watch(
     }
   },
   { immediate: true },
+);
+
+// A result only describes the exact settings that were tested. Ignore late
+// progress/results after editing the form, changing profiles or closing it.
+watch(
+  () => [props.open, props.connection.id, props.connection.database,
+    props.connection.timeout_secs, props.connection.allow_writes,
+    sshEnabled.value, sshAuthType.value, sshForm.value],
+  resetTest,
+  { deep: true },
 );
 
 function buildConn(): Connection {
@@ -454,16 +482,7 @@ function toggleReadOnly() {
 }
 
 async function test() {
-  isTesting.value = true;
-  testResult.value = null;
-  try {
-    const msg = await store.testConnection(buildConn());
-    testResult.value = { ok: true, msg: msg ?? "Connection successful" };
-  } catch (e: any) {
-    testResult.value = { ok: false, msg: String(e) };
-  } finally {
-    isTesting.value = false;
-  }
+  await testConnection(buildConn());
 }
 
 async function pickSshKey() {
@@ -479,3 +498,18 @@ async function pickSshKey() {
   }
 }
 </script>
+
+<style scoped>
+.connection-test-field[data-test-state="checking"] {
+  border-color: var(--color-amber-500);
+  background-color: color-mix(in oklab, var(--color-amber-500) 5%, transparent);
+}
+.connection-test-field[data-test-state="success"] {
+  border-color: color-mix(in oklab, var(--color-green-400) 40%, var(--input));
+  background-color: color-mix(in oklab, var(--color-green-400) 2.5%, transparent);
+}
+.connection-test-field[data-test-state="error"] {
+  border-color: var(--destructive);
+  background-color: color-mix(in oklab, var(--destructive) 5%, transparent);
+}
+</style>

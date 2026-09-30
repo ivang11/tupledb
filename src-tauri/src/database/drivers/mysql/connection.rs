@@ -35,10 +35,15 @@ pub async fn open(
             .idle_timeout(Duration::from_secs(60))
             .max_lifetime(Duration::from_secs(15 * 60));
     }
-    let pool = pool_options
-        .connect_with(opts)
-        .await
-        .map_err(|e| format!("MySQL connection failed: {e}"))?;
+    let pool = pool_options.connect_with(opts).await.map_err(|e| {
+        if let Some(on_error) = &options.on_error {
+            on_error(&e);
+        }
+        format!("MySQL connection failed: {e}")
+    })?;
+    if let Some(on_connected) = &options.on_connected {
+        on_connected();
+    }
     let server_version = sqlx::query_scalar::<_, String>("SELECT VERSION()")
         .fetch_one(&pool)
         .await

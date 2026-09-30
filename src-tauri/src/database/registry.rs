@@ -49,6 +49,10 @@ pub struct ConnectOptions<'a> {
     pub endpoint: Option<(&'a str, u16)>,
     pub timeout_secs: u64,
     pub tunneled: bool,
+    /// Used by connection tests once the server accepts the session, before
+    /// fetching server metadata. Normal workspace connections leave this unset.
+    pub on_connected: Option<Arc<dyn Fn() + Send + Sync>>,
+    pub on_error: Option<Arc<dyn Fn(&sqlx::Error) + Send + Sync>>,
 }
 
 pub async fn open(

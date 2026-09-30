@@ -111,6 +111,9 @@ pub async fn open(
                 break;
             }
             Err(error) => {
+                if let Some(on_error) = &options.on_error {
+                    on_error(&error);
+                }
                 last_error = format!("PostgreSQL database {catalog:?}: {error}");
                 if !may_try_another_catalog(&error) {
                     return Err(last_error);
@@ -121,6 +124,9 @@ pub async fn open(
     let (pool, catalog) = connected.ok_or_else(|| format!(
         "Could not open an initial PostgreSQL database. Specify an existing database you can access. {last_error}"
     ))?;
+    if let Some(on_connected) = &options.on_connected {
+        on_connected();
+    }
     let version: String = sqlx::query_scalar("SHOW server_version")
         .fetch_one(&pool)
         .await
@@ -162,6 +168,8 @@ mod tests {
                 endpoint: Some(("127.0.0.1", 6543)),
                 timeout_secs: 5,
                 tunneled: false,
+                on_connected: None,
+                on_error: None,
                 read_only: true,
             };
             let actual = connect_options(&settings, &options, "app").unwrap();
@@ -198,6 +206,8 @@ mod tests {
             endpoint: Some(("127.0.0.1", 6543)),
             timeout_secs: 5,
             tunneled: true,
+            on_connected: None,
+            on_error: None,
             read_only: false,
         };
         assert!(connect_options(&settings, &options, "app")
@@ -243,6 +253,8 @@ mod tests {
             endpoint: Some(("remote.example", 5432)),
             timeout_secs: 5,
             tunneled: false,
+            on_connected: None,
+            on_error: None,
             read_only: false,
         };
         let error = connect_options(&settings, &options, "app").unwrap_err();
