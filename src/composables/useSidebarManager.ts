@@ -150,9 +150,9 @@ export function useSidebarManager(ctx: SidebarContext) {
     }
   }
 
-  async function connectSaved(conn: any) {
+  async function connectSaved(conn: Connection, reconnect = false) {
     const existing = store.openConnections[conn.id];
-    if (existing) {
+    if (existing?.status === 'connected' && !reconnect) {
       existing.selectedDatabase =
         existing.selectedDatabase ??
         existing.openedDatabases?.[0] ??
@@ -1075,17 +1075,18 @@ export function useSidebarManager(ctx: SidebarContext) {
   }
 
   async function saveNewConn(conn: Connection, andConnect: boolean) {
-    if (!conn.name) return;
+    if (!conn.name || isSavingConn.value) return false;
     isSavingConn.value = true;
     try {
       await store.addConnection(conn);
-      if (andConnect) {
-        await store.connect(conn);
-        expandedConnections.value.add(conn.id);
-      }
       showNewConnDialog.value = false;
+      if (andConnect) {
+        return await connectSaved(conn, true);
+      }
+      return true;
     } catch (e: any) {
       toastError('Error', String(e));
+      return false;
     } finally {
       isSavingConn.value = false;
     }

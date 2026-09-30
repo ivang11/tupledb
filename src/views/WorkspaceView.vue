@@ -222,6 +222,7 @@ const connectionState = useWorkspaceConnectionState({
   selectedSidebarConnectionId,
   sidebarToggleVisible,
   connectSaved,
+  saveNewConn: sidebarManager.saveNewConn,
   resetWorkspaceState,
 });
 const {

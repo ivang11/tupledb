@@ -1,10 +1,12 @@
 import { computed, ref, watch, watchEffect, type Ref } from "vue";
 import { useConnectionStore } from "@/stores/connections";
+import type { Connection } from "@/types/connection";
 
 interface WorkspaceConnectionStateContext {
   selectedSidebarConnectionId: Ref<string | null>;
   sidebarToggleVisible: Ref<boolean>;
   connectSaved: (connection: any) => Promise<boolean | void>;
+  saveNewConn: (connection: Connection, andConnect: boolean) => Promise<boolean>;
   resetWorkspaceState: () => void;
 }
 
@@ -50,6 +52,14 @@ export function useWorkspaceConnectionState(ctx: WorkspaceConnectionStateContext
     }
   }
 
+  async function saveNewConn(conn: Connection, andConnect: boolean) {
+    const saved = await ctx.saveNewConn(conn, andConnect);
+    if (saved && andConnect) {
+      showConnectionManager.value = false;
+    }
+    return saved;
+  }
+
   watchEffect(() => {
     ctx.sidebarToggleVisible.value = !showConnectionManager.value && hasOpenConnections.value;
   });
@@ -83,5 +93,6 @@ export function useWorkspaceConnectionState(ctx: WorkspaceConnectionStateContext
     goHome,
     closeConnectionManager,
     connectFromManager,
+    saveNewConn,
   };
 }
