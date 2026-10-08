@@ -156,6 +156,9 @@ export function useSidebarManager(ctx: SidebarContext) {
       existing.selectedDatabase =
         existing.selectedDatabase ??
         existing.openedDatabases?.[0] ??
+        (existing.databases.includes(conn.mysql?.database)
+          ? conn.mysql.database
+          : null) ??
         existing.databases[0] ??
         null;
       expandedConnections.value.add(conn.id);
@@ -168,6 +171,13 @@ export function useSidebarManager(ctx: SidebarContext) {
       await store.connect(conn);
       expandedConnections.value.add(conn.id);
       selectedSidebarConnectionId.value = conn.id;
+      const defaultDatabase = conn.mysql?.database?.trim();
+      if (
+        defaultDatabase &&
+        store.openConnections[conn.id]?.databases.includes(defaultDatabase)
+      ) {
+        await selectDatabase(conn.id, defaultDatabase);
+      }
       return true;
     } catch (e: any) {
       toastError('Failed to connect', String(e));
