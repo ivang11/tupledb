@@ -87,8 +87,11 @@ export function openConnectionEditorWindow(options: {
         width: 640,
         height: 560, minWidth: 560, minHeight: 480,
         center: true, decorations: false, resizable: true, maximizable: false,
-        minimizable: false, skipTaskbar: true, parent: 'main', visible: true,
-        backgroundColor: '#1c1d20',
+        // Created hidden: the editor view shows the window once its first frame
+        // has painted and the window has been sized to the form, so the user
+        // never sees the WebView's white backdrop or the initial resize.
+        minimizable: false, skipTaskbar: true, parent: 'main', visible: false,
+        backgroundColor: '#17181b',
       })
       // Keep the creation callbacks alive if the host is unmounted while the
       // platform is still creating its window, so that late windows are closed.

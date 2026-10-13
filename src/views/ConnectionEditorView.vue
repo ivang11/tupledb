@@ -36,6 +36,18 @@ const saveError = ref<string | null>(null)
 const unlisteners: UnlistenFn[] = []
 let disposed = false
 let resizeQueue = Promise.resolve()
+let revealed = false
+let revealTimer: ReturnType<typeof setTimeout> | undefined
+
+// The window is created hidden. Reveal it after the form has painted and the
+// window has been fitted to it; the timer guarantees it appears even if the
+// host never sends the draft.
+async function reveal() {
+  if (revealed || disposed) return
+  revealed = true
+  clearTimeout(revealTimer)
+  try { await editor.show() } catch (error) { console.error('Could not show connection editor:', error) }
+}
 
 function resizeToFit(formHeight: number) {
   // Fit the actual content, including test feedback and optional certificates.
@@ -84,6 +96,9 @@ onMounted(async () => {
     store.availableDrivers = event.payload.drivers
     draft.value = event.payload
     await nextTick()
+    await new Promise(resolve => requestAnimationFrame(() => resolve(undefined)))
+    await resizeQueue
+    await reveal()
     await editor.setFocus()
     document.getElementById('connection-name')?.focus()
   }))
@@ -95,11 +110,13 @@ onMounted(async () => {
     if (isSaving.value) event.preventDefault()
   }))
   document.addEventListener('keydown', onKeydown)
+  revealTimer = setTimeout(() => void reveal(), 1500)
   await editor.emitTo('main', editorEvents.ready, { label: editor.label })
 })
 
 onUnmounted(() => {
   disposed = true
+  clearTimeout(revealTimer)
   unlisteners.forEach(unlisten => unlisten())
   document.removeEventListener('keydown', onKeydown)
 })

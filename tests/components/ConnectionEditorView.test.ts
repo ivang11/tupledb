@@ -7,7 +7,7 @@ import { editorEvents } from '@/lib/connectionEditorWindow'
 
 const transport = vi.hoisted(() => ({
   listeners: new Map<string, (event: any) => any>(),
-  emitTo: vi.fn(), close: vi.fn(), setFocus: vi.fn(),
+  emitTo: vi.fn(), close: vi.fn(), setFocus: vi.fn(), show: vi.fn(),
   innerSize: vi.fn(), scaleFactor: vi.fn(), setSize: vi.fn(),
   outerPosition: vi.fn(), setPosition: vi.fn(), currentMonitor: vi.fn(),
 }))
@@ -15,7 +15,7 @@ vi.mock('@tauri-apps/api/webviewWindow', () => ({
   WebviewWindow: class {},
   getCurrentWebviewWindow: () => ({
     label: 'connection-editor-fixture',
-    emitTo: transport.emitTo, close: transport.close, setFocus: transport.setFocus,
+    emitTo: transport.emitTo, close: transport.close, setFocus: transport.setFocus, show: transport.show,
     innerSize: transport.innerSize, scaleFactor: transport.scaleFactor, setSize: transport.setSize,
     outerPosition: transport.outerPosition, setPosition: transport.setPosition,
     listen: async (name: string, handler: (event: any) => any) => {
@@ -37,6 +37,7 @@ beforeEach(() => {
   transport.emitTo.mockResolvedValue(undefined)
   transport.close.mockResolvedValue(undefined)
   transport.setFocus.mockResolvedValue(undefined)
+  transport.show.mockResolvedValue(undefined)
   transport.innerSize.mockResolvedValue({ width: 1280, height: 1120 })
   transport.scaleFactor.mockResolvedValue(2)
   transport.setSize.mockResolvedValue(undefined)
@@ -136,6 +137,22 @@ describe('connection editor form in a separate window', () => {
     expect((wrapper.get('#connection-name').element as HTMLInputElement).value).toBe('Edited draft')
     expect(wrapper.findAll('button').find(button => button.text() === 'Save & Connect')!.attributes('disabled')).toBeUndefined()
     expect(transport.close).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('reveals the hidden window only after the draft has rendered, then focuses it', async () => {
+    const wrapper = mount(ConnectionEditorView, { attachTo: document.body, global: { stubs: { WindowResizeHandles: true } } })
+    await flushPromises()
+    expect(transport.show).not.toHaveBeenCalled()
+    await transport.listeners.get(editorEvents.initialize)!({ payload: {
+      connection: { id: 'fixture', name: 'Test connection', environment: 'LOCAL', database: {
+        engine: 'postgresql', settings: { host: 'localhost', port: 5432, user: 'postgres', ssl_mode: 'prefer' },
+      } },
+      editing: false, drivers: [{ engine: 'postgresql', label: 'PostgreSQL', defaultPort: 5432 }], showConnectButton: true,
+    } })
+    await flushPromises()
+    expect(transport.show).toHaveBeenCalledOnce()
+    expect(transport.show.mock.invocationCallOrder[0]).toBeLessThan(transport.setFocus.mock.invocationCallOrder[0])
     wrapper.unmount()
   })
 
