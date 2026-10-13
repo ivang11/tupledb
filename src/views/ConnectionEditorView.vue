@@ -1,9 +1,9 @@
 <template>
-  <div class="flex h-screen flex-col overflow-hidden rounded-lg border bg-background">
+  <div class="flex h-screen flex-col overflow-hidden rounded-lg border border-(--line-1) bg-background">
     <WindowResizeHandles />
-    <div data-tauri-drag-region class="relative flex h-7 shrink-0 items-center justify-center bg-muted/20">
-      <GripHorizontalIcon class="pointer-events-none size-4 text-muted-foreground/35" aria-hidden="true" />
-      <button type="button" class="absolute right-1 flex size-6 items-center justify-center rounded text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+    <div data-tauri-drag-region class="relative flex h-8 shrink-0 items-center justify-center border-b border-(--line-2) bg-(--bg-1)">
+      <span data-tauri-drag-region class="pointer-events-none text-[11.5px] font-medium text-(--fg-3)">{{ draft?.editing ? 'Edit connection' : 'New connection' }}</span>
+      <button type="button" class="absolute right-1.5 flex size-6 items-center justify-center rounded-md text-(--fg-3) transition-colors hover:bg-(--bg-2) hover:text-(--fg-1)"
         aria-label="Close connection window" :disabled="isSaving" @click="close"><XIcon class="pointer-events-none size-3.5" /></button>
     </div>
     <ConnectionForm v-if="draft" class="min-h-0 flex-1" :open="true" :connection="draft.connection"
@@ -11,7 +11,7 @@
       @update:open="close" @save="save" @height-change="resizeToFit">
       <template #error><p v-if="saveError" role="alert" class="mb-3 max-h-20 overflow-y-auto text-xs text-destructive">{{ saveError }}</p></template>
     </ConnectionForm>
-    <div v-else class="flex flex-1 items-center justify-center text-sm text-muted-foreground">Opening connection settings…</div>
+    <div v-else class="flex flex-1 items-center justify-center text-[12.5px] text-(--fg-4)">Opening connection settings…</div>
   </div>
 </template>
 
@@ -23,7 +23,7 @@ import { currentMonitor } from '@tauri-apps/api/window'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import ConnectionForm from '@/components/connections/ConnectionForm.vue'
 import WindowResizeHandles from '@/components/WindowResizeHandles.vue'
-import { GripHorizontalIcon, XIcon } from 'lucide-vue-next'
+import { XIcon } from 'lucide-vue-next'
 import { useConnectionStore } from '@/stores/connections'
 import { editorEvents, type EditorDraft } from '@/lib/connectionEditorWindow'
 import type { Connection } from '@/types/connection'
