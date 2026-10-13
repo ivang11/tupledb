@@ -1,9 +1,10 @@
 <template>
-  <div class="flex h-screen flex-col overflow-hidden rounded-lg border border-(--line-1) bg-background">
-    <WindowResizeHandles />
-    <div data-tauri-drag-region class="relative flex h-8 shrink-0 items-center justify-center border-b border-(--line-2) bg-(--bg-1)">
-      <span data-tauri-drag-region class="pointer-events-none text-[11.5px] font-medium text-(--fg-3)">{{ draft?.editing ? 'Edit connection' : 'New connection' }}</span>
-      <button type="button" class="absolute right-1.5 flex size-6 items-center justify-center rounded-md text-(--fg-3) transition-colors hover:bg-(--bg-2) hover:text-(--fg-1)"
+  <div class="flex h-screen flex-col overflow-hidden bg-background" :class="nativeChrome ? '' : 'border border-(--line-1)'">
+    <WindowResizeHandles v-if="!nativeChrome" />
+    <div data-tauri-drag-region class="relative flex h-8 shrink-0 items-center border-b border-(--line-2) bg-(--bg-1)">
+      <!-- Centered over the full bar so the traffic lights on macOS do not push it sideways. -->
+      <span data-tauri-drag-region class="pointer-events-none absolute inset-x-0 text-center text-[11.5px] font-medium text-(--fg-3)">{{ draft?.editing ? 'Edit connection' : 'New connection' }}</span>
+      <button v-if="!nativeChrome" type="button" class="absolute right-1.5 flex size-6 items-center justify-center rounded-md text-(--fg-3) transition-colors hover:bg-(--bg-2) hover:text-(--fg-1)"
         aria-label="Close connection window" :disabled="isSaving" @click="close"><XIcon class="pointer-events-none size-3.5" /></button>
     </div>
     <ConnectionForm v-if="draft" class="min-h-0 flex-1" :open="true" :connection="draft.connection"
@@ -23,11 +24,15 @@ import { currentMonitor } from '@tauri-apps/api/window'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import ConnectionForm from '@/components/connections/ConnectionForm.vue'
 import WindowResizeHandles from '@/components/WindowResizeHandles.vue'
+import { usesNativeMacWindowControls } from '@/lib/platform'
 import { XIcon } from 'lucide-vue-next'
 import { useConnectionStore } from '@/stores/connections'
 import { editorEvents, type EditorDraft } from '@/lib/connectionEditorWindow'
 import type { Connection } from '@/types/connection'
 
+// macOS uses native decorations (rounded corners, traffic lights); other
+// platforms draw their own close button and resize handles.
+const nativeChrome = usesNativeMacWindowControls
 const editor = getCurrentWebviewWindow()
 const store = useConnectionStore()
 const draft = ref<EditorDraft | null>(null)

@@ -1,4 +1,5 @@
 import { getCurrentWebviewWindow, WebviewWindow } from '@tauri-apps/api/webviewWindow'
+import { usesNativeMacWindowControls } from '@/lib/platform'
 import type { UnlistenFn } from '@tauri-apps/api/event'
 import type { Connection, DriverDescriptor } from '@/types/connection'
 
@@ -86,7 +87,13 @@ export function openConnectionEditorWindow(options: {
         title: options.draft.editing ? 'Edit Connection — TupleDB' : 'New Connection — TupleDB',
         width: 640,
         height: 560, minWidth: 560, minHeight: 480,
-        center: true, decorations: false, resizable: true, maximizable: false,
+        center: true, resizable: true, maximizable: false,
+        // macOS keeps native decorations so the window gets the system's rounded
+        // corners and traffic lights, with the title bar overlaid by our own bar
+        // like the main window. Elsewhere the window is frameless and square.
+        ...(usesNativeMacWindowControls
+          ? { decorations: true, titleBarStyle: 'overlay' as const, hiddenTitle: true }
+          : { decorations: false }),
         // Created hidden: the editor view shows the window once its first frame
         // has painted and the window has been sized to the form, so the user
         // never sees the WebView's white backdrop or the initial resize.
