@@ -78,6 +78,7 @@ import { useWorkspaceConnectionState } from "@/composables/useWorkspaceConnectio
 import { useRowContextMenu } from "@/composables/useRowContextMenu";
 import { useWorkspaceViewContexts } from "@/composables/useWorkspaceViewContexts";
 import { useWorkspaceShortcuts } from "@/composables/useWorkspaceShortcuts";
+import { useConnectionStore } from "@/stores/connections";
 
 const PaneResizer = defineAsyncComponent(() => import("@/components/PaneResizer.vue"));
 const StatusBar = defineAsyncComponent(() => import("@/components/StatusBar.vue"));
@@ -246,7 +247,22 @@ const quickSearch = useQuickSearch({
   setSql: sql => { const pane = getPane(); const tab = pane.tabs.find(tab => tab.id === pane.activeTabId); if (tab?.type === 'query') tab.sql = sql; },
 });
 window.addEventListener('tupledb:quick-search', quickSearch.show);
-onUnmounted(() => window.removeEventListener('tupledb:quick-search', quickSearch.show));
+// Actions picked from the native menu bar (see AppLayout).
+const connectionStore = useConnectionStore();
+const menuActions: Record<string, () => void> = {
+  'tupledb:menu:new-connection': () => sidebarManager.openNewConnDialog(),
+  'tupledb:menu:import-connections': () => void sidebarManager.importConnections(),
+  'tupledb:menu:export-connections': () => void sidebarManager.exportConnections(),
+  'tupledb:menu:new-query': () => {
+    const connectionId = selectedSidebarConnectionId.value;
+    if (connectionId) openQueryTab(connectionId, connectionStore.openConnections[connectionId]?.selectedDatabase ?? null);
+  },
+};
+for (const [name, handler] of Object.entries(menuActions)) window.addEventListener(name, handler);
+onUnmounted(() => {
+  window.removeEventListener('tupledb:quick-search', quickSearch.show);
+  for (const [name, handler] of Object.entries(menuActions)) window.removeEventListener(name, handler);
+});
 
 useWorkspaceSession({
   panes, activePaneId, paneWidths: workspace.paneWidths, focusedPaneId, sidebarVisible,

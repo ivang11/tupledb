@@ -100,6 +100,8 @@ import KeyboardShortcutsPanel from '@/components/KeyboardShortcutsPanel.vue'
 import WindowResizeHandles from '@/components/WindowResizeHandles.vue'
 import { useAppSettings, FONT_OPTIONS } from '@/composables/useAppSettings'
 import { usesNativeMacWindowControls } from '@/lib/platform'
+import { SETTINGS_TAB_EVENT } from '@/lib/settingsWindow'
+import type { UnlistenFn } from '@tauri-apps/api/event'
 
 const CHECK_UPDATES_EVENT = 'tupledb:check-updates'
 
@@ -115,7 +117,10 @@ const sections = [
   { id: 'export', label: 'Export', icon: FileOutputIcon },
   { id: 'keyboard', label: 'Keyboard shortcuts', icon: KeyboardIcon },
 ]
-const tab = ref('general')
+function requestedTab(value: string | null | undefined) {
+  return sections.some((section) => section.id === value) ? (value as string) : null
+}
+const tab = ref(requestedTab(new URLSearchParams(window.location.search).get('tab')) ?? 'general')
 const activeSection = computed(() => sections.find((section) => section.id === tab.value) ?? sections[0])
 
 async function close() {
@@ -133,6 +138,7 @@ function onKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape') void close()
 }
 
+let stopTabRequests: UnlistenFn | undefined
 let revealed = false
 async function reveal() {
   if (revealed) return
@@ -142,6 +148,10 @@ async function reveal() {
 
 onMounted(async () => {
   document.addEventListener('keydown', onKeydown)
+  stopTabRequests = await win.listen<string>(SETTINGS_TAB_EVENT, event => {
+    const next = requestedTab(event.payload)
+    if (next) tab.value = next
+  })
   await nextTick()
   await new Promise(resolve => requestAnimationFrame(() => resolve(undefined)))
   await reveal()
@@ -150,6 +160,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
+  stopTabRequests?.()
 })
 </script>
 

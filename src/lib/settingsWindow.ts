@@ -2,17 +2,19 @@ import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { usesNativeMacWindowControls } from '@/lib/platform'
 
 export const SETTINGS_WINDOW_LABEL = 'settings'
+export const SETTINGS_TAB_EVENT = 'tupledb:settings-tab'
 
-/** Opens the preferences window, or brings the existing one to the front. */
-export async function openSettingsWindow(): Promise<WebviewWindow> {
+/** Opens the preferences window, or brings the existing one to the front, optionally on a section. */
+export async function openSettingsWindow(tab?: string): Promise<WebviewWindow> {
   const existing = await WebviewWindow.getByLabel(SETTINGS_WINDOW_LABEL)
   if (existing) {
     await existing.show()
     await existing.setFocus()
+    if (tab) await existing.emitTo(SETTINGS_WINDOW_LABEL, SETTINGS_TAB_EVENT, tab)
     return existing
   }
   return new WebviewWindow(SETTINGS_WINDOW_LABEL, {
-    url: 'index.html?view=settings',
+    url: `index.html?view=settings${tab ? `&tab=${encodeURIComponent(tab)}` : ''}`,
     title: 'Settings — TupleDB',
     width: 680,
     height: 540,

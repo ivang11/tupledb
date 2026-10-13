@@ -13,6 +13,74 @@ pub mod state;
 use crate::state::AppState;
 use tauri::Manager;
 
+/// Native menu bar for macOS. Picks are forwarded to
+/// the main window as `tupledb:menu` events; items that mirror in-app
+/// shortcuts carry no accelerator so the customizable keybindings keep working.
+#[cfg(target_os = "macos")]
+fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
+
+    let about = AboutMetadataBuilder::new()
+        .name(Some("TupleDB"))
+        .version(Some(app.package_info().version.to_string()))
+        .build();
+
+    let app_menu = SubmenuBuilder::new(app, "TupleDB")
+        .item(&PredefinedMenuItem::about(app, Some("About TupleDB"), Some(about))?)
+        .separator()
+        .item(&MenuItemBuilder::with_id("settings", "Settings…").accelerator("CmdOrCtrl+,").build(app)?)
+        .item(&MenuItemBuilder::with_id("check-updates", "Check for Updates…").build(app)?)
+        .separator()
+        .services()
+        .separator()
+        .item(&PredefinedMenuItem::hide(app, Some("Hide TupleDB"))?)
+        .hide_others()
+        .show_all()
+        .separator()
+        .item(&PredefinedMenuItem::quit(app, Some("Quit TupleDB"))?)
+        .build()?;
+
+    let file_menu = SubmenuBuilder::new(app, "File")
+        .item(&MenuItemBuilder::with_id("new-connection", "New Connection…").accelerator("CmdOrCtrl+N").build(app)?)
+        .item(&MenuItemBuilder::with_id("new-query", "New Query").accelerator("CmdOrCtrl+T").build(app)?)
+        .separator()
+        .item(&MenuItemBuilder::with_id("import-connections", "Import Connections…").build(app)?)
+        .item(&MenuItemBuilder::with_id("export-connections", "Export Connections…").build(app)?)
+        .separator()
+        .item(&MenuItemBuilder::with_id("close-window", "Close Window").accelerator("Shift+CmdOrCtrl+W").build(app)?)
+        .build()?;
+
+    let edit_menu = SubmenuBuilder::new(app, "Edit")
+        .undo()
+        .redo()
+        .separator()
+        .cut()
+        .copy()
+        .paste()
+        .select_all()
+        .build()?;
+
+    let view_menu = SubmenuBuilder::new(app, "View")
+        .item(&MenuItemBuilder::with_id("toggle-sidebar", "Toggle Sidebar").build(app)?)
+        .item(&MenuItemBuilder::with_id("quick-search", "Quick Search…").build(app)?)
+        .separator()
+        .fullscreen()
+        .build()?;
+
+    let window_menu = SubmenuBuilder::new(app, "Window")
+        .minimize()
+        .maximize()
+        .build()?;
+
+    let help_menu = SubmenuBuilder::new(app, "Help")
+        .item(&MenuItemBuilder::with_id("settings-keyboard", "Keyboard Shortcuts…").build(app)?)
+        .build()?;
+
+    MenuBuilder::new(app)
+        .items(&[&app_menu, &file_menu, &edit_menu, &view_menu, &window_menu, &help_menu])
+        .build()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     crate::benchmark::mark_process_started();
@@ -28,6 +96,27 @@ pub fn run() {
                 (app.get_webview_window("main"), app.default_window_icon())
             {
                 window.set_icon(icon.clone())?;
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::Emitter;
+                app.set_menu(build_menu(app.handle())?)?;
+                app.on_menu_event(|app, event| {
+                    let id = event.id().as_ref();
+                    if id == "close-window" {
+                        for window in app.webview_windows().into_values() {
+                            if window.is_focused().unwrap_or(false) {
+                                let _ = window.close();
+                            }
+                        }
+                        return;
+                    }
+                    if let Some(main) = app.get_webview_window("main") {
+                        let _ = main.set_focus();
+                    }
+                    let _ = app.emit_to("main", "tupledb:menu", id.to_string());
+                });
             }
 
             Ok(())

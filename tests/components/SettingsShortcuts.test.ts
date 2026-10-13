@@ -9,7 +9,7 @@ import { DEFAULT_KEYBINDINGS } from '@/config/keybindingActions'
 vi.mock('@tauri-apps/plugin-fs', () => ({ readTextFile: vi.fn(), writeTextFile: vi.fn() }))
 const transport = vi.hoisted(() => ({ show: vi.fn(), setFocus: vi.fn(), close: vi.fn(), emitTo: vi.fn(), mainFocus: vi.fn() }))
 vi.mock('@tauri-apps/api/webviewWindow', () => ({
-  getCurrentWebviewWindow: () => ({ label: 'settings', show: transport.show, setFocus: transport.setFocus, close: transport.close, emitTo: transport.emitTo }),
+  getCurrentWebviewWindow: () => ({ label: 'settings', show: transport.show, setFocus: transport.setFocus, close: transport.close, emitTo: transport.emitTo, listen: async () => () => {} }),
   WebviewWindow: { getByLabel: vi.fn(async (label: string) => label === 'main' ? { setFocus: transport.mainFocus } : null) },
 }))
 
