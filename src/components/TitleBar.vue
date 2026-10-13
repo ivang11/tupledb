@@ -27,16 +27,6 @@
     <div class="flex items-center gap-0.5">
       <button class="flex size-6 items-center justify-center rounded text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1)" :title="`Quick search (${quickSearchKey})`" aria-label="Quick search" @click="openQuickSearch"><SearchIcon class="size-3.5" /></button>
       <button class="flex size-6 items-center justify-center rounded text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1)" title="Settings" aria-label="Settings" @click="settingsOpen = true"><SettingsIcon class="size-3.5" /></button>
-      <button
-        class="flex size-6 items-center justify-center rounded text-(--fg-2) transition-colors hover:bg-(--bg-2) hover:text-(--fg-1)"
-        :class="{ 'pointer-events-none opacity-70': isChecking || isInstalling }"
-        :title="updaterTitle"
-        :disabled="isChecking || isInstalling"
-        @click="() => checkForUpdates()"
-      >
-        <LoaderCircleIcon v-if="isChecking || isInstalling" class="size-3 animate-spin" />
-        <DownloadIcon v-else class="size-3" />
-      </button>
       <template v-if="!usesNativeMacWindowControls">
         <div class="w-px h-3.5 bg-border/50 mx-1" />
         <button
@@ -74,8 +64,6 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
   SearchIcon,
   SettingsIcon,
-  DownloadIcon,
-  LoaderCircleIcon,
   MinusIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
@@ -84,7 +72,6 @@ import {
 } from 'lucide-vue-next'
 import { useSidebarState } from '@/composables/useSidebarState'
 import { useKeybindings, formatKeybinding } from '@/composables/useKeybindings'
-import { useUpdater } from '@/composables/useUpdater'
 import { usesNativeMacWindowControls } from '@/lib/platform'
 
 const { settingsOpen } = useAppSettings()
@@ -95,14 +82,8 @@ const reserveNativeControlsSpace = computed(
 )
 const { sidebarVisible, sidebarToggleVisible } = useSidebarState()
 const { getBinding } = useKeybindings()
-const { checkForUpdates, isChecking, isInstalling } = useUpdater()
 const quickSearchKey = computed(() => formatKeybinding(getBinding('quickSearch')))
 const toggleSidebarKey = computed(() => formatKeybinding(getBinding('toggleSidebar')))
-const updaterTitle = computed(() => {
-  if (isInstalling.value) return 'Installing update'
-  if (isChecking.value) return 'Checking for updates'
-  return 'Check for updates'
-})
 
 function openQuickSearch() { window.dispatchEvent(new Event('tupledb:quick-search')) }
 

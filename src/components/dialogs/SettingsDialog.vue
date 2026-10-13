@@ -44,19 +44,33 @@
         <template v-if="tab === 'general'">
           <label>Restore workspace on startup<input type="checkbox" v-model="settings.restoreSession" /></label>
           <p>Restored SQL drafts are never executed automatically.</p>
+          <div class="flex items-center justify-between gap-5 border-t pt-3">
+            <span class="text-[13px]">App updates</span>
+            <Button variant="outline" :disabled="isChecking || isInstalling" @click="checkUpdates">
+              <LoaderCircleIcon v-if="isChecking || isInstalling" class="size-3.5 animate-spin" />
+              {{ isInstalling ? 'Installing update…' : isChecking ? 'Checking for updates…' : 'Check for updates' }}
+            </Button>
+          </div>
+          <p>Updates are also checked automatically when the app starts.</p>
         </template>
       </div>
-      <DialogFooter><Button v-if="tab !== 'keyboard'" variant="outline" @click="reset">Restore defaults</Button><Button @click="settingsOpen = false">Done</Button></DialogFooter>
     </DialogContent>
   </Dialog>
 </template>
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { LoaderCircleIcon } from 'lucide-vue-next'
+import { useUpdater } from '@/composables/useUpdater'
 import KeyboardShortcutsPanel from '@/components/KeyboardShortcutsPanel.vue'
 import { useAppSettings, FONT_OPTIONS } from '@/composables/useAppSettings'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-const { settings, settingsOpen, reset } = useAppSettings()
+const { settings, settingsOpen } = useAppSettings()
+const { checkForUpdates, isChecking, isInstalling, dialogOpen } = useUpdater()
+async function checkUpdates() {
+  await checkForUpdates()
+  if (dialogOpen.value) settingsOpen.value = false
+}
 const sections = [{ id: 'general', label: 'General' }, { id: 'appearance', label: 'Appearance' }, { id: 'editor', label: 'Editor' }, { id: 'queries', label: 'Queries' }, { id: 'export', label: 'Export' }, { id: 'keyboard', label: 'Keyboard shortcuts' }]
 const tab = ref('general')
 watch(settingsOpen, open => { if (open) tab.value = 'general' })
