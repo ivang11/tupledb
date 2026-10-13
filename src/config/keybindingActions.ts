@@ -1,4 +1,5 @@
 export type KeybindingAction =
+  | 'quickSearch'
   | 'closeTab'
   | 'runQuery'
   | 'formatQuery'
@@ -19,6 +20,7 @@ export interface KeybindingDef {
 }
 
 export const KEYBINDING_DEFS: KeybindingDef[] = [
+  { action: 'quickSearch', label: 'Quick Search', description: 'Find connections, databases, tables and saved queries', defaultKey: 'Ctrl+P', category: 'Navigation' },
   {
     action: 'closeTab',
     label: 'Close Tab',

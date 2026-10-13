@@ -252,3 +252,16 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:active {
   background-color: color-mix(in srgb, var(--primary) 55%, transparent);
 }
+
+/* A neutral light palette shares the same semantic tokens as the dark UI. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-0: #ffffff; --bg-1: #f5f6f7; --bg-2: #e9ecef; --bg-3: #dde2e6;
+  --line-1: #cbd2d8; --line-2: #dce1e5; --line-faint: #edf0f2;
+  --fg-1: #19232d; --fg-2: #394651; --fg-3: #5b6975; --fg-4: #75818b; --fg-5: #8a949c;
+  --acc: #17845e; --acc-soft: #17845e12; --acc-line: #17845e50;
+  --sidebar: #f5f6f7; --pk: #96691f; --destructive: #bf3947;
+  --env-local: #208759; --env-prod: #c24949; --env-dev: #a5791f; --env-staging: #637abd;
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+.data-grid [role="cell"] span { font-family: var(--font-table, var(--font-mono)); font-size: var(--table-font-size, 12px); }

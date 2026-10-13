@@ -60,7 +60,7 @@ export function formatKeybinding(binding: string): string {
   // Normalizes and returns a display string, e.g. "Ctrl+Shift+F"
   const parsed = parseKeybindingString(binding)
   const parts: string[] = []
-  if (parsed.ctrl) parts.push('Ctrl')
+  if (parsed.ctrl) parts.push(typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl')
   if (parsed.shift) parts.push('Shift')
   if (parsed.alt) parts.push('Alt')
   const key =
