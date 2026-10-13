@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "settings",
   "description": "Settings window: preferences, shortcut import/export and native window controls",
-  "windows": ["settings"],
+  "windows": [
+    "settings"
+  ],
   "permissions": [
     "core:event:default",
     "core:window:allow-close",
@@ -13,6 +15,7 @@
     "core:window:allow-start-resize-dragging",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",
+    "opener:default",
     "dialog:allow-open",
     "dialog:allow-save"
   ]

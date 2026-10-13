@@ -7,6 +7,8 @@ import { useKeybindings } from '@/composables/useKeybindings'
 import { DEFAULT_KEYBINDINGS } from '@/config/keybindingActions'
 
 vi.mock('@tauri-apps/plugin-fs', () => ({ readTextFile: vi.fn(), writeTextFile: vi.fn() }))
+const opener = vi.hoisted(() => ({ openUrl: vi.fn(async () => {}) }))
+vi.mock('@tauri-apps/plugin-opener', () => opener)
 const transport = vi.hoisted(() => ({ show: vi.fn(), setFocus: vi.fn(), close: vi.fn(), emitTo: vi.fn(), mainFocus: vi.fn() }))
 vi.mock('@tauri-apps/api/webviewWindow', () => ({
   getCurrentWebviewWindow: () => ({ label: 'settings', show: transport.show, setFocus: transport.setFocus, close: transport.close, emitTo: transport.emitTo, listen: async () => () => {} }),
@@ -41,12 +43,27 @@ describe('Settings window', () => {
     wrapper.unmount()
   })
 
-  it('restores default preferences from General', async () => {
+  it('restores default preferences from General and links to the repository', async () => {
     const { settings } = useAppSettings()
     settings.value.tableFontSize = 16
     const wrapper = await render()
     await wrapper.findAll('button').find(button => button.text() === 'Restore defaults')!.trigger('click')
     expect(settings.value.tableFontSize).toBe(12)
+    await wrapper.findAll('button').find(button => button.text().includes('github.com/ivang11/tupledb'))!.trigger('click')
+    expect(opener.openUrl).toHaveBeenCalledWith('https://github.com/ivang11/tupledb')
+    wrapper.unmount()
+  })
+
+  it('uses toggles instead of checkboxes for boolean preferences', async () => {
+    const { settings } = useAppSettings()
+    settings.value.restoreSession = true
+    const wrapper = await render()
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+    const toggle = wrapper.get('[role="switch"]')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    await toggle.trigger('click')
+    expect(settings.value.restoreSession).toBe(false)
+    settings.value.restoreSession = true
     wrapper.unmount()
   })
 

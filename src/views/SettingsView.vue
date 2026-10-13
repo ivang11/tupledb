@@ -34,7 +34,7 @@
             <label>Table font size<input type="number" min="10" max="20" v-model.number="settings.tableFontSize" /></label>
             <label>Row density<select v-model="settings.density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
             <label>Default column width<select v-model="settings.columnWidth"><option value="narrow">Narrow · 100 px</option><option value="normal">Normal · 180 px</option><option value="wide">Wide · 260 px</option><option value="fit">Fit to content</option></select></label>
-            <label>Alternate row backgrounds<input type="checkbox" v-model="settings.alternatingRows" /></label>
+            <label>Alternate row backgrounds<ToggleSwitch v-model="settings.alternatingRows" /></label>
             <p>Manually resized columns keep their width. “Reset columns” restores the default.</p>
           </template>
           <template v-if="tab === 'editor'">
@@ -43,9 +43,9 @@
             <label>Indent with<select v-model="settings.indent"><option value="spaces">Spaces</option><option value="tabs">Tabs</option></select></label>
             <label>Indent size<input type="number" min="1" max="8" v-model.number="settings.tabSize" /></label>
             <label>Accept autocomplete with<select v-model="settings.completionKey"><option value="both">Enter or Tab</option><option value="enter">Enter</option><option value="tab">Tab</option></select></label>
-            <label>Close quotes and brackets automatically<input type="checkbox" v-model="settings.closeBrackets" /></label>
-            <label>Complete SQL keywords in uppercase<input type="checkbox" v-model="settings.uppercaseKeywords" /></label>
-            <label>Enable :named query parameters<input type="checkbox" v-model="settings.queryParameters" /></label>
+            <label>Close quotes and brackets automatically<ToggleSwitch v-model="settings.closeBrackets" /></label>
+            <label>Complete SQL keywords in uppercase<ToggleSwitch v-model="settings.uppercaseKeywords" /></label>
+            <label>Enable :named query parameters<ToggleSwitch v-model="settings.queryParameters" /></label>
             <p>Run executes the selection, or the statement under the cursor. Run all executes all statements in order.</p>
           </template>
           <template v-if="tab === 'queries'">
@@ -62,7 +62,7 @@
             <p>These defaults apply to CSV result export.</p>
           </template>
           <template v-if="tab === 'general'">
-            <label>Restore workspace on startup<input type="checkbox" v-model="settings.restoreSession" /></label>
+            <label>Restore workspace on startup<ToggleSwitch v-model="settings.restoreSession" /></label>
             <p>Restored SQL drafts are never executed automatically.</p>
             <div class="flex items-center justify-between gap-5 border-t border-(--line-faint) pt-4">
               <span class="text-[12.5px] text-(--fg-1)">App updates</span>
@@ -71,6 +71,12 @@
               </button>
             </div>
             <p>Updates are also checked automatically when the app starts. Progress shows in the main window.</p>
+            <div class="flex items-center justify-between gap-5 border-t border-(--line-faint) pt-4">
+              <span class="text-[12.5px] text-(--fg-1)">Source code</span>
+              <button type="button" class="flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12.5px] text-(--fg-2) transition-colors hover:bg-(--bg-1) hover:text-(--fg-1)" @click="openRepository">
+                <GithubIcon class="size-3.5" /> github.com/ivang11/tupledb
+              </button>
+            </div>
             <div class="flex items-center justify-between gap-5 border-t border-(--line-faint) pt-4">
               <span class="text-[12.5px] text-(--fg-1)">Preferences</span>
               <button type="button" class="h-8 rounded-lg px-3 text-[12.5px] text-(--fg-3) transition-colors hover:bg-(--bg-1) hover:text-(--fg-1)" @click="reset">
@@ -90,6 +96,7 @@ import { getCurrentWebviewWindow, WebviewWindow } from '@tauri-apps/api/webviewW
 import {
   CodeIcon,
   FileOutputIcon,
+  GithubIcon,
   KeyboardIcon,
   PaletteIcon,
   SlidersHorizontalIcon,
@@ -97,6 +104,9 @@ import {
   XIcon,
 } from 'lucide-vue-next'
 import KeyboardShortcutsPanel from '@/components/KeyboardShortcutsPanel.vue'
+import ToggleSwitch from '@/components/ui/ToggleSwitch.vue'
+import { openUrl } from '@tauri-apps/plugin-opener'
+import { REPOSITORY_URL } from '@/lib/links'
 import WindowResizeHandles from '@/components/WindowResizeHandles.vue'
 import { useAppSettings, FONT_OPTIONS } from '@/composables/useAppSettings'
 import { usesNativeMacWindowControls } from '@/lib/platform'
@@ -132,6 +142,10 @@ async function checkUpdates() {
   await win.emitTo('main', CHECK_UPDATES_EVENT)
   const main = await WebviewWindow.getByLabel('main')
   await main?.setFocus()
+}
+
+function openRepository() {
+  void openUrl(REPOSITORY_URL).catch(error => console.error('Could not open repository:', error))
 }
 
 function onKeydown(event: KeyboardEvent) {

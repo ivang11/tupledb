@@ -13,6 +13,8 @@ pub mod state;
 use crate::state::AppState;
 use tauri::Manager;
 
+const REPOSITORY_URL: &str = "https://github.com/ivang11/tupledb";
+
 /// Native menu bar for macOS. Picks are forwarded to
 /// the main window as `tupledb:menu` events; items that mirror in-app
 /// shortcuts carry no accelerator so the customizable keybindings keep working.
@@ -23,6 +25,10 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
     let about = AboutMetadataBuilder::new()
         .name(Some("TupleDB"))
         .version(Some(app.package_info().version.to_string()))
+        // The window icon is tiny; the About panel wants the full-size artwork.
+        .icon(tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png")).ok())
+        .website(Some(REPOSITORY_URL))
+        .website_label(Some("GitHub"))
         .build();
 
     let app_menu = SubmenuBuilder::new(app, "TupleDB")
@@ -74,6 +80,8 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::
 
     let help_menu = SubmenuBuilder::new(app, "Help")
         .item(&MenuItemBuilder::with_id("settings-keyboard", "Keyboard Shortcuts…").build(app)?)
+        .separator()
+        .item(&MenuItemBuilder::with_id("github", "TupleDB on GitHub").build(app)?)
         .build()?;
 
     MenuBuilder::new(app)
@@ -89,6 +97,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             app.manage(AppState::new(app.handle()));
 
@@ -104,6 +113,11 @@ pub fn run() {
                 app.set_menu(build_menu(app.handle())?)?;
                 app.on_menu_event(|app, event| {
                     let id = event.id().as_ref();
+                    if id == "github" {
+                        use tauri_plugin_opener::OpenerExt;
+                        let _ = app.opener().open_url(REPOSITORY_URL, None::<&str>);
+                        return;
+                    }
                     if id == "close-window" {
                         for window in app.webview_windows().into_values() {
                             if window.is_focused().unwrap_or(false) {
