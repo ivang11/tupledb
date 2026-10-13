@@ -130,10 +130,10 @@
         <span v-if="isTesting" class="shrink-0 tabular-nums text-muted-foreground">{{ elapsedSeconds }}s</span>
       </div>
       <slot name="error" />
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <Button type="button" variant="outline" class="form-button" :disabled="isTesting || isSaving || !isAvailable" @click="test">{{ isTesting ? 'Testing...' : 'Test' }}</Button>
-        <div class="ml-auto flex gap-1.5">
-          <Button type="button" variant="ghost" class="form-button" :disabled="isSaving" @click="emit('update:open', false)">Cancel</Button>
+      <div class="flex flex-wrap items-center justify-end gap-1.5">
+        <Button v-if="showCancel" type="button" variant="ghost" class="form-button mr-auto" :disabled="isSaving" @click="emit('update:open', false)">Cancel</Button>
+        <Button type="button" variant="ghost" class="form-button" :disabled="isTesting || isSaving || !isAvailable" @click="test">{{ isTesting ? 'Testing...' : 'Test' }}</Button>
+        <div class="flex gap-1.5">
           <Button type="button" variant="outline" class="form-button" :disabled="isTesting || isSaving || !connection.name" @click="emit('save', buildConn(), false)">{{ isEdit ? 'Update' : 'Save only' }}</Button>
           <Button v-if="showConnectButton" type="button" class="form-button form-button-primary" :disabled="isTesting || isSaving || !connection.name || !isAvailable" @click="emit('save', buildConn(), true)">{{ isSaving ? 'Saving...' : 'Save & Connect' }}</Button>
         </div>
@@ -166,11 +166,14 @@ const props = withDefaults(
     connection: Connection;
     isSaving?: boolean;
     showConnectButton?: boolean;
+    /** The editor window closes natively, so it hides the Cancel button. */
+    showCancel?: boolean;
     editing?: boolean;
   }>(),
   {
     isSaving: false,
     showConnectButton: false,
+    showCancel: true,
   },
 );
 

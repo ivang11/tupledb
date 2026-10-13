@@ -156,11 +156,14 @@ describe('connection editor form in a separate window', () => {
     wrapper.unmount()
   })
 
-  it('closes the native window when Cancel is selected', async () => {
+  it('closes the native window with Escape and offers no Cancel button', async () => {
     const wrapper = await setup()
-    await wrapper.findAll('button').find(button => button.text() === 'Cancel')!.trigger('click')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Cancel')).toBe(false)
+    expect(wrapper.findAll('button').map(button => button.text()).filter(text => ['Test', 'Save only', 'Save & Connect'].includes(text)))
+      .toEqual(['Test', 'Save only', 'Save & Connect'])
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await flushPromises()
-    expect(transport.close).toHaveBeenCalledTimes(1)
+    expect(transport.close).toHaveBeenCalledOnce()
     wrapper.unmount()
   })
 })

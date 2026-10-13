@@ -8,7 +8,7 @@
         aria-label="Close connection window" :disabled="isSaving" @click="close"><XIcon class="pointer-events-none size-3.5" /></button>
     </div>
     <ConnectionForm v-if="draft" class="min-h-0 flex-1" :open="true" :connection="draft.connection"
-      :editing="draft.editing" :is-saving="isSaving" :show-connect-button="draft.showConnectButton"
+      :editing="draft.editing" :is-saving="isSaving" :show-connect-button="draft.showConnectButton" :show-cancel="false"
       @update:open="close" @save="save" @height-change="resizeToFit">
       <template #error><p v-if="saveError" role="alert" class="mb-3 max-h-20 overflow-y-auto text-xs text-destructive">{{ saveError }}</p></template>
     </ConnectionForm>
