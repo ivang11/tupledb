@@ -144,7 +144,7 @@ export function useTableTabs(ctx: WorkspaceContext) {
     const tableName = reference.name
     let pane = getPane(paneId)
     if (!paneId) {
-      // TablePlus-like default: opening a table uses the active pane.
+      // Default: opening a table uses the active pane.
       // Comparing DBs/tables is still possible through explicit splits.
       pane = getPane(ctx.activePaneId.value)
     }

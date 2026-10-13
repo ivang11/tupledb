@@ -198,7 +198,7 @@
   color: var(--acc);
 }
 
-/* Scrollbars: colores válidos con variables hex + refuerzo al hover del panel (estilo TablePlus) */
+/* Scrollbars: colores válidos con variables hex + refuerzo al hover del panel */
 .custom-scrollbar {
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--muted-foreground) 22%, transparent)
