@@ -39,6 +39,8 @@ export interface TableTab {
 }
 
 export interface QueryTab {
+  batchResults?: any[]
+  isExplainResult?: boolean
   type: 'query'
   id: string
   connectionId: string

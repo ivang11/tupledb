@@ -1,11 +1,11 @@
 <template>
   <div class="flex h-full flex-1 flex-col min-h-0 overflow-hidden">
     <!-- Toolbar -->
-    <div class="h-12 border-b flex items-center gap-3 px-4 bg-background/50 backdrop-blur-sm shrink-0 relative z-10">
+    <div class="h-10 border-b flex items-center gap-1.5 px-3 bg-background/50 backdrop-blur-sm shrink-0 relative z-10">
       <div class="flex-1" />
 
       <!-- Execution time badge -->
-      <div v-if="executionTime !== null" class="flex items-center gap-1 text-[10px] font-bold text-muted-foreground">
+      <div v-if="executionTime !== null" class="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
         <ClockIcon class="size-3" />
         {{ formatDuration(executionTime) }}
       </div>
@@ -14,7 +14,7 @@
       <button
         @click="beautify"
         :disabled="!sql.trim()"
-        class="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        class="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
         title="Beautify SQL (⌘⇧F)"
       >
         <WandSparklesIcon class="size-3.5" />
@@ -25,7 +25,7 @@
       <button
         @click="openSaveDialog(null)"
         :disabled="!sql.trim()"
-        class="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+        class="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
         title="Guardar query"
       >
         <BookmarkPlusIcon class="size-3.5" />
@@ -36,7 +36,7 @@
       <button
         @click="toggleSaved"
         :class="[
-          'flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold transition-colors',
+          'flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium transition-colors',
           showSaved
             ? 'bg-primary/10 text-primary'
             : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
@@ -45,14 +45,14 @@
       >
         <BookmarkIcon class="size-3.5" />
         <span class="hidden sm:inline">Guardadas</span>
-        <span v-if="savedStore.queries.length > 0" class="text-[9px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-black">{{ savedStore.queries.length }}</span>
+        <span v-if="savedStore.queries.length > 0" class="text-[9px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-semibold">{{ savedStore.queries.length }}</span>
       </button>
 
       <!-- History toggle -->
       <button
         @click="toggleHistory"
         :class="[
-          'flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-bold transition-colors',
+          'flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium transition-colors',
           showHistory
             ? 'bg-primary/10 text-primary'
             : 'text-muted-foreground hover:text-foreground hover:bg-muted/60'
@@ -61,13 +61,13 @@
       >
         <HistoryIcon class="size-3.5" />
         <span class="hidden sm:inline">History</span>
-        <span v-if="history.length > 0" class="text-[9px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-black">{{ history.length }}</span>
+        <span v-if="history.length > 0" class="text-[9px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-semibold">{{ history.length }}</span>
       </button>
 
       <!-- Live row counter (while running and rows are coming in) -->
       <span
         v-if="isRunning && rowsFetched !== null"
-        class="text-[10px] font-bold text-muted-foreground tabular-nums"
+        class="text-[10px] font-medium text-muted-foreground tabular-nums"
       >
         {{ rowsFetched.toLocaleString() }} rows…
         <span v-if="resultRowsLimited" class="text-amber-500">
@@ -80,19 +80,22 @@
         v-if="isRunning"
         @click="cancelQuery"
         :disabled="cancelButtonState.disabled || !canCancelQuery"
-        class="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-bold bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-destructive/20"
+        class="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed border border-destructive/20"
         title="Cancel query"
       >
         <Square class="size-3" />
         {{ cancelButtonState.label }}
       </button>
 
+      <button v-if="engine !== 'sqlite'" class="flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-semibold text-muted-foreground hover:bg-muted disabled:opacity-30"
+        :disabled="!sql.trim() || isRunning" title="Show estimated plan without executing the query" @click="runQuery(true)">Explain</button>
+      <button v-if="!isRunning" class="h-7 px-2 rounded text-xs text-muted-foreground hover:bg-muted disabled:opacity-30" :disabled="!sql.trim()" title="Execute all statements on one connection" @click="runAll">Run all</button>
       <!-- Run button -->
       <button
-        v-else
-        @click="runQuery"
+        v-if="!isRunning"
+        @click="runQuery()"
         :disabled="!sql.trim()"
-        class="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-bold bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+        class="flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
       >
         <PlayIcon class="size-3.5" />
         Run
@@ -105,10 +108,15 @@
       <!-- Left: SQL editor + results -->
       <div class="flex-1 flex flex-col min-w-0 min-h-0">
         <!-- SQL editor (CodeMirror) -->
-        <div class="h-44 shrink-0 border-b bg-[#0d1117] overflow-hidden">
+        <div class="h-44 shrink-0 border-b bg-background overflow-hidden">
           <div ref="editorEl" class="h-full overflow-auto" />
         </div>
 
+        <div v-if="batchResults.length > 1" class="flex shrink-0 border-b overflow-x-auto px-2 gap-1 bg-muted/20">
+          <button v-for="(item, index) in batchResults" :key="index" class="px-3 py-2 text-xs whitespace-nowrap border-b-2" :class="index === activeResult ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground'" @click="selectBatchResult(index)">
+            {{ index + 1 }} · {{ item.error ? 'Error' : item.result?.is_select ? `${item.result.rows_affected} rows` : `${item.result?.rows_affected ?? 0} affected` }}
+          </button>
+        </div>
         <!-- Results -->
         <div class="flex flex-1 min-h-0 min-w-0 flex-col bg-muted/5">
 
@@ -116,7 +124,7 @@
           <div v-if="queryError" class="m-4 p-4 rounded-lg bg-destructive/10 border border-destructive/20 flex items-start gap-3">
             <AlertCircleIcon class="size-4 text-destructive shrink-0 mt-0.5" />
             <div>
-              <p class="text-xs font-bold text-destructive mb-1 uppercase tracking-widest">Query Error</p>
+              <p class="text-xs font-medium text-destructive mb-1 uppercase tracking-widest">Query Error</p>
               <p class="text-xs font-mono text-destructive/80 whitespace-pre-wrap break-all">{{ queryError }}</p>
             </div>
           </div>
@@ -126,9 +134,9 @@
             <div class="size-12 rounded-full bg-green-500/10 flex items-center justify-center">
               <CheckCircleIcon class="size-6 text-green-500" />
             </div>
-            <p class="text-sm font-bold text-foreground">Query executed successfully</p>
+            <p class="text-sm font-medium text-foreground">Query executed successfully</p>
             <p class="text-xs text-muted-foreground">
-              <span class="font-black text-primary">{{ result.rows_affected }}</span>
+              <span class="font-semibold text-primary">{{ result.rows_affected }}</span>
               {{ result.rows_affected === 1 ? 'row' : 'rows' }} affected
               <span v-if="executionTime !== null" class="ml-2 opacity-60">· {{ formatDuration(executionTime) }}</span>
             </p>
@@ -137,7 +145,7 @@
           <!-- SELECT results table (virtualized) -->
           <template v-else-if="result && result.is_select">
             <div v-if="result.rows.length === 0" class="flex flex-col items-center justify-center min-h-full gap-2 text-center p-8">
-              <p class="text-sm font-bold text-muted-foreground">No rows returned</p>
+              <p class="text-sm font-medium text-muted-foreground">No rows returned</p>
               <p class="text-xs text-muted-foreground/50">Query completed in {{ formatDuration(executionTime!) }}</p>
             </div>
             <div v-else class="flex flex-1 min-h-0 min-w-0 flex-col">
@@ -150,8 +158,11 @@
                   of {{ resultTotalRows.toLocaleString() }}
                 </span>. Add a LIMIT/OFFSET or export the source table for the full dataset.
               </div>
-              <DataGrid
+              <ExplainPlanView v-if="isExplainResult" :result="result" />
+              <DataGrid v-else
                 :columns="result.columns"
+                :preference-key="JSON.stringify([connectionId, database, 'query', result.columns.map(column => column.name)])"
+                :client-side="true"
                 :rows="result.rows"
                 :primary-key="null"
                 :total-count="result.rows_affected"
@@ -182,7 +193,7 @@
                 @insert-row-input="() => {}"
                 @insert-row-submit="() => {}"
                 @insert-row-cancel="() => {}"
-                @row-contextmenu="() => {}"
+                @row-contextmenu="(row, x, y) => resultContextMenu = { show: true, row, x, y }"
                 @delete-key-pressed="() => {}"
               />
             </div>
@@ -190,14 +201,14 @@
 
 <!-- Empty state -->
           <div v-else class="flex flex-col items-center justify-center h-full gap-3 text-center p-8 text-muted-foreground/40">
-            <p class="text-xs font-bold uppercase tracking-widest">Results will appear here</p>
+            <p class="text-xs font-medium uppercase tracking-widest">Results will appear here</p>
           </div>
 
         </div>
 
         <!-- Result count footer -->
         <div v-if="result && result.is_select && result.rows_affected > 0" class="h-9 border-t flex items-center justify-between px-4 bg-background shrink-0">
-          <span class="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+          <span class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
             <template v-if="resultRowsLimited">
               Showing {{ result.rows.length.toLocaleString() }} of {{ result.rows_affected.toLocaleString() }} rows
             </template>
@@ -205,7 +216,7 @@
               {{ result.rows_affected }} {{ result.rows_affected === 1 ? 'row' : 'rows' }}
             </template>
           </span>
-          <span v-if="executionTime !== null" class="text-[11px] font-bold text-muted-foreground">
+          <span v-if="executionTime !== null" class="text-[11px] font-medium text-muted-foreground">
             {{ formatDuration(executionTime) }}
           </span>
         </div>
@@ -226,7 +237,7 @@
         </div>
 
         <div class="h-10 border-b flex items-center justify-between px-3 shrink-0">
-          <span class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Queries Guardadas</span>
+          <span class="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Queries Guardadas</span>
           <button
             @click="showSaved = false"
             class="size-6 flex items-center justify-center rounded text-muted-foreground/50 hover:text-foreground hover:bg-muted/60 transition-colors"
@@ -302,7 +313,7 @@
         </div>
 
         <div class="h-10 border-b flex items-center justify-between px-3 shrink-0">
-          <span class="text-[10px] font-black uppercase tracking-widest text-muted-foreground">Query History</span>
+          <span class="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Query History</span>
           <div class="flex items-center gap-1">
             <button
               v-if="history.length > 0"
@@ -336,7 +347,7 @@
             >
               <div class="flex items-center gap-2 mb-1.5">
                 <span :class="[
-                  'text-[9px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded',
+                  'text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded',
                   entry.error
                     ? 'bg-destructive/10 text-destructive'
                     : 'bg-green-500/10 text-green-500'
@@ -369,9 +380,13 @@
         </ScrollArea>
       </div>
     </div>
+    <RowContextMenu :show="resultContextMenu.show" :x="resultContextMenu.x" :y="resultContextMenu.y"
+      :has-primary-key="false" :selected-count="1" @dismiss="resultContextMenu.show = false"
+      @copy-json="copyResultRow('json')" @copy-tsv="copyResultRow('tsv')" />
   </div>
 
   <!-- Save Query Dialog -->
+  <QueryParametersDialog :open="parameterDialogOpen" :parameters="parameters" :error="parameterError" @cancel="parameterDialogOpen = false" @execute="confirmParameters" />
   <SaveQueryDialog
     v-model:open="saveDialogOpen"
     :sql="sql"
@@ -408,14 +423,14 @@ import { useSavedQueriesStore } from '@/stores/savedQueries'
 import SaveQueryDialog from '@/components/dialogs/SaveQueryDialog.vue'
 import DataGrid from '@/components/DataGrid.vue'
 import type { SavedQuery } from '@/types/savedQuery'
-import { EditorView, basicSetup } from 'codemirror'
-import { placeholder, keymap } from '@codemirror/view'
+import { EditorView, minimalSetup } from 'codemirror'
+import { placeholder, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter } from '@codemirror/view'
 import { MySQL, PostgreSQL, SQLite } from '@codemirror/lang-sql'
 import { databaseEngines } from '@/lib/databaseEngines'
 import { EditorState, Compartment } from '@codemirror/state'
 import { useKeybindings } from '@/composables/useKeybindings'
-import { syntaxHighlighting, HighlightStyle } from '@codemirror/language'
-import { type CompletionContext, type CompletionResult, type Completion } from '@codemirror/autocomplete'
+import { syntaxHighlighting, HighlightStyle, indentUnit, bracketMatching, foldGutter } from '@codemirror/language'
+import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap, acceptCompletion, type CompletionContext, type CompletionResult, type Completion } from '@codemirror/autocomplete'
 import { tags } from '@lezer/highlight'
 import {
   QUERY_RESULT_CELL_LIMIT,
@@ -427,12 +442,20 @@ import {
   type RawQueryResult,
 } from '@/lib/queryStreaming'
 import { getQueryCancelButtonState, shouldSurfaceQueryError } from '@/lib/queryExecutionUi'
-import { rowValue, type DataRow } from '@/lib/rowAccess'
-import { usesLinuxWebKitRuntime } from '@/lib/platform'
+import QueryParametersDialog from './dialogs/QueryParametersDialog.vue'
+import { useAppSettings, fontCss } from '@/composables/useAppSettings'
+import { splitSqlStatements, executionSql, parameterNames, substituteParameters, type QueryParameter } from '@/lib/sqlExecution'
+import ExplainPlanView from './ExplainPlanView.vue'
+import { explainSql } from '@/lib/explainPlan'
+import RowContextMenu from "./RowContextMenu.vue"
+import { copyText, rowTsv } from "@/lib/clipboard"
+import { rowRecord, rowValue, type DataRow } from '@/lib/rowAccess'
 
 const props = defineProps<{
   connectionId: string
   database: string | null
+  initialBatchResults?: BatchResult[]
+  initialIsExplain?: boolean
   initialSql?: string
   initialResult?: RawQueryResult | null
   initialError?: string | null
@@ -444,6 +467,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  'update:batch-results': [value: BatchResult[]]
+  'update:is-explain': [value: boolean]
   'update:sql': [string]
   'update:result': [RawQueryResult | null]
   'update:error': [string | null]
@@ -468,6 +493,7 @@ const SAVED_PANEL_WIDTH_KEY = 'tupledb:saved-panel-width'
 const HISTORY_PANEL_WIDTH_KEY = 'tupledb:history-panel-width'
 const MAX_HISTORY = 100
 
+const { settings } = useAppSettings()
 const connStore = useConnectionStore()
 const canCancelQuery = computed(() => connStore.openConnections[props.connectionId]?.capabilities.cancelQuery ?? false)
 const engine = computed(() => connStore.openConnections[props.connectionId]?.connection.database.engine ?? 'mysql')
@@ -482,6 +508,12 @@ const sql = ref(props.initialSql ?? '')
 const selectedDb = computed(() => props.database)
 // shallowRef + markRaw: Vue tracks the reference but never wraps row objects in Proxies.
 // triggerRef() forces the virtualizer to re-read count after chunk appends.
+const resultContextMenu = ref<{ show: boolean; row: DataRow | null; x: number; y: number }>({ show: false, row: null, x: 0, y: 0 })
+function copyResultRow(format: 'json' | 'tsv') {
+  if (!resultContextMenu.value.row || !result.value) return
+  const record = rowRecord(resultContextMenu.value.row, result.value.columns)
+  void copyText(format === 'json' ? JSON.stringify(record, null, 2) : rowTsv(record))
+}
 const result = shallowRef<RawQueryResult | null>(props.initialResult ?? null)
 const queryError = ref<string | null>(props.initialError ?? null)
 const isRunning = ref(false)
@@ -500,7 +532,7 @@ const cancelButtonState = computed(() => getQueryCancelButtonState(
   activeQueryId.value,
 ))
 const retainedResultRows = computed(() => result.value?.rows.length ?? QUERY_RESULT_ROW_LIMIT)
-const queryResultCellLimit = usesLinuxWebKitRuntime ? QUERY_RESULT_CELL_LIMIT : undefined
+const queryResultCellLimit = QUERY_RESULT_CELL_LIMIT
 
 function syncResultState() {
   emit('update:result', result.value)
@@ -638,9 +670,71 @@ function removeHistoryEntry(id: string) {
   persistHistory()
 }
 
-async function runQuery() {
-  const q = sql.value.trim()
+const isExplainResult = ref(props.initialIsExplain ?? false)
+interface BatchResult { sql: string; result: RawQueryResult | null; error: string | null; duration_ms: number }
+const batchResults = shallowRef<BatchResult[]>(props.initialBatchResults ?? [])
+const activeResult = ref(0)
+const parameterDialogOpen = ref(false), parameterError = ref(''), parameters = ref<QueryParameter[]>([])
+let parameterTarget = { sql: '', all: false, explain: false }
+function runQuery(explain = false) {
+  if (isRunning.value) return
+  try {
+    const selection = editorView?.state.selection.main ?? { from: 0, to: 0 }
+    prepareExecution(executionSql(sql.value, selection, engine.value), false, explain)
+  } catch (error) { queryError.value = String(error); syncResultState() }
+}
+function runAll() { if (!isRunning.value) prepareExecution(sql.value, true, false) }
+function prepareExecution(source: string, all: boolean, explain: boolean) {
+  if (!source.trim()) return
+  const names = settings.value.queryParameters ? parameterNames(source, engine.value) : []
+  if (names.length) {
+    parameters.value = names.map(name => ({ name, type: 'text', value: '' }))
+    parameterTarget = { sql: source, all, explain }; parameterError.value = ''; parameterDialogOpen.value = true
+  } else void executePrepared(source, all, explain)
+}
+function confirmParameters() {
+  try {
+    const source = substituteParameters(parameterTarget.sql, parameters.value, engine.value)
+    parameterDialogOpen.value = false; void executePrepared(source, parameterTarget.all, parameterTarget.explain)
+  } catch (error) { parameterError.value = String(error) }
+}
+async function executePrepared(source: string, all: boolean, explain: boolean) {
+  if (all && !explain) await executeBatch(source)
+  else { batchResults.value = []; emit('update:batch-results', []); await executeSingle(explain, source) }
+}
+function selectBatchResult(index: number) {
+  const item = batchResults.value[index]; if (!item) return
+  activeResult.value = index; result.value = item.result ? markRaw(item.result) : null
+  queryError.value = item.error; executionTime.value = item.duration_ms
+  resultTotalRows.value = item.result?.rows_affected ?? null
+  resultRowsLimited.value = !!item.result?.is_select && item.result.rows.length < item.result.rows_affected
+  isExplainResult.value = false; emit('update:is-explain', false); syncResultState()
+}
+async function executeBatch(source: string) {
+  let statements: string[]
+  try { statements = splitSqlStatements(source, engine.value).map(statement => statement.sql) }
+  catch (error) { queryError.value = String(error); syncResultState(); return }
+  if (!statements.length || isRunning.value) return
+  const queryId = crypto.randomUUID(); activeQueryId.value = queryId; isRunning.value = true
+  isCancelling.value = false; queryError.value = null; batchResults.value = []
+  try {
+    const items = await invoke<BatchResult[]>('execute_query_batch', { connectionId: props.connectionId, database: selectedDb.value, statements, queryId,
+      rowLimit: Math.min(50000, Math.max(100, settings.value.resultRowLimit)), timeoutSecs: Math.min(3600, Math.max(1, settings.value.queryTimeout)) })
+    batchResults.value = items.map(item => markRaw(item)); emit('update:batch-results', batchResults.value)
+    selectBatchResult(Math.max(0, items.length - 1))
+    for (const item of items) addToHistory({ id: crypto.randomUUID(), sql: item.sql, database: selectedDb.value, executedAt: new Date().toISOString(), durationMs: item.duration_ms,
+      rowCount: item.result?.rows_affected ?? 0, isSelect: item.result?.is_select ?? false, error: item.error ?? undefined })
+  } catch (error) { if (!isCancelling.value) { queryError.value = String(error); syncResultState() } }
+  finally { isRunning.value = false; isCancelling.value = false; activeQueryId.value = null }
+}
+async function executeSingle(explain = false, source = sql.value) {
+  let q = source.trim()
   if (!q || isRunning.value) return
+  if (explain) {
+    try { q = explainSql(q, engine.value) }
+    catch (error) { queryError.value = String(error); syncResultState(); return }
+  }
+  isExplainResult.value = explain; emit('update:is-explain', explain)
 
   const queryId = crypto.randomUUID()
   activeQueryId.value = queryId
@@ -682,7 +776,7 @@ async function runQuery() {
           result: result.value,
           rowsLimited: resultRowsLimited.value,
           streamedRowsSeen,
-        }, event.payload, QUERY_RESULT_ROW_LIMIT, queryResultCellLimit)
+        }, event.payload, settings.value.resultRowLimit, queryResultCellLimit)
 
         streamedRowsSeen = nextState.streamedRowsSeen
         resultRowsLimited.value = nextState.rowsLimited
@@ -706,6 +800,7 @@ async function runQuery() {
       sql: q,
       queryId,
       maxRetainedCells: queryResultCellLimit,
+      timeoutSecs: settings.value.queryTimeout,
     })
 
     // Wait for the backend to signal completion
@@ -732,7 +827,7 @@ async function runQuery() {
         triggerRef(result)
       } else {
         // Non-SELECT or legacy buffered result
-        const limited = limitBufferedQueryResult(meta, QUERY_RESULT_ROW_LIMIT, queryResultCellLimit)
+        const limited = limitBufferedQueryResult(meta, settings.value.resultRowLimit, queryResultCellLimit)
         resultRowsLimited.value = limited.rowsLimited
         resultTotalRows.value = limited.totalRows
         result.value = markRaw(limited.result)
@@ -793,7 +888,7 @@ async function cancelQuery() {
 function beautify() {
   if (!sql.value.trim()) return
   try {
-    sql.value = formatSql(sql.value, { language: databaseEngines[engine.value].formatter, tabWidth: 2, keywordCase: 'upper' })
+    sql.value = formatSql(sql.value, { language: databaseEngines[engine.value].formatter, tabWidth: settings.value.tabSize, useTabs: settings.value.indent === 'tabs', keywordCase: settings.value.uppercaseKeywords ? 'upper' : 'preserve' })
   } catch {
     // leave as-is if formatter fails
   }
@@ -828,27 +923,35 @@ let suppressSync = false
 const keymapCompartment = new Compartment()
 const kb = useKeybindings()
 
-const darkTheme = EditorView.theme({
-  '&': { backgroundColor: '#0d1117', height: '100%' },
-  '.cm-scroller': { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '13px', lineHeight: '1.65' },
-  '.cm-content': { color: '#e6edf3', padding: '12px 0', caretColor: '#e6edf3' },
-  '.cm-line': { padding: '0 16px' },
-  '.cm-cursor': { borderLeftColor: '#e6edf3', borderLeftWidth: '2px' },
-  '.cm-activeLine': { backgroundColor: 'rgba(255,255,255,0.03)' },
-  '.cm-gutters': { backgroundColor: '#0d1117', borderRight: '1px solid #21262d', color: '#484f58', minWidth: '40px' },
-  '.cm-activeLineGutter': { backgroundColor: 'rgba(255,255,255,0.03)' },
-  '.cm-gutterElement': { padding: '0 8px 0 4px', fontSize: '11px' },
-  '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': { backgroundColor: 'rgba(56,139,253,0.18) !important' },
-  '&.cm-focused': { outline: 'none' },
-  '.cm-tooltip': { backgroundColor: '#161b22', border: '1px solid #30363d', borderRadius: '6px', boxShadow: '0 8px 24px rgba(0,0,0,0.4)', color: '#e6edf3', overflow: 'hidden' },
-  '.cm-tooltip-autocomplete > ul': { maxHeight: '200px', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '12px' },
-  '.cm-tooltip-autocomplete > ul > li': { padding: '4px 12px', display: 'flex', gap: '8px', alignItems: 'center' },
-  '.cm-tooltip-autocomplete > ul > li[aria-selected]': { backgroundColor: '#1f6feb', color: '#ffffff' },
-  '.cm-completionIcon': { opacity: '0.6', fontSize: '10px', width: '14px' },
-  '.cm-completionLabel': { flex: '1' },
-  '.cm-completionDetail': { opacity: '0.5', fontSize: '11px', fontStyle: 'normal' },
-  '.cm-matchingBracket': { backgroundColor: 'rgba(56,139,253,0.15)', color: 'inherit !important' },
-}, { dark: true })
+const editorSettingsCompartment = new Compartment(), appearanceCompartment = new Compartment()
+function editorExtensions() {
+  const value = settings.value
+  const keys = completionKeymap.filter(binding => binding.key !== 'Enter' && binding.key !== 'Tab')
+  return [EditorState.tabSize.of(value.tabSize), indentUnit.of(value.indent === 'tabs' ? '\t' : ' '.repeat(value.tabSize)),
+    autocompletion({ defaultKeymap: false }), keymap.of([
+      ...keys, ...(value.completionKey !== 'tab' ? [{ key: 'Enter', run: acceptCompletion }] : []),
+      ...(value.completionKey !== 'enter' ? [{ key: 'Tab', run: acceptCompletion }] : []),
+      { key: 'Tab', run: (view: EditorView) => { view.dispatch(view.state.replaceSelection(value.indent === 'tabs' ? '\t' : ' '.repeat(value.tabSize))); return true } },
+      ...(value.closeBrackets ? closeBracketsKeymap : []),
+    ]), ...(value.closeBrackets ? [closeBrackets()] : [])]
+}
+function editorAppearance() {
+  return EditorView.theme({
+    '&': { backgroundColor: 'var(--bg-0)', height: '100%' },
+    '.cm-scroller': { fontFamily: fontCss(settings.value.editorFont), fontSize: `${settings.value.editorFontSize}px`, lineHeight: '1.5' },
+    '.cm-content': { color: 'var(--fg-1)', padding: '8px 0', caretColor: 'var(--fg-1)' },
+    '.cm-cursor': { borderLeftColor: 'var(--fg-1)' },
+    '.cm-gutters': { backgroundColor: 'var(--bg-1)', borderRight: '1px solid var(--line-2)', color: 'var(--fg-3)' },
+    '.cm-activeLine, .cm-activeLineGutter': { backgroundColor: 'var(--acc-soft)' },
+    '.cm-tooltip': { backgroundColor: 'var(--bg-1)', color: 'var(--fg-1)', border: '1px solid var(--line-1)' },
+    '.cm-tooltip-autocomplete li[aria-selected]': { backgroundColor: 'var(--acc-soft)', color: 'var(--fg-1)' },
+  }, { dark: document.documentElement.dataset.theme !== 'light' })
+}
+watch(settings, () => editorView?.dispatch({ effects: [editorSettingsCompartment.reconfigure(editorExtensions()), appearanceCompartment.reconfigure(editorAppearance())] }), { deep: true })
+function refreshEditorAppearance() { editorView?.dispatch({ effects: appearanceCompartment.reconfigure(editorAppearance()) }) }
+onMounted(() => window.addEventListener('tupledb:appearance', refreshEditorAppearance))
+onBeforeUnmount(() => window.removeEventListener('tupledb:appearance', refreshEditorAppearance))
+
 
 const sqlHighlight = HighlightStyle.define([
   { tag: tags.keyword, color: '#ff7b72', fontWeight: 'bold' },
@@ -960,7 +1063,7 @@ function makeSqlCompletion() {
     const prefix = word.text.toLowerCase()
     return {
       from: word.from,
-      options: options.filter(o => o.label.toLowerCase().startsWith(prefix)),
+      options: options.filter(o => o.label.toLowerCase().startsWith(prefix)).map(option => option.type === 'keyword' ? { ...option, apply: settings.value.uppercaseKeywords ? option.label.toUpperCase() : option.label.toLowerCase() } : option),
       validFor: /^\w*$/,
     }
   }
@@ -987,13 +1090,15 @@ onMounted(() => {
           { key: kb.getCodeMirrorKey('runQuery'), run: () => { runQuery(); return true } },
           { key: kb.getCodeMirrorKey('formatQuery'), run: () => { beautify(); return true } },
         ])),
-        basicSetup,
+        minimalSetup,
+        lineNumbers(), highlightActiveLine(), highlightActiveLineGutter(), bracketMatching(), foldGutter(),
+        editorSettingsCompartment.of(editorExtensions()),
         dialectCompartment.of([
           sqlDialect.value.language,
           sqlDialect.value.language.data.of({ autocomplete: makeSqlCompletion() }),
         ]),
         syntaxHighlighting(sqlHighlight, { fallback: true }),
-        darkTheme,
+        appearanceCompartment.of(editorAppearance()),
         placeholder(`SELECT * FROM table WHERE ...  (${kb.getBinding('runQuery')} to run)`),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) {
