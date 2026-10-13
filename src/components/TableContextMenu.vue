@@ -1,15 +1,14 @@
 <template>
-  <div
-    v-if="show"
-    class="fixed z-100 min-w-40 bg-background/95 backdrop-blur-md border rounded-lg shadow-xl p-1 animate-in fade-in zoom-in-95 duration-100"
-    :style="{ left: x + 'px', top: y + 'px' }"
-  >
+  <ContextMenuSurface :show="show" :x="x" :y="y" @dismiss="emit('dismiss')">
     <div class="px-2 py-1 mb-1 border-b">
       <span class="text-[10px] font-semibold font-mono tracking-normal text-muted-foreground truncate block">
         {{ selectedCount && selectedCount > 1 ? `${selectedCount} tables selected` : tableName }}
       </span>
     </div>
 
+    <button class="w-full px-3 py-2 text-xs rounded-md hover:bg-muted text-left" @click="emit('open')">Open table</button>
+    <button class="w-full px-3 py-2 text-xs rounded-md hover:bg-muted text-left" @click="emit('copy-name')">Copy table name</button>
+    <div class="border-t my-1" />
     <!-- Single table options -->
     <template v-if="!selectedCount || selectedCount <= 1">
       <button :disabled="canWrite === false"
@@ -41,10 +40,11 @@
         <XIcon class="size-3.5 text-muted-foreground" /> Drop {{ selectedCount }} Tables
       </button>
     </template>
-  </div>
+  </ContextMenuSurface>
 </template>
 
 <script setup lang="ts">
+import ContextMenuSurface from "./ContextMenuSurface.vue"
 import { Trash2Icon, XIcon } from 'lucide-vue-next'
 
 defineProps<{
@@ -57,6 +57,9 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
+  'dismiss': []
+  'open': []
+  'copy-name': []
   'truncate': []
   'drop': []
   'truncate-selected': []

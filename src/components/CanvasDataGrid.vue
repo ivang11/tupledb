@@ -130,6 +130,7 @@ import {
   watch,
 } from 'vue'
 import { DatabaseIcon } from 'lucide-vue-next'
+import { useAppSettings } from '@/composables/useAppSettings'
 import { rowValue } from '@/lib/rowAccess'
 
 interface GridColumn {
@@ -143,6 +144,9 @@ interface PendingInsert {
 }
 
 const props = defineProps<{
+  sourceColumns?: GridColumn[]
+  rowHeight?: number
+  pinnedColumns?: string[]
   columns: GridColumn[]
   rows: any[]
   primaryKey: PrimaryKey
@@ -180,12 +184,16 @@ const emit = defineEmits<{
   'insert-row-cancel': []
   'pending-insert-input': [index: number, colName: string, value: string]
   'pending-insert-cancel': [index: number]
+  'cell-contextmenu': [row: any, column: string, x: number, y: number]
+  'column-contextmenu': [column: string, x: number, y: number]
+  'inspect-cell': [row: any, column: string]
   'row-contextmenu': [row: any, x: number, y: number]
   'delete-key-pressed': []
 }>()
 
-const HEADER_HEIGHT = 48
-const ROW_HEIGHT = 34
+const { settings } = useAppSettings()
+const HEADER_HEIGHT = 42
+const ROW_HEIGHT = computed(() => props.rowHeight ?? 34)
 const DEFAULT_COLUMN_WIDTH = 180
 const COLUMN_OVERSCAN = 1
 const ROW_OVERSCAN = 2
@@ -242,7 +250,7 @@ const horizontalScrollScale = computed(() => {
 })
 const totalRows = computed(() => props.rows.length + props.pendingInserts.length)
 const totalHeight = computed(() =>
-  HEADER_HEIGHT + totalRows.value * ROW_HEIGHT + (props.bottomInset ?? 0),
+  HEADER_HEIGHT + totalRows.value * ROW_HEIGHT.value + (props.bottomInset ?? 0),
 )
 const sizerStyle = computed(() => ({
   width: `${Math.max(nativeColumnSize.value, viewportWidth.value)}px`,
@@ -255,7 +263,7 @@ const canvasStyle = computed(() => ({
 }))
 
 function rawCellValue(row: any, column: string) {
-  return rowValue(row, column, props.columns)
+  return rowValue(row, column, props.sourceColumns ?? props.columns)
 }
 
 function lowerBoundColumn(offset: number) {
@@ -276,10 +284,10 @@ function visibleRange() {
     props.columns.length,
     lowerBoundColumn(scrollLeft.value + viewportWidth.value) + 1 + COLUMN_OVERSCAN,
   )
-  const rowStart = Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT) - ROW_OVERSCAN)
+  const rowStart = Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT.value) - ROW_OVERSCAN)
   const rowEnd = Math.min(
     totalRows.value,
-    Math.ceil((scrollTop.value + Math.max(0, viewportHeight.value - HEADER_HEIGHT)) / ROW_HEIGHT) + ROW_OVERSCAN,
+    Math.ceil((scrollTop.value + Math.max(0, viewportHeight.value - HEADER_HEIGHT)) / ROW_HEIGHT.value) + ROW_OVERSCAN,
   )
   return { columnStart, columnEnd, rowStart, rowEnd }
 }
@@ -316,7 +324,7 @@ function resolveColors(): CanvasGridColors {
     primarySoft: token('--acc-soft', 'rgba(47,158,104,.14)'),
     destructive: token('--destructive', '#e26d5c'),
     amber: token('--pk', '#d6ad57'),
-    mono: token('--font-mono', 'ui-monospace, monospace'),
+    mono: token('--font-table', 'ui-monospace, monospace'),
   }
 }
 
@@ -325,7 +333,7 @@ function refreshColors() {
 }
 
 function rowSelectionKey(row: any, index: number) {
-  return props.primaryKey ? rowKey(row, props.primaryKey, props.columns) : `__row_index:${index}`
+  return props.primaryKey ? rowKey(row, props.primaryKey, props.sourceColumns ?? props.columns) : `__row_index:${index}`
 }
 
 function isSelected(row: any, index: number) {
@@ -334,11 +342,11 @@ function isSelected(row: any, index: number) {
 }
 
 function isDeleted(row: any) {
-  return !!props.pendingDeletions[rowKey(row, props.primaryKey, props.columns)]
+  return !!props.pendingDeletions[rowKey(row, props.primaryKey, props.sourceColumns ?? props.columns)]
 }
 
 function isChanged(row: any, column: string) {
-  return props.pendingChanges[rowKey(row, props.primaryKey, props.columns)]?.[column] !== undefined
+  return props.pendingChanges[rowKey(row, props.primaryKey, props.sourceColumns ?? props.columns)]?.[column] !== undefined
 }
 
 function truncate(value: string, width: number) {
@@ -346,20 +354,26 @@ function truncate(value: string, width: number) {
   return value.length > maxCharacters ? `${value.slice(0, Math.max(0, maxCharacters - 1))}…` : value
 }
 
+function isPinned(name: string) { return props.pinnedColumns?.includes(name) ?? false }
+function viewportColumnX(item: typeof columnLayout.value[number]) { return isPinned(item.column.name) ? item.start : item.start - scrollLeft.value }
+function drawingColumns(range: ReturnType<typeof visibleRange>) {
+  return [...columnLayout.value.slice(range.columnStart, range.columnEnd).filter(item => !isPinned(item.column.name)), ...columnLayout.value.filter(item => isPinned(item.column.name))]
+}
 function drawHeader(ctx: CanvasRenderingContext2D, range: ReturnType<typeof visibleRange>, colors: CanvasGridColors) {
   ctx.fillStyle = colors.muted
   ctx.fillRect(0, 0, viewportWidth.value, HEADER_HEIGHT)
   ctx.textBaseline = 'middle'
 
-  for (let index = range.columnStart; index < range.columnEnd; index += 1) {
-    const item = columnLayout.value[index]
-    const x = item.start - scrollLeft.value
+  for (const item of drawingColumns(range)) {
+    const x = viewportColumnX(item)
+    ctx.fillStyle = colors.muted
+    ctx.fillRect(x, 0, item.size, HEADER_HEIGHT)
     if (props.sortColumn === item.column.name) {
       ctx.fillStyle = colors.primarySoft
       ctx.fillRect(x, 0, item.size, HEADER_HEIGHT)
     }
     ctx.fillStyle = colors.foreground
-    ctx.font = `700 12px ${colors.mono}`
+    ctx.font = `600 12px ${colors.mono}`
     const suffix = isPrimaryKeyColumn(props.primaryKey, item.column.name) ? '  PK' : ''
     ctx.fillText(truncate(`${item.column.name}${suffix}`, item.size), x + 12, 17)
     ctx.fillStyle = colors.secondary
@@ -397,49 +411,52 @@ function drawStoredRow(
         ? colors.primarySoft
         : hoveredRow.value === rowIndex
           ? colors.accent
-          : rowIndex % 2 === 1 ? colors.muted : colors.background
-  ctx.fillRect(0, y, viewportWidth.value, ROW_HEIGHT)
+          : settings.value.alternatingRows && rowIndex % 2 === 1 ? colors.muted : colors.background
+  ctx.fillRect(0, y, viewportWidth.value, ROW_HEIGHT.value)
 
   ctx.textBaseline = 'middle'
-  ctx.font = `13px ${colors.mono}`
-  for (let columnIndex = range.columnStart; columnIndex < range.columnEnd; columnIndex += 1) {
-    const item = columnLayout.value[columnIndex]
-    const x = item.start - scrollLeft.value
+  ctx.font = `${settings.value.tableFontSize}px ${colors.mono}`
+  for (const item of drawingColumns(range)) {
+    const x = viewportColumnX(item)
+    if (isPinned(item.column.name)) {
+      ctx.fillStyle = props.pendingDrop || deleted ? 'rgb(67,32,32)' : selected ? colors.accent : settings.value.alternatingRows && rowIndex % 2 === 1 ? colors.muted : colors.background
+      ctx.fillRect(x, y, item.size, ROW_HEIGHT.value)
+    }
     const changed = isChanged(row, item.column.name)
     if (changed) {
       ctx.fillStyle = 'rgba(210,155,45,.10)'
-      ctx.fillRect(x, y, item.size, ROW_HEIGHT)
+      ctx.fillRect(x, y, item.size, ROW_HEIGHT.value)
     }
     const rawValue = rawCellValue(row, item.column.name)
     const value = props.getCellValue(row, item.column.name)
     ctx.fillStyle = deleted || props.pendingDrop
       ? colors.destructive
       : changed ? colors.amber : rawValue == null || value === '' ? colors.faint : colors.foreground
-    ctx.fillText(truncate(rawValue == null ? 'NULL' : value === '' ? 'EMPTY' : value, item.size), x + 12, y + ROW_HEIGHT / 2)
+    ctx.fillText(truncate(rawValue == null ? 'NULL' : value === '' ? 'EMPTY' : value, item.size), x + 12, y + ROW_HEIGHT.value / 2)
     if (props.fkMap[item.column.name] && rawValue != null) {
       ctx.fillStyle = colors.secondary
-      ctx.fillText('›', x + item.size - 17, y + ROW_HEIGHT / 2)
+      ctx.fillText('›', x + item.size - 17, y + ROW_HEIGHT.value / 2)
     }
     ctx.strokeStyle = colors.border
     ctx.beginPath()
     ctx.moveTo(Math.round(x + item.size) + 0.5, y)
-    ctx.lineTo(Math.round(x + item.size) + 0.5, y + ROW_HEIGHT)
+    ctx.lineTo(Math.round(x + item.size) + 0.5, y + ROW_HEIGHT.value)
     ctx.stroke()
   }
   ctx.strokeStyle = colors.border
   ctx.beginPath()
-  ctx.moveTo(0, Math.round(y + ROW_HEIGHT) + 0.5)
-  ctx.lineTo(viewportWidth.value, Math.round(y + ROW_HEIGHT) + 0.5)
+  ctx.moveTo(0, Math.round(y + ROW_HEIGHT.value) + 0.5)
+  ctx.lineTo(viewportWidth.value, Math.round(y + ROW_HEIGHT.value) + 0.5)
   ctx.stroke()
   if (selected) {
     ctx.fillStyle = colors.primary
-    ctx.fillRect(0, y, 2, ROW_HEIGHT)
+    ctx.fillRect(0, y, 2, ROW_HEIGHT.value)
   }
 }
 
 function drawPendingRow(ctx: CanvasRenderingContext2D, y: number) {
   ctx.fillStyle = 'rgba(35,160,95,.12)'
-  ctx.fillRect(0, y, viewportWidth.value, ROW_HEIGHT)
+  ctx.fillRect(0, y, viewportWidth.value, ROW_HEIGHT.value)
 }
 
 function draw() {
@@ -466,7 +483,7 @@ function draw() {
   ctx.rect(0, HEADER_HEIGHT, viewportWidth.value, Math.max(0, viewportHeight.value - HEADER_HEIGHT))
   ctx.clip()
   for (let index = range.rowStart; index < range.rowEnd; index += 1) {
-    const y = HEADER_HEIGHT + index * ROW_HEIGHT - scrollTop.value
+    const y = HEADER_HEIGHT + index * ROW_HEIGHT.value - scrollTop.value
     if (index < props.rows.length) drawStoredRow(ctx, props.rows[index], index, y, range, colors)
     else drawPendingRow(ctx, y)
   }
@@ -515,24 +532,24 @@ function localPoint(event: MouseEvent) {
 
 function columnAtViewportX(x: number) {
   if (!props.columns.length) return null
+  const pinned = columnLayout.value.find(item => isPinned(item.column.name) && x >= item.start && x < item.end)
+  if (pinned) return pinned
   const index = lowerBoundColumn(x + scrollLeft.value)
   return columnLayout.value[index] ?? null
 }
 
 function rowAtViewportY(y: number) {
   if (y < HEADER_HEIGHT) return null
-  const index = Math.floor((y + scrollTop.value - HEADER_HEIGHT) / ROW_HEIGHT)
+  const index = Math.floor((y + scrollTop.value - HEADER_HEIGHT) / ROW_HEIGHT.value)
   return index >= 0 && index < props.rows.length ? { index, row: props.rows[index] } : null
 }
 
 function hoveredResizeColumn() {
   if (!canvas.value) return null
-  const logicalPointer = pointerX.value + scrollLeft.value
-  const index = lowerBoundColumn(logicalPointer)
-  for (const candidate of [columnLayout.value[index], columnLayout.value[index - 1]]) {
-    if (candidate && Math.abs(logicalPointer - candidate.end) <= RESIZE_HIT_WIDTH) return candidate
-  }
-  return null
+  const item = columnAtViewportX(pointerX.value)
+  if (!item) return null
+  const candidates = [item, columnLayout.value[item.index - 1]]
+  return candidates.find(candidate => candidate && Math.abs(pointerX.value - (viewportColumnX(candidate) + candidate.size)) <= RESIZE_HIT_WIDTH) ?? null
 }
 
 function onCanvasMouseMove(event: MouseEvent) {
@@ -590,17 +607,22 @@ function onCanvasDoubleClick(event: MouseEvent) {
   const point = localPoint(event)
   const column = columnAtViewportX(point.x)
   const hit = rowAtViewportY(point.y)
-  if (!column || !hit || !props.primaryKey || props.pendingTruncate || props.pendingDrop || isDeleted(hit.row)) return
+  if (!column || !hit) return
+  if (!props.primaryKey || props.pendingTruncate || props.pendingDrop || isDeleted(hit.row)) { emit('inspect-cell', hit.row, column.column.name); return }
   emit('cell-dblclick', hit.row, column.column.name)
 }
 
 function onCanvasContextMenu(event: MouseEvent) {
   const point = localPoint(event)
-  const hit = rowAtViewportY(point.y)
-  if (!hit) return
+  const column = columnAtViewportX(point.x)
+  if (!column) return
   event.preventDefault()
   event.stopPropagation()
-  emit('row-contextmenu', hit.row, event.clientX, event.clientY)
+  if (point.y < HEADER_HEIGHT) emit('column-contextmenu', column.column.name, event.clientX, event.clientY)
+  else {
+    const hit = rowAtViewportY(point.y)
+    if (hit) emit('cell-contextmenu', hit.row, column.column.name, event.clientX, event.clientY)
+  }
 }
 
 function isEditableTarget(target: EventTarget | null) {
@@ -621,24 +643,24 @@ function pendingValue(insert: PendingInsert, columnName: string) {
 
 const inlineEditor = computed(() => {
   if (!props.primaryKey || !props.inlineEditColumn || props.selectedRowPk === null) return null
-  const rowIndex = props.rows.findIndex(row => rowKey(row, props.primaryKey, props.columns) === props.selectedRowPk)
+  const rowIndex = props.rows.findIndex(row => rowKey(row, props.primaryKey, props.sourceColumns ?? props.columns) === props.selectedRowPk)
   const column = columnLayout.value.find(item => item.column.name === props.inlineEditColumn)
   if (rowIndex < 0 || !column) return null
-  const left = column.start - scrollLeft.value
-  const top = HEADER_HEIGHT + rowIndex * ROW_HEIGHT - scrollTop.value
-  if (left + column.size < 0 || left > viewportWidth.value || top + ROW_HEIGHT < HEADER_HEIGHT || top > viewportHeight.value) return null
+  const left = viewportColumnX(column)
+  const top = HEADER_HEIGHT + rowIndex * ROW_HEIGHT.value - scrollTop.value
+  if (left + column.size < 0 || left > viewportWidth.value || top + ROW_HEIGHT.value < HEADER_HEIGHT || top > viewportHeight.value) return null
   const row = props.rows[rowIndex]
   return {
     row,
     rowIndex,
-    rowKey: rowKey(row, props.primaryKey, props.columns),
+    rowKey: rowKey(row, props.primaryKey, props.sourceColumns ?? props.columns),
     column: column.column,
     value: props.getCellValue(row, column.column.name),
     style: {
       left: `${left}px`,
       top: `${top}px`,
       width: `${column.size}px`,
-      height: `${ROW_HEIGHT}px`,
+      height: `${ROW_HEIGHT.value}px`,
     },
   }
 })
@@ -648,9 +670,9 @@ const pendingEditors = computed(() => {
   const range = visibleRange()
   return props.pendingInserts.flatMap((insert, insertIndex) => {
     const rowIndex = props.rows.length + insertIndex
-    const top = HEADER_HEIGHT + rowIndex * ROW_HEIGHT - scrollTop.value
-    if (top + ROW_HEIGHT < HEADER_HEIGHT || top > viewportHeight.value) return []
-    return columnLayout.value.slice(range.columnStart, range.columnEnd).map(item => ({
+    const top = HEADER_HEIGHT + rowIndex * ROW_HEIGHT.value - scrollTop.value
+    if (top + ROW_HEIGHT.value < HEADER_HEIGHT || top > viewportHeight.value) return []
+    return drawingColumns(range).map(item => ({
       key: `${insertIndex}:${item.column.name}`,
       insertIndex,
       column: item.column,
@@ -658,21 +680,17 @@ const pendingEditors = computed(() => {
       autoIncrement: props.isColAutoIncrement(item.column.name),
       boolean: props.isBooleanCol(item.column.name),
       style: {
-        left: `${item.start - scrollLeft.value}px`,
+        left: `${viewportColumnX(item)}px`,
         top: `${top}px`,
         width: `${item.size}px`,
-        height: `${ROW_HEIGHT}px`,
+        height: `${ROW_HEIGHT.value}px`,
       },
     }))
   })
 })
 
-const ariaColumns = computed(() =>
-  props.columns.slice(ariaRange.value.columnStart, ariaRange.value.columnEnd).map((column, offset) => ({
-    ...column,
-    index: ariaRange.value.columnStart + offset,
-  })),
-)
+const ariaColumns = computed(() => drawingColumns(ariaRange.value).map(item => ({ ...item.column, index: item.index })))
+
 const ariaRows = computed(() => {
   const end = Math.min(props.rows.length, ariaRange.value.rowEnd)
   return props.rows.slice(ariaRange.value.rowStart, end).map((row, offset) => {
@@ -702,7 +720,7 @@ watch(
 )
 
 watch(
-  () => [props.rows, props.columns, props.columnWidths, props.selectedRowPk, props.selectedRowPks, props.sortColumn, props.sortDesc],
+  () => [props.rows, props.columns, props.columnWidths, props.selectedRowPk, props.selectedRowPks, props.sortColumn, props.sortDesc, props.rowHeight, props.pinnedColumns],
   () => {
     scheduleDraw()
     scheduleAriaUpdate(0)
@@ -728,9 +746,12 @@ onMounted(() => {
 })
 
 onUpdated(scheduleDraw)
+watch(settings, () => { refreshColors(); scheduleDraw() }, { deep: true })
+onMounted(() => window.addEventListener('tupledb:appearance', updateViewport))
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
+  window.removeEventListener('tupledb:appearance', updateViewport)
   window.removeEventListener('resize', updateViewport)
   if (drawFrame !== null) cancelAnimationFrame(drawFrame)
   if (ariaTimer !== null) clearTimeout(ariaTimer)

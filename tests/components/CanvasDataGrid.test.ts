@@ -193,7 +193,9 @@ describe('CanvasDataGrid rendering and hit testing', () => {
     expect(wrapper.emitted('cell-dblclick')?.at(-1)).toEqual([rows[0], 'name'])
 
     await canvas.trigger('contextmenu', { clientX: 220, clientY: 60 })
-    expect(wrapper.emitted('row-contextmenu')?.at(-1)).toEqual([rows[0], 220, 60])
+    expect(wrapper.emitted('cell-contextmenu')?.at(-1)).toEqual([rows[0], 'name', 220, 60])
+    await canvas.trigger('contextmenu', { clientX: 220, clientY: 20 })
+    expect(wrapper.emitted('column-contextmenu')?.at(-1)).toEqual(['name', 220, 20])
 
     await canvas.trigger('click', { clientX: 530, clientY: 60 })
     expect(wrapper.emitted('navigate-related')?.at(-1)).toEqual(['parents', 'id', 9])
@@ -234,4 +236,31 @@ describe('CanvasDataGrid rendering and hit testing', () => {
     await wrapper.trigger('keydown', { key: 'Delete' })
     expect(wrapper.emitted('delete-key-pressed')).toHaveLength(1)
   })
+  it('keeps pinned columns visible and editable at their fixed position after scrolling', async () => {
+    const wrapper = await mountGrid({ pinnedColumns: ['id'], selectedRowPk: '1', inlineEditColumn: 'id' })
+    const scroller = wrapper.get<HTMLElement>('.custom-scrollbar')
+    scroller.element.scrollLeft = 180
+    await scroller.trigger('scroll'); await vi.runAllTimersAsync()
+    expect(wrapper.get<HTMLElement>('[data-grid-edit]').element.style.left).toBe('0px')
+    await wrapper.get('canvas').trigger('contextmenu', { clientX: 40, clientY: 60 })
+    expect(wrapper.emitted('cell-contextmenu')?.at(-1)?.[1]).toBe('id')
+    expect(drawContext.fillText).toHaveBeenCalledWith(expect.stringContaining('id'), 12, expect.any(Number))
+  })
+
+  it('preserves composite identities when compact source rows use reordered visible columns', async () => {
+    const key = JSON.stringify([{ column: 'id', value: 1 }, { column: 'name', value: 'Alice' }])
+    const wrapper = await mountGrid({ columns: [columns[1], columns[0]], sourceColumns: columns, rows: [[1, 'Alice', 9]],
+      primaryKey: ['id', 'name'], selectedRowPk: key, inlineEditColumn: 'name',
+      getCellValue: (row: unknown[], name: string) => String(rowValue(row, name, columns)),
+    })
+    expect(wrapper.get<HTMLInputElement>('[data-grid-edit]').element.value).toBe('Alice')
+    expect(wrapper.get('[data-grid-edit]').attributes('data-grid-edit')).toBe(key)
+  })
+
+  it('uses compact height for row hit testing as well as drawing', async () => {
+    const wrapper = await mountGrid({ rowHeight: 25 })
+    await wrapper.get('canvas').trigger('contextmenu', { clientX: 40, clientY: 75 })
+    expect(wrapper.emitted('cell-contextmenu')?.at(-1)?.[0]).toEqual(rows[1])
+  })
+
 })

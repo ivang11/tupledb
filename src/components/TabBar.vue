@@ -24,6 +24,7 @@
         :key="tab.id"
         draggable="true"
         @click="emit('switch-tab', tab.id)"
+        @contextmenu.prevent.stop="tabMenu = { show: true, x: $event.clientX, y: $event.clientY, tab }"
         @mousedown="(e) => { if (e.button === 1) { e.preventDefault(); e.stopPropagation(); emit('close-tab', tab.id, e); } }"
         @dragstart="emit('tab-drag-start', tab.id, $event)"
         @dragover.prevent
@@ -152,13 +153,27 @@
       <XIcon class="size-4" />
     </button>
     </div>
+    <ContextMenuSurface :show="tabMenu.show" :x="tabMenu.x" :y="tabMenu.y" @dismiss="tabMenu.show = false">
+      <template v-if="tabMenu.tab">
+        <button class="tab-menu-item" @click="emit('switch-tab', tabMenu.tab.id)">Select tab</button>
+        <button v-if="tabMenu.tab.type === 'table'" class="tab-menu-item" @click="refreshContextTab">Refresh table</button>
+        <button class="tab-menu-item" @click="copyTabName">Copy {{ tabMenu.tab.type === 'table' ? 'table name' : 'tab name' }}</button>
+        <div class="border-t my-1" />
+        <button class="tab-menu-item" @click="emit('close-tab', tabMenu.tab.id, $event)">Close tab</button>
+        <button :disabled="tabs.length < 2" class="tab-menu-item" @click="closeContextTabs('others', $event)">Close other tabs</button>
+        <button :disabled="contextTabIndex === tabs.length - 1" class="tab-menu-item" @click="closeContextTabs('right', $event)">Close tabs to the right</button>
+        <button class="tab-menu-item" @click="closeContextTabs('all', $event)">Close all tabs</button>
+      </template>
+    </ContextMenuSurface>
   </div>
 </template>
 
 <script setup lang="ts">
 import { tableLabel } from '@/lib/tableReference'
 
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import ContextMenuSurface from "./ContextMenuSurface.vue";
+import { copyText } from "@/lib/clipboard";
 import { useKeybindings, formatKeybinding } from "@/composables/useKeybindings";
 import {
   TerminalIcon,
@@ -182,7 +197,7 @@ interface AnyTab {
   reference?: import('@/types/database').TableRef;
 }
 
-defineProps<{
+const props = defineProps<{
   paneId: string;
   tabs: AnyTab[];
   activeTabId: string | null;
@@ -214,6 +229,22 @@ const emit = defineEmits<{
   "tab-drop": [targetTabId: string | null, e: DragEvent];
 }>();
 
+const tabMenu = ref<{ show: boolean; x: number; y: number; tab: AnyTab | null }>({ show: false, x: 0, y: 0, tab: null });
+const contextTabIndex = computed(() => props.tabs.findIndex(tab => tab.id === tabMenu.value.tab?.id));
+function refreshContextTab() {
+  if (!tabMenu.value.tab) return;
+  emit('switch-tab', tabMenu.value.tab.id);
+  emit('refresh');
+}
+function copyTabName() {
+  const tab = tabMenu.value.tab;
+  if (tab) void copyText(tab.type === 'table' ? tableLabel(tab.reference ?? tab.tableName ?? '') : 'Query');
+}
+function closeContextTabs(mode: 'others' | 'right' | 'all', event: MouseEvent) {
+  const tabs = props.tabs.filter((tab, index) => mode === 'all' || (mode === 'others' ? tab.id !== tabMenu.value.tab?.id : index > contextTabIndex.value));
+  for (const tab of tabs) emit('close-tab', tab.id, event);
+}
+
 const getEnvDotColor = (env: Environment): string => {
   switch (env) {
     case "PRODUCTION": return "bg-(--env-prod)";
@@ -227,3 +258,8 @@ const { getBinding } = useKeybindings();
 const focusPaneKey = computed(() => formatKeybinding(getBinding('focusPane')));
 
 </script>
+
+<style scoped>
+.tab-menu-item { display: block; width: 100%; text-align: left; padding: 7px 12px; border-radius: 4px; font-size: 12px; }
+.tab-menu-item:hover:not(:disabled) { background: var(--muted); }
+</style>

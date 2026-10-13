@@ -36,6 +36,7 @@
     @connect-saved="connectSaved"
     @select-database="handleSelectDatabase"
     @toggle-database="toggleDatabase"
+    @refresh-schema="refreshDatabaseSchema"
     @load-table="loadTableData"
     @toggle-table-selection="toggleTableSelection"
     @select-table-range="selectTableRange"
@@ -102,6 +103,7 @@ const {
   openNewConnDialog,
   connectSaved,
   toggleDatabase,
+  refreshDatabaseSchema,
   loadTableData,
   toggleTableSelection,
   selectTableRange,

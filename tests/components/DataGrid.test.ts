@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { ref } from 'vue'
+import { rowValue } from '@/lib/rowAccess'
+import { useAppSettings } from '@/composables/useAppSettings'
 import DataGrid from '@/components/DataGrid.vue'
 
 // useVirtualizer needs a scrollable container with real height to yield items.
@@ -274,5 +276,55 @@ describe('DataGrid — horizontal virtualization', () => {
     expect(w.find('[role="table"]').attributes('aria-colcount')).toBe('100')
     expect(w.findAll('[role="columnheader"]')).toHaveLength(5)
     expect(w.findAll('[role="rowgroup"]:last-child > [role="row"]').at(0)?.findAll('[role="cell"]')).toHaveLength(5)
+  })
+})
+
+
+describe('DataGrid — column preferences and cell actions', () => {
+  function grid(key: string) {
+    const source = [[1, 'Alice', null], [2, null, 'value']]
+    return mount(DataGrid, { props: { ...defaults(), preferenceKey: key, rows: source, totalCount: 2, canFilter: true,
+      getCellValue: (row: unknown[], name: string) => { const value = rowValue(row, name, columns); return value == null ? '' : String(value) },
+    } })
+  }
+  async function menuAction(wrapper: ReturnType<typeof mount>, label: string) {
+    await wrapper.find('[role="menu"]').findAll('button').find(button => button.text() === label)!.trigger('click')
+  }
+  it('hides columns without changing source-array values or their NULL indicators', async () => {
+    const wrapper = grid('hide-test')
+    await wrapper.findAll('[role="columnheader"]')[0].trigger('contextmenu', { clientX: 10, clientY: 10 })
+    await menuAction(wrapper, 'Hide column')
+    expect(wrapper.findAll('[role="columnheader"]')).toHaveLength(2)
+    expect(wrapper.findAll('[role="columnheader"]')[0].text()).toContain('name')
+    const row = wrapper.findAll('[role="row"]')[1]
+    expect(row.findAll('[role="cell"]')[0].text()).toBe('Alice')
+    expect(row.findAll('[role="cell"]')[1].text()).toBe('NULL')
+    wrapper.unmount()
+  })
+  it('filters a NULL cell using an actual null value', async () => {
+    const wrapper = grid('filter-test')
+    const row = wrapper.findAll('[role="row"]')[1]
+    await row.findAll('[role="cell"]')[2].trigger('contextmenu', { clientX: 10, clientY: 10 })
+    await menuAction(wrapper, 'Filter by this value')
+    expect(wrapper.emitted('filter-value')?.[0]).toEqual(['value', null])
+    wrapper.unmount()
+  })
+  it('remembers column visibility when the same table opens again', async () => {
+    const first = grid('remember-test')
+    await first.findAll('[role="columnheader"]')[0].trigger('contextmenu', { clientX: 10, clientY: 10 })
+    await menuAction(first, 'Hide column'); first.unmount()
+    const second = grid('remember-test')
+    expect(second.findAll('[role="columnheader"]')).toHaveLength(2)
+    second.unmount()
+  })
+  it('applies global compact rows and narrow widths without a toolbar in the grid', async () => {
+    const { settings, reset } = useAppSettings()
+    const wrapper = grid('settings-test')
+    settings.value.density = 'compact'; settings.value.columnWidth = 'narrow'
+    await wrapper.vm.$nextTick()
+    expect((wrapper.findAll('[role="row"]')[1].element as HTMLElement).style.height).toBe('25px')
+    expect((wrapper.findAll('[role="columnheader"]')[0].element as HTMLElement).style.width).toBe('100px')
+    expect(wrapper.find('select[aria-label="Column width"]').exists()).toBe(false)
+    reset(); wrapper.unmount()
   })
 })

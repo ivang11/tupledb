@@ -1,9 +1,5 @@
 <template>
-  <div
-    v-if="show"
-    class="fixed z-100 min-w-40 bg-background/95 backdrop-blur-md border rounded-lg shadow-xl p-1 animate-in fade-in zoom-in-95 duration-100"
-    :style="{ left: x + 'px', top: y + 'px' }"
-  >
+  <ContextMenuSurface :show="show" :x="x" :y="y" @dismiss="emit('dismiss')">
     <button
       class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-primary/10 text-foreground transition-colors text-left"
       title="New Query"
@@ -62,10 +58,11 @@
     >
       <Trash2Icon class="size-3.5" /> Drop Database
     </button>
-  </div>
+  </ContextMenuSurface>
 </template>
 
 <script setup lang="ts">
+import ContextMenuSurface from "./ContextMenuSurface.vue"
 import {
   Trash2Icon,
   TerminalIcon,
@@ -87,6 +84,7 @@ defineProps<{
 }>();
 
 const emit = defineEmits<{
+  'dismiss': []
   "open-query": [];
   "open-in-split": [];
   "refresh-schema": [];

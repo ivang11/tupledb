@@ -103,7 +103,8 @@ const operators: { label: string, value: Operator }[] = [
   { label: 'contains', value: 'contains' },
   { label: 'starts with', value: 'starts_with' },
   { label: 'ends with', value: 'ends_with' },
-  { label: 'in', value: 'not_in' },
+  { label: 'in', value: 'in' },
+  { label: 'not in', value: 'not_in' },
   { label: 'is null', value: 'is_null' },
   { label: 'is not null', value: 'is_not_null' },
   { label: 'is true', value: 'true' },
@@ -119,6 +120,10 @@ const filterSet = ref<FilterSet>(
     ? JSON.parse(JSON.stringify(props.initialFilter))
     : { match_all: true, rows: [] }
 )
+
+watch(() => props.initialFilter, value => {
+  filterSet.value = value ? JSON.parse(JSON.stringify(value)) : { match_all: true, rows: [] }
+}, { deep: true })
 
 function addRow() {
   filterSet.value.rows.push({

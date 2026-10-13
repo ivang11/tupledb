@@ -1,3 +1,4 @@
+import { resizeDetailField } from '@/lib/rowDetailLayout'
 import { tableHandle, tableSelectionKey } from '@/lib/tableReference'
 import { ref, nextTick } from 'vue'
 import type { TableTab } from '@/types/workspace'
@@ -115,7 +116,7 @@ export function usePanelResizing() {
   function resizeAllPanelTextareas() {
     nextTick(() => {
       document.querySelectorAll<HTMLTextAreaElement>('[data-row-detail-panel] textarea').forEach(el => {
-        el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'
+        resizeDetailField(el)
       })
     })
   }

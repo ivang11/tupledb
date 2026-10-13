@@ -1,9 +1,5 @@
 <template>
-  <div
-    v-if="show && connection"
-    class="fixed z-100 min-w-40 bg-background/95 backdrop-blur-md border rounded-lg shadow-xl p-1 animate-in fade-in zoom-in-95 duration-100"
-    :style="{ left: x + 'px', top: y + 'px' }"
-  >
+  <ContextMenuSurface v-if="connection" :show="show" :x="x" :y="y" @dismiss="emit('dismiss')">
     <button
       class="w-full flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-md hover:bg-muted transition-colors text-left"
       @click="emit('edit', connection)"
@@ -39,10 +35,11 @@
     >
       <Trash2Icon class="size-3.5" /> Delete Connection
     </button>
-  </div>
+  </ContextMenuSurface>
 </template>
 
 <script setup lang="ts">
+import ContextMenuSurface from "./ContextMenuSurface.vue"
 import { PencilIcon, CopyIcon, XIcon, Trash2Icon, PlusIcon } from 'lucide-vue-next'
 import type { Connection } from '@/types/connection'
 
@@ -56,6 +53,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
+  'dismiss': []
   'edit': [conn: Connection]
   'duplicate': [conn: Connection]
   'disconnect': [id: string]

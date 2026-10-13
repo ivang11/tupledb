@@ -1,8 +1,11 @@
 <template>
   <aside
+    ref="panel"
     data-row-detail-panel
+    :data-density="settings.density"
     class="shrink-0 border-l border-border bg-card flex flex-col min-h-0 min-w-0 relative"
-    :style="{ width: width + 'px' }"
+    :style="{ width: width + 'px', '--detail-font': fontCss(settings.tableFont), '--detail-size': settings.tableFontSize + 'px' }"
+    :class="{ 'row-detail-compact': settings.density === 'compact' }"
   >
     <!-- Resize handle -->
     <div
@@ -44,14 +47,15 @@
     </div>
 
     <ScrollArea class="flex-1 min-h-0">
-      <div class="p-3 space-y-3.5 pb-6">
+      <div class="detail-fields p-3 pb-6" :class="settings.density === 'compact' ? 'space-y-1' : 'space-y-3.5'">
         <div
           v-for="col in filteredColumns()"
           :key="'detail-' + col.name"
-          class="space-y-1"
+          class="detail-field"
         >
           <div class="flex items-center justify-between gap-1">
-            <Label class="text-xs font-bold text-foreground">{{ col.name }}</Label>
+            <Label class="text-xs font-medium text-foreground">{{ col.name }}</Label>
+            <span v-if="settings.density === 'compact'" class="flex-1 truncate text-[10px] text-muted-foreground font-mono" :title="col.type_name">{{ col.type_name }}</span>
             <button
               type="button"
               class="size-5 shrink-0 flex items-center justify-center rounded transition-colors"
@@ -64,7 +68,7 @@
             </button>
           </div>
           <div
-            class="rounded-md border border-input bg-background focus-within:ring-1 focus-within:ring-ring"
+            class="detail-value rounded-md border border-input bg-background focus-within:ring-1 focus-within:ring-ring"
             :class="[
               fkMap[col.name] ? 'flex items-start px-3 py-1.5' : '',
               isPendingDelete() ? 'opacity-50 cursor-not-allowed' : '',
@@ -85,8 +89,7 @@
               @input="(e) => {
                 if (isReadOnly()) return
                 const t = e.target as HTMLTextAreaElement
-                t.style.height = 'auto'
-                t.style.height = t.scrollHeight + 'px'
+                resizeDetailField(t)
                 emit('cell-input', col.name, t.value)
               }"
             />
@@ -100,7 +103,7 @@
               <ArrowRightIcon class="size-3" />
             </button>
           </div>
-          <p class="text-[10px] text-foreground/60 font-mono">{{ col.type_name }}</p>
+          <p v-if="settings.density !== 'compact'" class="text-[10px] text-foreground/60 font-mono">{{ col.type_name }}</p>
         </div>
       </div>
     </ScrollArea>
@@ -108,12 +111,14 @@
 </template>
 
 <script setup lang="ts">
+import { resizeDetailField } from '@/lib/rowDetailLayout'
 import { tableLabel } from '@/lib/tableReference'
 import type { TableRef } from '@/types/database'
 
 import { rowKey, type PrimaryKey } from '@/lib/tableIdentity'
 
-import { ref, nextTick } from 'vue'
+import { useAppSettings, fontCss } from '@/composables/useAppSettings'
+import { ref, nextTick, watch } from 'vue'
 import { SearchIcon, XIcon, CopyIcon, CheckIcon, ArrowRightIcon } from 'lucide-vue-next'
 import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -138,6 +143,9 @@ const emit = defineEmits<{
 }>()
 
 const fieldSearch = ref('')
+const { settings } = useAppSettings()
+const panel = ref<HTMLElement | null>(null)
+watch(() => [settings.value.density, settings.value.tableFontSize, settings.value.tableFont], () => nextTick(() => panel.value?.querySelectorAll('textarea').forEach(autoResize)))
 const copiedField = ref<string | null>(null)
 
 function filteredColumns() {
@@ -154,10 +162,7 @@ async function copyValue(colName: string, value: any) {
 
 function autoResize(el: HTMLTextAreaElement | null) {
   if (!el) return
-  nextTick(() => {
-    el.style.height = 'auto'
-    el.style.height = el.scrollHeight + 'px'
-  })
+  nextTick(() => resizeDetailField(el))
 }
 
 const isReadOnly = () => !props.primaryKey
@@ -169,3 +174,15 @@ const fieldWidth = (row: Record<string, any> | any[], colName: string) => {
   return `min(100%, ${length}ch)`
 }
 </script>
+
+<style scoped>
+[data-row-detail-panel] textarea { font-family: var(--detail-font); font-size: var(--detail-size); max-height: 180px; overflow-y: auto; }
+.detail-field { display: grid; gap: 4px; }
+.row-detail-compact .h-11 { height: 30px; }
+.row-detail-compact .detail-fields { padding: 6px 8px; }
+.row-detail-compact .detail-field { gap: 1px; }
+.row-detail-compact .detail-value { display: flex; align-items: center; }
+.row-detail-compact .detail-value.flex { padding: 0 6px; }
+.row-detail-compact textarea { display: block; padding: 2px 6px; line-height: 1.2; max-height: 48px; }
+.row-detail-compact .py-2 { padding-top: 4px; padding-bottom: 4px; }
+</style>
