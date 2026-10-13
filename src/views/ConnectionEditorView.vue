@@ -1,7 +1,7 @@
 <template>
   <div class="flex h-screen flex-col overflow-hidden bg-background" :class="nativeChrome ? '' : 'border border-(--line-1)'">
     <WindowResizeHandles v-if="!nativeChrome" />
-    <div data-tauri-drag-region class="relative flex h-8 shrink-0 items-center border-b border-(--line-2) bg-(--bg-1)">
+    <div ref="bar" data-tauri-drag-region class="relative flex h-8 shrink-0 items-center border-b border-(--line-2) bg-(--bg-1)">
       <!-- Centered over the full bar so the traffic lights on macOS do not push it sideways. -->
       <span data-tauri-drag-region class="pointer-events-none absolute inset-x-0 text-center text-[11.5px] font-medium text-(--fg-3)">{{ draft?.editing ? 'Edit connection' : 'New connection' }}</span>
       <button v-if="!nativeChrome" type="button" class="absolute right-1.5 flex size-6 items-center justify-center rounded-md text-(--fg-3) transition-colors hover:bg-(--bg-2) hover:text-(--fg-1)"
@@ -36,6 +36,8 @@ const nativeChrome = usesNativeMacWindowControls
 const editor = getCurrentWebviewWindow()
 const store = useConnectionStore()
 const draft = ref<EditorDraft | null>(null)
+const bar = ref<HTMLElement | null>(null)
+const CHROME_FALLBACK_PX = 30
 const isSaving = ref(false)
 const saveError = ref<string | null>(null)
 const unlisteners: UnlistenFn[] = []
@@ -64,7 +66,11 @@ function resizeToFit(formHeight: number) {
     ])
     if (disposed) return
     const usableHeight = monitor ? monitor.workArea.size.height / scale : screen.availHeight
-    const height = Math.min(Math.max(480, formHeight + 30), Math.max(480, usableHeight - 32))
+    // Window chrome above the form: the measured bar (with its border) plus the
+    // frame border on platforms that draw their own.
+    const barHeight = bar.value?.getBoundingClientRect().height ?? 0
+    const chrome = barHeight > 0 ? barHeight + (nativeChrome ? 0 : 2) : CHROME_FALLBACK_PX
+    const height = Math.min(Math.max(480, formHeight + chrome), Math.max(480, usableHeight - 32))
     await editor.setSize(new LogicalSize(size.width / scale, height))
     if (monitor && !disposed) {
       const top = monitor.workArea.position.y + 16 * scale

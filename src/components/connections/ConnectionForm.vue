@@ -1,6 +1,6 @@
 <template>
   <div class="connection-form flex h-full min-h-0 flex-col">
-    <div class="connection-settings min-h-0 flex-1 overflow-y-auto px-5 py-4">
+    <div ref="settings" class="connection-settings min-h-0 flex-1 overflow-y-auto px-5 py-4">
       <div ref="settingsContent" class="flex flex-col gap-3">
         <section aria-label="Connection settings" class="space-y-3">
           <div class="grid grid-cols-[minmax(0,1fr)_10rem] gap-3">
@@ -243,12 +243,19 @@ watch(
   { immediate: true },
 );
 
+const settings = ref<HTMLElement>();
 const settingsContent = ref<HTMLElement>();
 const footer = ref<HTMLElement>();
+// Report the height the form needs below the window bar: content plus the
+// scroll container's real padding and the footer (which grows with test
+// feedback), measured rather than assumed so the window never needs to scroll.
 useResizeObserver([settingsContent, footer], () => {
-  if (!settingsContent.value || !footer.value) return;
+  if (!settings.value || !settingsContent.value || !footer.value) return;
   const contentHeight = settingsContent.value.getBoundingClientRect().height;
-  if (contentHeight > 0) emit('height-change', Math.ceil(contentHeight + footer.value.getBoundingClientRect().height + 24));
+  if (contentHeight <= 0) return;
+  const style = getComputedStyle(settings.value);
+  const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+  emit('height-change', Math.ceil(contentHeight + padding + footer.value.getBoundingClientRect().height));
 });
 
 // A result only describes the exact settings that were tested. Ignore late
