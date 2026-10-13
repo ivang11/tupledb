@@ -1,6 +1,6 @@
 <template>
     <div v-if="show" ref="menu" role="menu" aria-label="Context menu" tabindex="-1"
-      class="fixed z-100 min-w-48 max-w-[calc(100vw-16px)] max-h-[calc(100vh-16px)] overflow-auto bg-background border border-border rounded-lg shadow-xl p-1 context-menu-surface"
+      class="fixed z-100 min-w-48 max-w-[calc(100vw-16px)] max-h-[calc(100vh-16px)] overflow-auto bg-background border border-border rounded-md shadow-xl p-1 context-menu-surface"
       :style="{ left: position.x + 'px', top: position.y + 'px' }"
       @keydown="onKeydown" @click.capture="onMenuClick" @contextmenu.prevent>
       <slot />
@@ -14,11 +14,19 @@ const emit = defineEmits<{ dismiss: [] }>()
 const menu = ref<HTMLElement | null>(null)
 const position = ref({ x: props.x, y: props.y })
 let previousFocus: HTMLElement | null = null
+let pendingDismiss: ReturnType<typeof setTimeout> | null = null
 function items() { return [...(menu.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])] }
 function dismiss() { emit('dismiss') }
 function onMenuClick(event: MouseEvent) {
   const button = (event.target as HTMLElement).closest('button')
-  if (button && !button.disabled) void nextTick(dismiss)
+  if (!button || button.disabled) return
+  // This runs in the capture phase so it also sees items that stop propagation.
+  // Browsers flush microtasks between natively dispatched listeners, so a
+  // nextTick here would unmount the menu before the item's own click handler
+  // runs and Vue would drop the item's emit. Wait for a macrotask instead,
+  // which only fires once the whole click dispatch has completed.
+  if (pendingDismiss !== null) clearTimeout(pendingDismiss)
+  pendingDismiss = setTimeout(() => { pendingDismiss = null; dismiss() }, 0)
 }
 function onOutside(event: PointerEvent) {
   if (!menu.value?.contains(event.target as Node)) dismiss()
@@ -56,6 +64,7 @@ watch(() => [props.show, props.x, props.y], async () => {
   window.addEventListener('resize', dismiss)
 }, { immediate: true })
 onUnmounted(() => {
+  if (pendingDismiss !== null) clearTimeout(pendingDismiss)
   document.removeEventListener('pointerdown', onOutside, true)
   window.removeEventListener('resize', dismiss)
 })

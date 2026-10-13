@@ -32,3 +32,19 @@ vi.mock('@tauri-apps/plugin-notification', () => ({
 vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: vi.fn(),
 }))
+
+// happy-dom 20 no longer exposes a working localStorage on the vitest global;
+// the app reads and writes it defensively, but tests need a real store to assert on.
+if (typeof (globalThis as any).localStorage?.clear !== 'function') {
+  const memory = new Map<string, string>()
+  const storage: Storage = {
+    get length() { return memory.size },
+    clear: () => memory.clear(),
+    getItem: (key) => memory.get(String(key)) ?? null,
+    key: (index) => [...memory.keys()][index] ?? null,
+    removeItem: (key) => { memory.delete(String(key)) },
+    setItem: (key, value) => { memory.set(String(key), String(value)) },
+  }
+  Object.defineProperty(globalThis, 'localStorage', { value: storage, configurable: true })
+  if (typeof window !== 'undefined') Object.defineProperty(window, 'localStorage', { value: storage, configurable: true })
+}

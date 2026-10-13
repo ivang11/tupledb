@@ -25,6 +25,8 @@ describe('tab context menus', () => {
     await wrapper.find('[role="menu"]').findAll('button').find(button => button.text() === 'Refresh table')!.trigger('click')
     expect(wrapper.emitted('switch-tab')?.[0]).toEqual(['second'])
     expect(wrapper.emitted('refresh')).toHaveLength(1)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await flushPromises()
     expect(wrapper.find('[role="menu"]').exists()).toBe(false)
   })
   it('closes only tabs to the right of the clicked tab', async () => {
@@ -61,6 +63,8 @@ describe('context menu surface', () => {
     wrapper.find('button').element.addEventListener('click', action)
     await wrapper.find('button').trigger('click')
     expect(action).toHaveBeenCalledOnce()
+    // Dismissal is deferred to a macrotask so it never races the item's own click handler.
+    await new Promise(resolve => setTimeout(resolve, 0))
     expect(wrapper.emitted('dismiss')).toHaveLength(1)
   })
 })
