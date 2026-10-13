@@ -341,6 +341,56 @@ impl QueryDriver for PostgreSqlDriver {
         Ok(())
     }
 
+    async fn execute_query_batch(
+        &self, database: Option<&str>, statements: &[String], query_id: &str,
+        row_limit: usize, cell_limit: usize,
+    ) -> Result<Vec<BatchQueryResult>, String> {
+        struct Registration<'a>(&'a PostgreSqlDriver, String);
+        impl Drop for Registration<'_> { fn drop(&mut self) { self.0.running_queries.lock().remove(&self.1); } }
+        let (tx, mut rx) = tokio::sync::watch::channel(false);
+        self.running_queries.lock().insert(query_id.to_string(), tx);
+        let _registration = Registration(self, query_id.to_string());
+        let database = database.unwrap_or(&self.catalog);
+        let pool = self.pool_for(database).await?;
+        let mut conn = pool.acquire().await.map_err(|e| e.to_string())?;
+        conn.close_on_drop();
+        let (pid, started): (i32, String) = sqlx::query_as("SELECT pg_backend_pid(), backend_start::text FROM pg_stat_activity WHERE pid=pg_backend_pid()")
+            .fetch_one(&mut *conn).await.map_err(|e| e.to_string())?;
+        let execution = async {
+            if self.read_only { sqlx::query("BEGIN READ ONLY").execute(&mut *conn).await.map_err(|e| e.to_string())?; }
+            let mut results = Vec::new(); let mut remaining = cell_limit;
+            for statement in statements {
+                let start = Instant::now();
+                let executed: Result<RawQueryResult, String> = async {
+                    let description = conn.describe(statement).await.map_err(|e| e.to_string())?;
+                    let columns = description.columns().iter().map(|c| ColumnInfo { name: c.name().into(), type_name: c.type_info().name().into() }).collect::<Vec<_>>();
+                    let is_select = !columns.is_empty(); let mut rows = Vec::new(); let mut fetched = 0u64; let mut affected = 0u64;
+                    let mut stream = sqlx::raw_sql(statement).fetch_many(&mut *conn);
+                    while let Some(item) = stream.next().await {
+                        match item.map_err(|e| e.to_string())? {
+                            Either::Left(done) => { affected += done.rows_affected(); }
+                            Either::Right(row) => {
+                                fetched += 1;
+                                if rows.len() < row_limit && (rows.len() + 1) * columns.len().max(1) <= remaining { rows.push(values::parse_text_row(&row, &columns, true)?); }
+                            }
+                        }
+                    }
+                    Ok(RawQueryResult { columns, rows, rows_affected: if is_select { fetched } else { affected }, is_select })
+                }.await;
+                let failed = executed.is_err();
+                let (result, error) = match executed { Ok(result) => { remaining = remaining.saturating_sub(result.rows.len() * result.columns.len().max(1)); (Some(result), None) }, Err(error) => (None, Some(error)) };
+                results.push(BatchQueryResult { sql: statement.clone(), result, error, duration_ms: start.elapsed().as_millis() as u64 });
+                if failed { break; }
+            }
+            Ok(results)
+        };
+        tokio::select! {
+            biased;
+            _ = rx.changed() => { super::session::cancel_backend(&pool, database, pid, &started).await; Err("Query cancelled".into()) },
+            result = execution => result,
+        }
+    }
+
     async fn execute_query(
         &self,
         database: Option<&str>,

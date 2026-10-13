@@ -16,6 +16,7 @@ pub fn execute_query(
     sql: String,
     query_id: String,
     max_retained_cells: Option<usize>,
+    timeout_secs: Option<u64>,
 ) -> Result<(), String> {
     let (env, allow_writes) = {
         let configs = state.connections_config.read();
@@ -62,7 +63,7 @@ pub fn execute_query(
             },
         ));
 
-        let result = driver
+        let execution = driver
             .execute_query(
                 database.as_deref(),
                 &sql,
@@ -70,8 +71,15 @@ pub fn execute_query(
                 on_progress,
                 on_chunk,
                 max_retained_cells,
-            )
-            .await;
+            );
+        tokio::pin!(execution);
+        let result = tokio::select! {
+            result = &mut execution => result,
+            _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs.unwrap_or(300).clamp(1, 3600))) => {
+                let _ = driver.cancel_query(&query_id).await;
+                Err("Query timed out".into())
+            }
+        };
         let ms = t0.elapsed().as_millis() as u64;
 
         use tauri::Emitter;
@@ -121,4 +129,33 @@ pub async fn cancel_query(
     let driver = state.get_driver(&connection_id)?;
     crate::database::capabilities::require(driver.capabilities().cancel_query, "cancel_query")?;
     driver.cancel_query(&query_id).await
+}
+
+#[tauri::command]
+pub async fn execute_query_batch(
+    state: State<'_, AppState>, connection_id: Uuid, database: Option<String>, statements: Vec<String>,
+    query_id: String, row_limit: Option<usize>, timeout_secs: Option<u64>,
+) -> Result<Vec<BatchQueryResult>, String> {
+    if statements.is_empty() || statements.len() > 200 { return Err("Execute between 1 and 200 statements per batch".into()); }
+    let (env, allow_writes) = { let configs = state.connections_config.read(); configs.data()?.get(&connection_id)
+        .map(|c| (c.environment, c.allow_writes)).unwrap_or((crate::connections::Environment::Local, true)) };
+    for statement in &statements { crate::security::is_query_safe(statement, env, allow_writes)?; }
+    let driver = state.get_driver(&connection_id)?;
+    let execution = driver.execute_query_batch(database.as_deref(), &statements, &query_id, row_limit.unwrap_or(5000).clamp(100, 50000), 300_000);
+    tokio::pin!(execution);
+    let results = tokio::select! {
+        result = &mut execution => result,
+        _ = tokio::time::sleep(std::time::Duration::from_secs(timeout_secs.unwrap_or(300).clamp(1, 3600))) => {
+            let _ = driver.cancel_query(&query_id).await;
+            Err("Query timed out".into())
+        }
+    }?;
+    for result in &results { state.emit_query_log_context(Some(connection_id), database.as_deref(), &result.sql, result.duration_ms, result.error.as_deref()); }
+    Ok(results.into_iter().map(|mut item| { if let Some(result) = &mut item.result { result.rows = compact_rows_for_ipc(&result.columns, std::mem::take(&mut result.rows)); } item }).collect())
+}
+
+#[tauri::command]
+pub async fn keep_connection_alive(state: State<'_, AppState>, connection_id: Uuid) -> Result<(), String> {
+    let driver = state.get_driver(&connection_id)?;
+    driver.get_databases().await.map(|_| ())
 }

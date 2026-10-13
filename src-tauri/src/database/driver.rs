@@ -107,6 +107,13 @@ pub trait QueryDriver: Send + Sync {
         tx: tokio::sync::mpsc::Sender<(Option<Vec<ColumnInfo>>, Value)>,
     ) -> Result<(), String>;
 
+    async fn execute_query_batch(
+        &self, _database: Option<&str>, _statements: &[String], _query_id: &str,
+        _row_limit: usize, _cell_limit: usize,
+    ) -> Result<Vec<BatchQueryResult>, String> {
+        Err("Batch queries are not supported by this driver".into())
+    }
+
     async fn execute_query(
         &self,
         database: Option<&str>,

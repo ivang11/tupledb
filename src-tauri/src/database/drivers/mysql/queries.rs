@@ -251,6 +251,50 @@ impl QueryDriver for MySqlDriver {
         Ok(())
     }
 
+    async fn execute_query_batch(
+        &self, database: Option<&str>, statements: &[String], query_id: &str,
+        row_limit: usize, cell_limit: usize,
+    ) -> Result<Vec<BatchQueryResult>, String> {
+        use sqlx::{Column, Either, Executor, TypeInfo};
+        struct Registration<'a>(&'a MySqlDriver, String);
+        impl Drop for Registration<'_> { fn drop(&mut self) { self.0.running_queries.write().remove(&self.1); } }
+        let mut conn = self.pool.acquire().await.map_err(|e| e.to_string())?;
+        conn.close_on_drop();
+        let thread_id: u64 = sqlx::query_scalar("SELECT CONNECTION_ID()").fetch_one(&mut *conn).await.map_err(|e| e.to_string())?;
+        self.running_queries.write().insert(query_id.to_string(), thread_id);
+        let _registration = Registration(self, query_id.to_string());
+        if let Some(db) = database.filter(|db| !db.is_empty()) {
+            conn.execute(format!("USE {}", quote_identifier(db)?).as_str()).await.map_err(|e| e.to_string())?;
+        }
+        let mut results = Vec::new();
+        let mut remaining = cell_limit;
+        for statement in statements {
+            let start = std::time::Instant::now();
+            let execution: Result<RawQueryResult, String> = async {
+                let mut columns = conn.describe(statement.as_str()).await.ok().map(|d| d.columns().iter().map(|c| ColumnInfo { name: c.name().into(), type_name: c.type_info().name().into() }).collect::<Vec<_>>()).unwrap_or_default();
+                let mut rows = Vec::new(); let mut fetched = 0u64; let mut affected = 0u64;
+                let mut stream = sqlx::raw_sql(statement).fetch_many(&mut *conn);
+                while let Some(item) = stream.next().await {
+                    match item.map_err(|e| e.to_string())? {
+                        Either::Left(done) => { affected += done.rows_affected(); }
+                        Either::Right(row) => {
+                            if columns.is_empty() { columns = row.columns().iter().map(|c| ColumnInfo { name: c.name().into(), type_name: c.type_info().name().into() }).collect(); }
+                            fetched += 1;
+                            if rows.len() < row_limit && (rows.len() + 1) * columns.len().max(1) <= remaining { rows.push(parse_mysql_row(&row)); }
+                        }
+                    }
+                }
+                let is_select = !columns.is_empty();
+                Ok(RawQueryResult { columns, rows, rows_affected: if is_select { fetched } else { affected }, is_select })
+            }.await;
+            let failed = execution.is_err();
+            let (result, error) = match execution { Ok(result) => { remaining = remaining.saturating_sub(result.rows.len() * result.columns.len().max(1)); (Some(result), None) }, Err(error) => (None, Some(error)) };
+            results.push(BatchQueryResult { sql: statement.clone(), result, error, duration_ms: start.elapsed().as_millis() as u64 });
+            if failed { break; }
+        }
+        Ok(results)
+    }
+
     async fn execute_query(
         &self,
         database: Option<&str>,
@@ -260,6 +304,9 @@ impl QueryDriver for MySqlDriver {
         on_chunk: Option<QueryChunkCallback>,
         max_retained_cells: Option<usize>,
     ) -> Result<RawQueryResult, String> {
+        struct Registration<'a>(&'a MySqlDriver, Option<String>);
+        impl Drop for Registration<'_> { fn drop(&mut self) { if let Some(id) = &self.1 { self.0.running_queries.write().remove(id); } } }
+        let _registration = Registration(self, query_id.map(str::to_owned));
         const CHUNK_SIZE: usize = 500;
 
         let trimmed = sql.trim().to_uppercase();
@@ -271,6 +318,7 @@ impl QueryDriver for MySqlDriver {
             || trimmed.starts_with("WITH");
 
         let mut conn = self.pool.acquire().await.map_err(|e| e.to_string())?;
+        conn.close_on_drop();
 
         use sqlx::Executor;
 

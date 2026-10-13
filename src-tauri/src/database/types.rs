@@ -83,6 +83,14 @@ pub struct RawQueryResult {
     pub is_select: bool,
 }
 
+#[derive(Debug, Serialize)]
+pub struct BatchQueryResult {
+    pub sql: String,
+    pub result: Option<RawQueryResult>,
+    pub error: Option<String>,
+    pub duration_ms: u64,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QueryResult {
     pub columns: Vec<ColumnInfo>,

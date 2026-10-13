@@ -67,6 +67,8 @@ pub fn run() {
             crate::commands::catalog::get_table_indexes,
             crate::commands::catalog::get_table_ddl,
             crate::commands::queries::execute_query,
+            crate::commands::queries::execute_query_batch,
+            crate::commands::queries::keep_connection_alive,
             crate::commands::queries::cancel_query,
             crate::saved_queries::get_saved_queries,
             crate::saved_queries::upsert_saved_query,

@@ -187,3 +187,13 @@ commands.allow = ["upsert_saved_query"]
 identifier = "allow-delete-saved-query"
 description = "Allows deleting a saved query"
 commands.allow = ["delete_saved_query"]
+
+[[permission]]
+identifier = "allow-execute-query-batch"
+description = "Allows execute query batch"
+commands.allow = ["execute_query_batch"]
+
+[[permission]]
+identifier = "allow-keep-connection-alive"
+description = "Allows keep connection alive"
+commands.allow = ["keep_connection_alive"]
