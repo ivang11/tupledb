@@ -14,7 +14,8 @@
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent, onMounted } from 'vue'
+import { defineAsyncComponent, onBeforeUnmount, onMounted } from 'vue'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useAppearance } from '@/composables/useAppearance'
 import TitleBar from '@/components/TitleBar.vue'
 import WindowResizeHandles from '@/components/WindowResizeHandles.vue'
@@ -30,13 +31,19 @@ useAppearance()
 const { checkForUpdates, dialogOpen } = useUpdater()
 const AUTO_UPDATE_CHECK_DELAY_MS = 30_000
 
-onMounted(() => {
+let stopUpdateRequests: UnlistenFn | undefined
+
+onMounted(async () => {
+  // The settings window asks for update checks here, where the update dialog lives.
+  stopUpdateRequests = await listen('tupledb:check-updates', () => void checkForUpdates())
   if (!import.meta.env.PROD) return
 
   window.setTimeout(() => {
     void checkForUpdates({ silent: true })
   }, AUTO_UPDATE_CHECK_DELAY_MS)
 })
+
+onBeforeUnmount(() => stopUpdateRequests?.())
 </script>
 
 <style>

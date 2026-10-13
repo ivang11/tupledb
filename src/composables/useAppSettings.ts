@@ -1,4 +1,5 @@
 import { ref, watch } from 'vue'
+import { emit, listen } from '@tauri-apps/api/event'
 export interface AppSettings {
   theme: 'system' | 'light' | 'dark'; uiFont: string; editorFont: string; tableFont: string; editorFontSize: number; tableFontSize: number;
   density: 'compact' | 'comfortable'; columnWidth: 'narrow' | 'normal' | 'wide' | 'fit'; alternatingRows: boolean;
@@ -37,6 +38,24 @@ function load(): AppSettings {
     return result
   } catch { return { ...DEFAULT_SETTINGS } }
 }
-const settings = ref<AppSettings>(load()), settingsOpen = ref(false)
-watch(settings, value => { try { localStorage.setItem('tupledb:settings', JSON.stringify(value)) } catch {} }, { deep: true })
-export function useAppSettings() { return { settings, settingsOpen, reset: () => { settings.value = { ...DEFAULT_SETTINGS } } } }
+const SETTINGS_KEY = 'tupledb:settings'
+const SETTINGS_EVENT = 'tupledb:settings-changed'
+const settings = ref<AppSettings>(load())
+// Settings are edited in their own window, so every window persists what it
+// changes and broadcasts it; the others reload from storage. The last persisted
+// snapshot keeps the echo of our own broadcast from re-triggering a write.
+let lastPersisted = JSON.stringify(settings.value)
+watch(settings, value => {
+  const json = JSON.stringify(value)
+  if (json === lastPersisted) return
+  lastPersisted = json
+  try { localStorage.setItem(SETTINGS_KEY, json) } catch {}
+  void emit(SETTINGS_EVENT, json).catch(() => {})
+}, { deep: true })
+void listen<string>(SETTINGS_EVENT, event => {
+  if (typeof event.payload !== 'string' || event.payload === lastPersisted) return
+  lastPersisted = event.payload
+  try { localStorage.setItem(SETTINGS_KEY, event.payload) } catch {}
+  settings.value = load()
+}).catch(() => {})
+export function useAppSettings() { return { settings, reset: () => { settings.value = { ...DEFAULT_SETTINGS } } } }

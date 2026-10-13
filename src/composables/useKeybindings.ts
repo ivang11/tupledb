@@ -1,4 +1,5 @@
 import { ref, readonly } from 'vue'
+import { emit, listen } from '@tauri-apps/api/event'
 import {
   DEFAULT_KEYBINDINGS,
   KEYBINDING_DEFS,
@@ -6,6 +7,7 @@ import {
 } from '@/config/keybindingActions'
 
 const STORAGE_KEY = 'tupledb:keybindings'
+const CHANGE_EVENT = 'tupledb:keybindings-changed'
 
 // Singleton state shared across all component instances
 const _overrides = ref<Partial<Record<KeybindingAction, string>>>({})
@@ -24,16 +26,29 @@ function _loadFromStorage() {
   }
 }
 
+function _applyOverrides(parsed: Partial<Record<KeybindingAction, string>>) {
+  _overrides.value = parsed
+  _bindings.value = { ...DEFAULT_KEYBINDINGS, ...parsed }
+}
+
 function _saveToStorage() {
-  if (Object.keys(_overrides.value).length === 0) {
-    localStorage.removeItem(STORAGE_KEY)
-  } else {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(_overrides.value))
+  const json = JSON.stringify(_overrides.value)
+  try {
+    if (Object.keys(_overrides.value).length === 0) localStorage.removeItem(STORAGE_KEY)
+    else localStorage.setItem(STORAGE_KEY, json)
+  } catch {
+    // storage unavailable; bindings still apply for this session
   }
+  // Shortcuts are edited in the settings window; tell the other windows.
+  void emit(CHANGE_EVENT, json).catch(() => {})
 }
 
 // Initialize on module load
 _loadFromStorage()
+void listen<string>(CHANGE_EVENT, event => {
+  if (typeof event.payload !== 'string' || event.payload === JSON.stringify(_overrides.value)) return
+  try { _applyOverrides(JSON.parse(event.payload)) } catch { /* ignore malformed broadcasts */ }
+}).catch(() => {})
 
 // ── Parsing helpers ────────────────────────────────────────────────────────────
 

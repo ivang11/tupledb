@@ -26,7 +26,7 @@
     <!-- Window controls -->
     <div class="flex items-center gap-0.5">
       <button class="flex size-6 items-center justify-center rounded text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1)" :title="`Quick search (${quickSearchKey})`" aria-label="Quick search" @click="openQuickSearch"><SearchIcon class="size-3.5" /></button>
-      <button class="flex size-6 items-center justify-center rounded text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1)" title="Settings" aria-label="Settings" @click="settingsOpen = true"><SettingsIcon class="size-3.5" /></button>
+      <button class="flex size-6 items-center justify-center rounded text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1)" title="Settings" aria-label="Settings" @click="openSettings"><SettingsIcon class="size-3.5" /></button>
       <template v-if="!usesNativeMacWindowControls">
         <div class="w-px h-3.5 bg-border/50 mx-1" />
         <button
@@ -52,13 +52,12 @@
         </button>
       </template>
     </div>
-    <SettingsDialog />
   </div>
 </template>
 
 <script setup lang="ts">
-import SettingsDialog from '@/components/dialogs/SettingsDialog.vue'
-import { useAppSettings } from '@/composables/useAppSettings'
+import { openSettingsWindow } from '@/lib/settingsWindow'
+import { useToast } from '@/composables/useToast'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import {
@@ -74,7 +73,9 @@ import { useSidebarState } from '@/composables/useSidebarState'
 import { useKeybindings, formatKeybinding } from '@/composables/useKeybindings'
 import { usesNativeMacWindowControls } from '@/lib/platform'
 
-const { settingsOpen } = useAppSettings()
+function openSettings() {
+  void openSettingsWindow().catch(error => useToast().error('Could not open settings', String(error)))
+}
 const win = getCurrentWindow()
 const isFullscreen = ref(false)
 const reserveNativeControlsSpace = computed(

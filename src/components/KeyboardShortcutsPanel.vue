@@ -1,17 +1,11 @@
 <template>
   <div ref="panel" tabindex="-1" class="min-h-0 outline-none" @keydown="onRecordKeydown">
-      <div class="space-y-1 mb-3">
-        <h3 class="flex items-center gap-2 text-sm">
-          <KeyboardIcon class="size-4" />
-          Keyboard Shortcuts
-        </h3>
-        <p class="text-xs">
-          Click a binding to reassign it. Changes apply immediately.
-        </p>
-      </div>
+      <p class="mb-3 text-[11.5px] text-(--fg-4)">
+        Click a binding to reassign it. Changes apply immediately.
+      </p>
 
       <!-- Keybinding list -->
-      <div class="space-y-4 py-1 max-h-105 overflow-y-auto pr-1">
+      <div class="space-y-4 py-1">
         <template v-for="[category, defs] in categories" :key="category">
           <div>
             <div class="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 px-1">
@@ -117,7 +111,7 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
-import { KeyboardIcon, RotateCcwIcon, DownloadIcon, UploadIcon, XIcon, CheckIcon } from 'lucide-vue-next'
+import { RotateCcwIcon, DownloadIcon, UploadIcon, XIcon, CheckIcon } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import {
   useKeybindings,

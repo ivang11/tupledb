@@ -2,11 +2,14 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "connection-editor",
   "description": "Connection editor window: testing, local IPC and native window controls",
-  "windows": ["connection-editor-*"],
+  "windows": [
+    "connection-editor-*"
+  ],
   "permissions": [
     "core:event:default",
     "core:window:allow-close",
     "core:window:allow-destroy",
+    "core:window:allow-show",
     "core:window:allow-set-focus",
     "core:window:allow-inner-size",
     "core:window:allow-scale-factor",
