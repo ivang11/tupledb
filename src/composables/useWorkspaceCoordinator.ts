@@ -4,6 +4,7 @@ import { useConnectionStore } from "@/stores/connections";
 import type { AnyTab, PaneState, QueryTab, TableTab } from "@/types/workspace";
 
 interface WorkspaceCoordinatorContext {
+  requestClose?: (tabs: AnyTab[], action: () => void) => void;
   panes: Ref<PaneState[]>;
   activePaneId: Ref<string>;
   getPane: (paneId?: string) => PaneState;
@@ -141,7 +142,10 @@ export function useWorkspaceCoordinator(ctx: WorkspaceCoordinatorContext) {
     }
   }
 
-  function handleCloseDatabase(connectionId: string, database: string) {
+  function handleCloseDatabase(connectionId: string, database: string, confirmed = false) {
+    if (!confirmed && ctx.requestClose) {
+      ctx.requestClose(ctx.panes.value.flatMap(pane => pane.tabs.filter(tab => tab.connectionId === connectionId && tab.database === database)), () => handleCloseDatabase(connectionId, database, true)); return
+    }
     const connState = store.openConnections[connectionId];
     if (!connState) return;
 

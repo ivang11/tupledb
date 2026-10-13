@@ -1,3 +1,4 @@
+import { groupSidebarTables } from '@/lib/sidebarTables'
 import { tableHandle, tableLabel, tableSelectionKey, parseTableSelectionKey } from '@/lib/tableReference'
 import { ref, computed, onMounted, watch, type Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
@@ -13,6 +14,7 @@ import type { Connection } from "@/types/connection";
 import type { PaneState, TableTab } from "@/types/workspace";
 
 interface SidebarContext {
+  requestClose?: (tabs: import("@/types/workspace").AnyTab[], action: () => void) => void;
   panes: Ref<PaneState[]>;
   activePaneId: Ref<string>;
   getPane: (paneId?: string) => PaneState;
@@ -151,13 +153,16 @@ export function useSidebarManager(ctx: SidebarContext) {
   }
 
   async function connectSaved(conn: Connection, reconnect = false) {
+    const defaultDatabase = conn.database.engine === "sqlite"
+      ? undefined
+      : conn.database.settings.database?.trim();
     const existing = store.openConnections[conn.id];
     if (existing?.status === 'connected' && !reconnect) {
       existing.selectedDatabase =
         existing.selectedDatabase ??
         existing.openedDatabases?.[0] ??
-        (existing.databases.includes(conn.mysql?.database)
-          ? conn.mysql.database
+        (defaultDatabase && existing.databases.includes(defaultDatabase)
+          ? defaultDatabase
           : null) ??
         existing.databases[0] ??
         null;
@@ -171,7 +176,6 @@ export function useSidebarManager(ctx: SidebarContext) {
       await store.connect(conn);
       expandedConnections.value.add(conn.id);
       selectedSidebarConnectionId.value = conn.id;
-      const defaultDatabase = conn.mysql?.database?.trim();
       if (
         defaultDatabase &&
         store.openConnections[conn.id]?.databases.includes(defaultDatabase)
@@ -216,7 +220,10 @@ export function useSidebarManager(ctx: SidebarContext) {
     }
   }
 
-  function disconnectConn(id: string) {
+  function disconnectConn(id: string, confirmed = false) {
+    if (!confirmed && ctx.requestClose) {
+      ctx.requestClose(panes.value.flatMap(pane => pane.tabs.filter(tab => tab.connectionId === id)), () => disconnectConn(id, true)); return
+    }
     for (const pane of panes.value) {
       pane.tabs = pane.tabs.filter((t) => t.connectionId !== id);
       if (
@@ -740,7 +747,8 @@ export function useSidebarManager(ctx: SidebarContext) {
     database: string,
     tableName: string,
   ) {
-    const tables = filteredTables(connectionId, database).map((table: any) => tableHandle(table));
+    const tables = groupSidebarTables(filteredTables(connectionId, database))
+      .flatMap(group => group.tables.map((table: any) => tableHandle(table)));
     const firstKey = [...selectedTables.value][0];
     const firstTableName = firstKey ? parseTableSelectionKey(firstKey)[2] : tableName;
     const start = tables.indexOf(firstTableName);
@@ -1005,6 +1013,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     e.preventDefault();
     e.stopPropagation();
     closeSidebarContextMenus();
+    if (!isTableSelected(connectionId, database, tableName)) clearTableSelection();
     sidebarTableContextMenu.value = {
       show: true,
       x: e.clientX,

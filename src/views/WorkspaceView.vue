@@ -50,11 +50,18 @@
     </div>
 
     <WorkspaceDialogs />
+    <QuickSearchDialog :open="quickSearch.open.value" :items="quickSearch.items.value" :busy="quickSearch.busy.value" @update:open="quickSearch.open.value = $event" @select="quickSearch.select" />
+    <UnsavedChangesDialog :open="workspace.unsavedGuard.open.value" :labels="workspace.unsavedGuard.requests.value.map(request => request.label)"
+      @cancel="workspace.unsavedGuard.cancel" @discard="workspace.unsavedGuard.discardAndContinue" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent, ref, watch } from "vue";
+import QuickSearchDialog from "@/components/dialogs/QuickSearchDialog.vue";
+import { useQuickSearch } from "@/composables/useQuickSearch";
+import { useWorkspaceSession } from "@/composables/useWorkspaceSession";
+import UnsavedChangesDialog from "@/components/dialogs/UnsavedChangesDialog.vue";
+import { defineAsyncComponent, onUnmounted, ref, watch } from "vue";
 import { useKeybindings } from "@/composables/useKeybindings";
 import { useSidebarState } from "@/composables/useSidebarState";
 import type Sidebar from "@/components/Sidebar.vue";
@@ -101,6 +108,7 @@ const { resizeAllPanelTextareas } = panelResizing;
 // ── Composables ───────────────────────────────────────────────────────────────
 
 const tableTabs = useTableTabs({
+  requestClose: workspace.unsavedGuard.request,
   panes,
   activePaneId,
   focusedPaneId,
@@ -149,6 +157,7 @@ const rowContext = useRowContextMenu({
   toggleDeletionSelected,
 });
 const sidebarManager = useSidebarManager({
+  requestClose: workspace.unsavedGuard.request,
   panes,
   activePaneId,
   getPane,
@@ -202,6 +211,7 @@ useKeybindings();
 const sidebarRef = ref<InstanceType<typeof Sidebar> | null>(null);
 
 const coordinator = useWorkspaceCoordinator({
+  requestClose: workspace.unsavedGuard.request,
   panes,
   activePaneId,
   getPane,
@@ -229,6 +239,20 @@ const {
   hasOpenConnections,
   showConnectionManager,
 } = connectionState;
+
+const quickSearch = useQuickSearch({
+  connect: connectSaved, selectDatabase, openTable: loadTableData, openQuery: openQueryTab,
+  selectedConnectionId: selectedSidebarConnectionId, showWorkspace: connectionState.closeConnectionManager,
+  setSql: sql => { const pane = getPane(); const tab = pane.tabs.find(tab => tab.id === pane.activeTabId); if (tab?.type === 'query') tab.sql = sql; },
+});
+window.addEventListener('tupledb:quick-search', quickSearch.show);
+onUnmounted(() => window.removeEventListener('tupledb:quick-search', quickSearch.show));
+
+useWorkspaceSession({
+  panes, activePaneId, paneWidths: workspace.paneWidths, focusedPaneId, sidebarVisible,
+  selectedConnectionId: selectedSidebarConnectionId, connect: connectSaved,
+  showWorkspace: connectionState.closeConnectionManager, requestClose: workspace.unsavedGuard.request,
+});
 
 useWorkspaceViewContexts({
   workspace,

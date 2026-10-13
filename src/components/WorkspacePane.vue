@@ -44,6 +44,10 @@
         :key="getVisiblePaneActiveQueryTab(pane)!.id"
         :connection-id="getVisiblePaneActiveQueryTab(pane)!.connectionId"
         :database="getVisiblePaneActiveQueryTab(pane)!.database"
+        :initial-batch-results="getVisiblePaneActiveQueryTab(pane)!.batchResults ?? []"
+        @update:batch-results="getVisiblePaneActiveQueryTab(pane)!.batchResults = $event"
+        :initial-is-explain="getVisiblePaneActiveQueryTab(pane)!.isExplainResult ?? false"
+        @update:is-explain="getVisiblePaneActiveQueryTab(pane)!.isExplainResult = $event"
         :initial-sql="getVisiblePaneActiveQueryTab(pane)!.sql"
         :initial-result="getVisiblePaneActiveQueryTab(pane)!.queryResult ?? null"
         :initial-error="getVisiblePaneActiveQueryTab(pane)!.queryError ?? null"
@@ -118,6 +122,10 @@
         <DataGrid
           :key="pane.activeTabId ?? pane.id"
           :columns="tableGridColumns(pane)"
+          :preference-key="getPaneTab(pane) ? JSON.stringify([getPaneTab(pane)!.connectionId, getPaneTab(pane)!.reference ?? [getPaneTab(pane)!.database, getPaneTab(pane)!.tableName]]) : undefined"
+          :can-filter="true"
+          @filter-value="(column, value) => applyFilters(pane, { match_all: true, rows: [...(getPaneTab(pane)?.filters?.rows ?? []), { active: true, column, operator: value === null ? 'is_null' : 'equals', value: value === null ? '' : String(value) }] })"
+          @sort-direction="(column, desc) => onSortColumn(pane, column, desc)"
           :rows="getPaneTab(pane)?.queryResult?.rows ?? []"
           :primary-key="getPrimaryKey(pane)"
           :total-count="getPaneTab(pane)?.queryResult?.total_count ?? 0"
@@ -185,6 +193,7 @@
         @update:disable-fk-checks="disableFkChecks = $event"
         @discard="discardChanges(pane)"
         @apply="applyChanges(pane)"
+        @preview="openSqlPreview"
       />
     </template>
 
@@ -193,6 +202,8 @@
       :has-connections="hasOpenConnections"
       :has-selected-database="!!activeConnectionState?.selectedDatabase"
     />
+    <SqlPreviewDialog :open="sqlPreviewOpen" :sql="sqlPreview" :saving="isSaving" @update:open="sqlPreviewOpen = $event"
+      @apply="applyChanges(pane); sqlPreviewOpen = false" />
   </div>
 </template>
 
@@ -202,6 +213,11 @@ import { useConnectionStore } from '@/stores/connections';
 import type { DatabaseCapabilities } from '@/types/connection';
 import type { PaneState } from "@/types/workspace";
 import { useWorkspacePaneContext } from "@/composables/useWorkspacePaneContext";
+import SqlPreviewDialog from '@/components/dialogs/SqlPreviewDialog.vue';
+import { pendingSqlPreview } from '@/lib/sqlPreview';
+import { pendingTabsForDatabase } from '@/lib/pendingChanges';
+import { useToast } from '@/composables/useToast';
+import { ref } from 'vue';
 import TabBar from "@/components/TabBar.vue";
 import DataGrid from "@/components/DataGrid.vue";
 import FilterBar from "@/components/FilterBar.vue";
@@ -220,7 +236,7 @@ function supports(pane: PaneState, capability: keyof DatabaseCapabilities): bool
   return !!(tab && connectionStore.openConnections[tab.connectionId]?.capabilities[capability]);
 }
 
-defineProps<{
+const props = defineProps<{
   pane: PaneState;
   paneIdx: number;
 }>();
@@ -299,4 +315,14 @@ const {
   discardChanges,
   applyChanges,
 } = useWorkspacePaneContext();
+const sqlPreviewOpen = ref(false);
+const sqlPreview = ref('');
+function openSqlPreview() {
+  const tab = getPaneTab(props.pane);
+  if (!tab) return;
+  try {
+    sqlPreview.value = pendingSqlPreview(pendingTabsForDatabase(panes.value, tab), getPaneConnection(props.pane)?.database.engine ?? 'mysql');
+    sqlPreviewOpen.value = true;
+  } catch (error) { useToast().error('Could not preview changes', String(error)); }
+}
 </script>

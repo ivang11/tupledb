@@ -74,6 +74,7 @@
   />
 
   <ConnectionContextMenu
+    @dismiss="sidebarContextMenu.show = false"
     v-if="sidebarContextMenu.show"
     :show="sidebarContextMenu.show"
     :x="sidebarContextMenu.x"
@@ -106,11 +107,14 @@
     @delete="confirmDeleteConn"
   />
   <TableContextMenu
+    @dismiss="sidebarTableContextMenu.show = false"
     v-if="sidebarTableContextMenu.show"
     :show="sidebarTableContextMenu.show"
     :x="sidebarTableContextMenu.x"
     :y="sidebarTableContextMenu.y"
-    :table-name="sidebarTableContextMenu.tableName"
+    :table-name="sidebarContextTableLabel"
+    @open="loadTableData(sidebarTableContextMenu.tableName, sidebarTableContextMenu.connectionId, sidebarTableContextMenu.database)"
+    @copy-name="copyText(sidebarContextTableLabel)"
     :selected-count="sidebarTableContextMenu.selectedCount"
     :can-write="store.openConnections[sidebarTableContextMenu.connectionId]?.connection.allow_writes !== false"
     @truncate="
@@ -141,6 +145,7 @@
     "
   />
   <DatabaseContextMenu
+    @dismiss="sidebarDatabaseContextMenu.show = false"
     v-if="sidebarDatabaseContextMenu.show"
     :show="sidebarDatabaseContextMenu.show"
     :x="sidebarDatabaseContextMenu.x"
@@ -173,6 +178,7 @@
   />
 
   <RowContextMenu
+    @dismiss="rowContextMenu.show = false"
     v-if="rowContextMenu.show"
     :show="rowContextMenu.show"
     :x="rowContextMenu.x"
@@ -181,6 +187,8 @@
     :selected-count="rowContextMenu.pane ? (getPaneTab(rowContextMenu.pane)?.selectedRowPks?.length ?? 1) : 1"
     @delete="handleRowContextDelete"
     @duplicate="handleRowContextDuplicate"
+    @copy-json="copyContextRow('json')"
+    @copy-tsv="copyContextRow('tsv')"
   />
 
   <DeleteConfirmDialog
@@ -201,7 +209,10 @@
 </template>
 
 <script setup lang="ts">
-import { defineAsyncComponent } from "vue";
+import { computed, defineAsyncComponent } from "vue";
+import { rowRecord } from "@/lib/rowAccess";
+import { copyText, rowTsv } from "@/lib/clipboard";
+import { tableLabel } from "@/lib/tableReference";
 import { useConnectionStore } from "@/stores/connections";
 import { useWorkspaceDialogsContext } from "@/composables/useWorkspaceDialogsContext";
 
@@ -273,6 +284,7 @@ const {
   disconnectConn,
   confirmDeleteConn,
   stageSidebarTableAction,
+  loadTableData,
   stageSelectedTableTruncation,
   stageSelectedTableDeletion,
   openQueryTab,
@@ -289,4 +301,15 @@ const {
   handleRowContextDuplicate,
   confirmDeleteRow,
 } = useWorkspaceDialogsContext();
+const sidebarContextTableLabel = computed(() => {
+  const menu = sidebarTableContextMenu.value;
+  return tableLabel(store.tableReference(menu.connectionId, menu.database, menu.tableName));
+});
+function copyContextRow(format: 'json' | 'tsv') {
+  const menu = rowContextMenu.value;
+  if (!menu.pane || !menu.row) return;
+  const columns = getPaneTab(menu.pane)?.queryResult?.columns ?? [];
+  const record = rowRecord(menu.row, columns);
+  void copyText(format === 'json' ? JSON.stringify(record, null, 2) : rowTsv(record));
+}
 </script>

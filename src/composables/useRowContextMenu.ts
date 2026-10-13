@@ -1,3 +1,4 @@
+import { rowKey, primaryKeyColumns } from '@/lib/tableIdentity'
 import { ref } from "vue";
 import type { PaneState, TableTab } from "@/types/workspace";
 
@@ -22,6 +23,16 @@ export function useRowContextMenu(ctx: RowContextMenuContext) {
   const deleteRowTarget = ref<{ pane: PaneState; row: any } | null>(null);
 
   function openRowContextMenu(pane: PaneState, row: any, x: number, y: number) {
+    const tab = ctx.getPaneTab(pane);
+    if (tab) {
+      const key = primaryKeyColumns(tab.tableStructure);
+      if (key) {
+        const selected = rowKey(row, key, tab.queryResult?.columns ?? []);
+        if (!tab.selectedRowPks.includes(selected)) tab.selectedRowPks = [selected];
+        tab.selectedRowPk = selected;
+        tab.inlineEditColumn = null;
+      }
+    }
     rowContextMenu.value = { show: true, x, y, pane, row };
     const close = () => {
       rowContextMenu.value.show = false;

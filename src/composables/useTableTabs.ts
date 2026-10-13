@@ -9,6 +9,7 @@ import { stageStructureChange } from '@/lib/schemaEditing'
 import { rowValue } from '@/lib/rowAccess'
 
 interface WorkspaceContext {
+  requestClose?: (tabs: Array<TableTab | QueryTab>, action: () => void) => void
   panes: Ref<PaneState[]>
   activePaneId: Ref<string>
   focusedPaneId: Ref<string | null>
@@ -48,11 +49,12 @@ export function useTableTabs(ctx: WorkspaceContext) {
     }
   }
 
-  function closeTab(tabId: string, paneId?: string, event?: MouseEvent) {
+  function closeTab(tabId: string, paneId?: string, event?: MouseEvent, confirmed = false) {
     event?.stopPropagation()
     const pane = getPane(paneId)
     const idx = pane.tabs.findIndex(t => t.id === tabId)
     if (idx === -1) return
+    if (!confirmed && ctx.requestClose) { ctx.requestClose([pane.tabs[idx]], () => closeTab(tabId, paneId, undefined, true)); return }
     pane.tabs.splice(idx, 1)
     if (pane.activeTabId === tabId) {
       const nextIdx = findNextActiveIndex(pane.tabs.length, idx)
@@ -282,10 +284,11 @@ export function useTableTabs(ctx: WorkspaceContext) {
     tab.queryResult = await store.fetchTableData(tab.connectionId, tab.database, tab.reference ?? tab.tableName, pane.page, pane.pageSize, tab.filters, sortPayload(tab))
   }
 
-  async function onSortColumn(pane: PaneState, column: string) {
+  async function onSortColumn(pane: PaneState, column: string, descending?: boolean) {
     const tab = getPaneTab(pane)
     if (!tab) return
-    if (tab.sortColumn === column) tab.sortDesc = !tab.sortDesc
+    if (descending !== undefined) { tab.sortColumn = column; tab.sortDesc = descending }
+    else if (tab.sortColumn === column) tab.sortDesc = !tab.sortDesc
     else { tab.sortColumn = column; tab.sortDesc = false }
     tab.selectedRowPk = null; tab.inlineEditColumn = null
     pane.page = 0; tab.page = 0

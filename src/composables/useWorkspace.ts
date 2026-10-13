@@ -1,3 +1,4 @@
+import { useUnsavedChangesGuard } from './useUnsavedChangesGuard'
 import { tableHandle } from '@/lib/tableReference'
 import type { TableRef } from '@/types/database'
 import { primaryKeyColumns } from '@/lib/tableIdentity'
@@ -9,6 +10,7 @@ import { pendingTabsForDatabase } from '@/lib/pendingChanges'
 
 export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
   const store = useConnectionStore()
+  const unsavedGuard = useUnsavedChangesGuard()
 
   function createPane(): PaneState {
     return { id: crypto.randomUUID(), tabs: [], activeTabId: null, viewMode: 'content', page: 0, pageSize: 300, showFilters: false }
@@ -32,7 +34,9 @@ export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
     return pane.id
   }
 
-  function removePane(paneId: string) {
+  function removePane(paneId: string, confirmed = false) {
+    const target = panes.value.find(pane => pane.id === paneId)
+    if (!confirmed && target) { unsavedGuard.request(target.tabs, () => removePane(paneId, true)); return }
     if (panes.value.length <= 1) return
     const idx = panes.value.findIndex(p => p.id === paneId)
     if (idx === -1) return
@@ -131,6 +135,7 @@ export function useWorkspace(panesContainer: Ref<HTMLElement | null>) {
   }
 
   return {
+    unsavedGuard,
     panes,
     activePaneId,
     paneWidths,

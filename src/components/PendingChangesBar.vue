@@ -23,6 +23,7 @@
           </span>
         </label>
       </div>
+      <Button variant="outline" size="sm" class="h-8 text-xs" @click="emit('preview')">Review SQL</Button>
       <Button variant="ghost" size="sm" class="h-8 text-xs font-bold uppercase tracking-tight" @click="emit('discard')">Discard</Button>
       <Button size="sm" class="h-8 px-4 text-xs font-bold uppercase tracking-tight shadow-lg" :disabled="isSaving" @click="emit('apply')">
         {{ isSaving ? 'Saving...' : 'Apply Changes' }}
@@ -51,6 +52,7 @@ const emit = defineEmits<{
   'update:disableFkChecks': [val: boolean]
   'discard': []
   'apply': []
+  'preview': []
 }>()
 
 const pendingLabel = computed(() => {
