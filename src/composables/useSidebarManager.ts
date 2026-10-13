@@ -963,6 +963,9 @@ export function useSidebarManager(ctx: SidebarContext) {
     x: 0,
     y: 0,
     connection: null as Connection | null,
+    // Deleting is only offered from the connections list, never from the rail or sidebar,
+    // where it sits one slip away from Disconnect.
+    source: "rail" as "rail" | "list",
   });
   const sidebarTableContextMenu = ref({
     show: false,
@@ -987,7 +990,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     sidebarDatabaseContextMenu.value.show = false;
   }
 
-  function openSidebarContextMenu(e: MouseEvent, conn: Connection) {
+  function openSidebarContextMenu(e: MouseEvent, conn: Connection, source: "rail" | "list" = "rail") {
     e.preventDefault();
     e.stopPropagation();
     closeSidebarContextMenus();
@@ -996,6 +999,7 @@ export function useSidebarManager(ctx: SidebarContext) {
       x: e.clientX,
       y: e.clientY,
       connection: conn,
+      source,
     };
     const close = () => {
       sidebarContextMenu.value.show = false;

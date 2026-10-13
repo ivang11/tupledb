@@ -1,21 +1,22 @@
 <template>
-  <div class="shrink-0 bg-(--bg-0) border-b border-(--line-2) flex items-center px-2 h-9">
+  <div class="shrink-0 bg-(--bg-0) border-b border-(--line-2) flex items-center px-1.5 h-7 gap-0.5">
     <button
       v-for="tab in SUB_TABS"
       :key="tab.id"
-      class="relative px-3 h-full text-[12px] font-medium text-(--fg-1) transition-colors cursor-pointer"
+      class="relative h-full px-2 text-[11.5px] font-medium transition-colors cursor-pointer"
+      :class="activeMode === tab.id ? 'text-(--fg-1)' : 'text-(--fg-3) hover:text-(--fg-1)'"
       @click="emit('set-mode', tab.id)"
     >
-      <span class="inline-flex items-center gap-1.5">
+      <span class="inline-flex items-center gap-1">
         {{ tab.label }}
         <span
           v-if="badgeCount(tab.id) != null"
-          class="font-mono text-[10px] text-(--fg-1)"
+          class="tabular-nums text-[10px] text-(--fg-4)"
         >{{ badgeCount(tab.id) }}</span>
       </span>
       <span
         v-if="activeMode === tab.id"
-        class="absolute inset-x-2 bottom-0 h-0.5 bg-(--acc) rounded-full"
+        class="absolute inset-x-1.5 -bottom-px h-[2px] bg-(--acc)"
       />
     </button>
 
@@ -23,21 +24,21 @@
 
     <button
       v-if="showRowDetailToggle"
-      class="h-6 px-2 inline-flex items-center gap-1 rounded text-[11px] transition-colors"
-      :class="rowDetailOnClick ? 'text-(--acc) bg-(--acc-soft)' : 'text-(--fg-1) hover:bg-(--bg-2)'"
+      class="h-[22px] px-1.5 inline-flex items-center gap-1 rounded-[4px] text-[11px] transition-colors"
+      :class="rowDetailOnClick ? 'text-(--acc) bg-(--acc-soft)' : 'text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1)'"
       :title="rowDetailOnClick ? 'Disable row detail on click' : 'Enable row detail on click'"
       @click="emit('toggle-row-detail')"
     >
-      <PanelRightIcon class="size-4" /> Detail
+      <PanelRightIcon class="size-3.5" /> Detail
     </button>
 
     <button
       v-if="canInsertRow"
-      class="h-6 px-2 inline-flex items-center gap-1 rounded text-[11px] text-(--fg-1) hover:bg-(--bg-2) transition-colors"
+      class="h-[22px] px-1.5 inline-flex items-center gap-1 rounded-[4px] text-[11px] text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1) transition-colors"
       title="Insert new row"
       @click="emit('insert-row')"
     >
-      <PlusIcon class="size-4" /> Row
+      <PlusIcon class="size-3.5" /> Row
     </button>
   </div>
 </template>

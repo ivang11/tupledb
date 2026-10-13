@@ -62,7 +62,7 @@
     @close="closeConnectionManager"
     @connect-saved="connectFromManager"
     @new-connection="openNewConnDialog"
-    @context-menu-connection="openSidebarContextMenu"
+    @context-menu-connection="(event, conn) => openSidebarContextMenu(event, conn, 'list')"
     @export-connections="exportConnections"
     @import-connections="importConnections"
   />

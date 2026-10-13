@@ -8,12 +8,12 @@
   >
     <div
       v-if="rows.length === 0 && pendingInserts.length === 0"
-      class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-12"
+      class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center p-8"
     >
-      <DatabaseIcon class="size-8 text-muted-foreground/15" />
+      <DatabaseIcon class="size-6 text-(--fg-5)" />
       <div>
-        <p class="text-sm font-semibold text-foreground/60">No records</p>
-        <p class="text-xs text-muted-foreground/40 mt-1">This table is empty or your filters didn't match any rows.</p>
+        <p class="text-[12.5px] font-medium text-(--fg-2)">No records</p>
+        <p class="text-[11.5px] text-(--fg-4) mt-0.5">This table is empty or your filters didn't match any rows.</p>
       </div>
     </div>
 
@@ -39,7 +39,7 @@
           :data-col="inlineEditor.column.name"
           :value="inlineEditor.value"
           :style="inlineEditor.style"
-          class="absolute z-30 bg-background border border-primary/50 px-2 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary/50"
+          class="grid-editor absolute z-30 bg-background border border-primary/50 px-2 focus:outline-none focus:ring-1 focus:ring-primary/50"
           @input="emit('cell-input', inlineEditor.row, inlineEditor.column.name, ($event.target as HTMLInputElement).value)"
           @blur="emit('cell-blur')"
           @keydown.delete.stop
@@ -60,7 +60,7 @@
             :value="editor.value"
             :placeholder="editor.boolean ? '0 / 1' : ''"
             :style="editor.style"
-            class="insert-row-input pending-insert-input absolute z-30 bg-background/95 px-2 text-xs font-mono focus:outline-none focus:bg-emerald-500/10 focus:ring-1 focus:ring-emerald-500/40"
+            class="grid-editor insert-row-input pending-insert-input absolute z-30 bg-background/95 px-2 focus:outline-none focus:bg-emerald-500/10 focus:ring-1 focus:ring-emerald-500/40"
             @input="emit('pending-insert-input', editor.insertIndex, editor.column.name, ($event.target as HTMLInputElement).value)"
             @keydown.delete.stop
             @keydown.backspace.stop
@@ -192,8 +192,9 @@ const emit = defineEmits<{
 }>()
 
 const { settings } = useAppSettings()
-const HEADER_HEIGHT = 42
+const HEADER_HEIGHT = 28
 const ROW_HEIGHT = computed(() => props.rowHeight ?? 34)
+const CELL_PADDING = 8
 const DEFAULT_COLUMN_WIDTH = 180
 const COLUMN_OVERSCAN = 1
 const ROW_OVERSCAN = 2
@@ -243,17 +244,20 @@ const columnLayout = computed(() => {
 })
 const totalColumnSize = computed(() => columnLayout.value.at(-1)?.end ?? 0)
 const nativeColumnSize = computed(() => Math.min(totalColumnSize.value, MAX_NATIVE_SCROLL_WIDTH))
+const totalRows = computed(() => props.rows.length + props.pendingInserts.length)
+// Row-number gutter on the left, sized to the widest row index.
+const GUTTER_WIDTH = computed(() => Math.max(36, 18 + String(Math.max(totalRows.value, 1)).length * 7))
+const contentWidth = computed(() => Math.max(0, viewportWidth.value - GUTTER_WIDTH.value))
 const horizontalScrollScale = computed(() => {
-  const logicalRange = Math.max(0, totalColumnSize.value - viewportWidth.value)
-  const nativeRange = Math.max(0, nativeColumnSize.value - viewportWidth.value)
+  const logicalRange = Math.max(0, totalColumnSize.value - contentWidth.value)
+  const nativeRange = Math.max(0, nativeColumnSize.value - contentWidth.value)
   return nativeRange > 0 ? logicalRange / nativeRange : 1
 })
-const totalRows = computed(() => props.rows.length + props.pendingInserts.length)
 const totalHeight = computed(() =>
   HEADER_HEIGHT + totalRows.value * ROW_HEIGHT.value + (props.bottomInset ?? 0),
 )
 const sizerStyle = computed(() => ({
-  width: `${Math.max(nativeColumnSize.value, viewportWidth.value)}px`,
+  width: `${Math.max(nativeColumnSize.value + GUTTER_WIDTH.value, viewportWidth.value)}px`,
   height: `${Math.max(totalHeight.value, viewportHeight.value)}px`,
 }))
 const canvasStyle = computed(() => ({
@@ -282,7 +286,7 @@ function visibleRange() {
   const columnStart = Math.max(0, lowerBoundColumn(scrollLeft.value) - COLUMN_OVERSCAN)
   const columnEnd = Math.min(
     props.columns.length,
-    lowerBoundColumn(scrollLeft.value + viewportWidth.value) + 1 + COLUMN_OVERSCAN,
+    lowerBoundColumn(scrollLeft.value + contentWidth.value) + 1 + COLUMN_OVERSCAN,
   )
   const rowStart = Math.max(0, Math.floor(scrollTop.value / ROW_HEIGHT.value) - ROW_OVERSCAN)
   const rowEnd = Math.min(
@@ -349,13 +353,21 @@ function isChanged(row: any, column: string) {
   return props.pendingChanges[rowKey(row, props.primaryKey, props.sourceColumns ?? props.columns)]?.[column] !== undefined
 }
 
-function truncate(value: string, width: number) {
-  const maxCharacters = Math.max(1, Math.floor((width - 24) / 7.7))
+function truncate(value: string, width: number, charWidth = settings.value.tableFontSize * 0.62) {
+  const maxCharacters = Math.max(1, Math.floor((width - CELL_PADDING * 2) / charWidth))
   return value.length > maxCharacters ? `${value.slice(0, Math.max(0, maxCharacters - 1))}…` : value
 }
 
+function isNumericColumn(column: GridColumn) {
+  const type = String(column.type_name ?? '').toLowerCase()
+  if (!type || /char|text|bin|blob|json|enum|set|date|time|point|geom|uuid/.test(type)) return false
+  return /int|dec|num|float|double|real|serial|money/.test(type)
+}
+
 function isPinned(name: string) { return props.pinnedColumns?.includes(name) ?? false }
-function viewportColumnX(item: typeof columnLayout.value[number]) { return isPinned(item.column.name) ? item.start : item.start - scrollLeft.value }
+function viewportColumnX(item: typeof columnLayout.value[number]) {
+  return GUTTER_WIDTH.value + (isPinned(item.column.name) ? item.start : item.start - scrollLeft.value)
+}
 function drawingColumns(range: ReturnType<typeof visibleRange>) {
   return [...columnLayout.value.slice(range.columnStart, range.columnEnd).filter(item => !isPinned(item.column.name)), ...columnLayout.value.filter(item => isPinned(item.column.name))]
 }
@@ -363,33 +375,75 @@ function drawHeader(ctx: CanvasRenderingContext2D, range: ReturnType<typeof visi
   ctx.fillStyle = colors.muted
   ctx.fillRect(0, 0, viewportWidth.value, HEADER_HEIGHT)
   ctx.textBaseline = 'middle'
+  ctx.textAlign = 'left'
 
   for (const item of drawingColumns(range)) {
     const x = viewportColumnX(item)
-    ctx.fillStyle = colors.muted
+    ctx.fillStyle = props.sortColumn === item.column.name ? colors.primarySoft : colors.muted
     ctx.fillRect(x, 0, item.size, HEADER_HEIGHT)
-    if (props.sortColumn === item.column.name) {
-      ctx.fillStyle = colors.primarySoft
-      ctx.fillRect(x, 0, item.size, HEADER_HEIGHT)
+    // Single-line header: column name plus sort arrow; types live in the Structure tab.
+    const pk = isPrimaryKeyColumn(props.primaryKey, item.column.name)
+    const sorted = props.sortColumn === item.column.name
+    const direction = sorted ? (props.sortDesc ? ' ↓' : ' ↑') : ''
+    ctx.fillStyle = sorted ? colors.primary : colors.foreground
+    ctx.font = `600 11.5px ${colors.mono}`
+    ctx.fillText(truncate(`${item.column.name}${direction}`, item.size - (pk ? 18 : 0), 7.2), x + CELL_PADDING, HEADER_HEIGHT / 2)
+    if (pk) {
+      // Key marker pinned to the right edge so it never truncates the name.
+      ctx.fillStyle = colors.amber
+      ctx.font = `700 8px ${colors.mono}`
+      ctx.textAlign = 'right'
+      ctx.fillText('PK', x + item.size - 5, HEADER_HEIGHT / 2)
+      ctx.textAlign = 'left'
     }
-    ctx.fillStyle = colors.foreground
-    ctx.font = `600 12px ${colors.mono}`
-    const suffix = isPrimaryKeyColumn(props.primaryKey, item.column.name) ? '  PK' : ''
-    ctx.fillText(truncate(`${item.column.name}${suffix}`, item.size), x + 12, 17)
-    ctx.fillStyle = colors.secondary
-    ctx.font = `600 9px ${colors.mono}`
-    const direction = props.sortColumn === item.column.name ? (props.sortDesc ? '  ↓' : '  ↑') : ''
-    ctx.fillText(truncate(`${item.column.type_name ?? ''}${direction}`, item.size), x + 12, 36)
     ctx.strokeStyle = colors.border
     ctx.beginPath()
     ctx.moveTo(Math.round(x + item.size) + 0.5, 0)
     ctx.lineTo(Math.round(x + item.size) + 0.5, HEADER_HEIGHT)
     ctx.stroke()
   }
+  // Gutter header sits above scrolled columns.
+  ctx.fillStyle = colors.muted
+  ctx.fillRect(0, 0, GUTTER_WIDTH.value, HEADER_HEIGHT)
   ctx.strokeStyle = colors.border
   ctx.beginPath()
+  ctx.moveTo(GUTTER_WIDTH.value - 0.5, 0)
+  ctx.lineTo(GUTTER_WIDTH.value - 0.5, HEADER_HEIGHT)
   ctx.moveTo(0, HEADER_HEIGHT - 0.5)
   ctx.lineTo(viewportWidth.value, HEADER_HEIGHT - 0.5)
+  ctx.stroke()
+}
+
+function drawGutter(ctx: CanvasRenderingContext2D, range: ReturnType<typeof visibleRange>, colors: CanvasGridColors) {
+  const width = GUTTER_WIDTH.value
+  ctx.fillStyle = colors.muted
+  ctx.fillRect(0, HEADER_HEIGHT, width, Math.max(0, viewportHeight.value - HEADER_HEIGHT))
+  ctx.textBaseline = 'middle'
+  ctx.textAlign = 'right'
+  ctx.font = `${Math.max(9, settings.value.tableFontSize - 2)}px ${colors.mono}`
+  for (let index = range.rowStart; index < range.rowEnd; index += 1) {
+    const y = HEADER_HEIGHT + index * ROW_HEIGHT.value - scrollTop.value
+    const stored = index < props.rows.length
+    const selected = stored && isSelected(props.rows[index], index)
+    if (selected) {
+      ctx.fillStyle = colors.primarySoft
+      ctx.fillRect(0, y, width, ROW_HEIGHT.value)
+      ctx.fillStyle = colors.primary
+      ctx.fillRect(0, y, 2, ROW_HEIGHT.value)
+    }
+    ctx.fillStyle = selected ? colors.primary : stored ? colors.faint : colors.primary
+    ctx.fillText(String(index + 1), width - 6, y + ROW_HEIGHT.value / 2)
+    ctx.strokeStyle = colors.border
+    ctx.beginPath()
+    ctx.moveTo(0, Math.round(y + ROW_HEIGHT.value) + 0.5)
+    ctx.lineTo(width, Math.round(y + ROW_HEIGHT.value) + 0.5)
+    ctx.stroke()
+  }
+  ctx.textAlign = 'left'
+  ctx.strokeStyle = colors.border
+  ctx.beginPath()
+  ctx.moveTo(width - 0.5, HEADER_HEIGHT)
+  ctx.lineTo(width - 0.5, viewportHeight.value)
   ctx.stroke()
 }
 
@@ -415,7 +469,9 @@ function drawStoredRow(
   ctx.fillRect(0, y, viewportWidth.value, ROW_HEIGHT.value)
 
   ctx.textBaseline = 'middle'
+  ctx.textAlign = 'left'
   ctx.font = `${settings.value.tableFontSize}px ${colors.mono}`
+  const midY = y + ROW_HEIGHT.value / 2
   for (const item of drawingColumns(range)) {
     const x = viewportColumnX(item)
     if (isPinned(item.column.name)) {
@@ -432,10 +488,18 @@ function drawStoredRow(
     ctx.fillStyle = deleted || props.pendingDrop
       ? colors.destructive
       : changed ? colors.amber : rawValue == null || value === '' ? colors.faint : colors.foreground
-    ctx.fillText(truncate(rawValue == null ? 'NULL' : value === '' ? 'EMPTY' : value, item.size), x + 12, y + ROW_HEIGHT.value / 2)
-    if (props.fkMap[item.column.name] && rawValue != null) {
+    const text = truncate(rawValue == null ? 'NULL' : value === '' ? 'EMPTY' : value, item.size)
+    const hasFk = !!props.fkMap[item.column.name] && rawValue != null
+    if (rawValue != null && value !== '' && isNumericColumn(item.column)) {
+      ctx.textAlign = 'right'
+      ctx.fillText(text, x + item.size - CELL_PADDING - (hasFk ? 12 : 0), midY)
+      ctx.textAlign = 'left'
+    } else {
+      ctx.fillText(text, x + CELL_PADDING, midY)
+    }
+    if (hasFk) {
       ctx.fillStyle = colors.secondary
-      ctx.fillText('›', x + item.size - 17, y + ROW_HEIGHT.value / 2)
+      ctx.fillText('›', x + item.size - 13, midY)
     }
     ctx.strokeStyle = colors.border
     ctx.beginPath()
@@ -448,10 +512,6 @@ function drawStoredRow(
   ctx.moveTo(0, Math.round(y + ROW_HEIGHT.value) + 0.5)
   ctx.lineTo(viewportWidth.value, Math.round(y + ROW_HEIGHT.value) + 0.5)
   ctx.stroke()
-  if (selected) {
-    ctx.fillStyle = colors.primary
-    ctx.fillRect(0, y, 2, ROW_HEIGHT.value)
-  }
 }
 
 function drawPendingRow(ctx: CanvasRenderingContext2D, y: number) {
@@ -487,6 +547,7 @@ function draw() {
     if (index < props.rows.length) drawStoredRow(ctx, props.rows[index], index, y, range, colors)
     else drawPendingRow(ctx, y)
   }
+  drawGutter(ctx, range, colors)
   ctx.restore()
   drawHeader(ctx, range, colors)
 }
@@ -532,9 +593,11 @@ function localPoint(event: MouseEvent) {
 
 function columnAtViewportX(x: number) {
   if (!props.columns.length) return null
-  const pinned = columnLayout.value.find(item => isPinned(item.column.name) && x >= item.start && x < item.end)
+  const contentX = x - GUTTER_WIDTH.value
+  if (contentX < 0) return null
+  const pinned = columnLayout.value.find(item => isPinned(item.column.name) && contentX >= item.start && contentX < item.end)
   if (pinned) return pinned
-  const index = lowerBoundColumn(x + scrollLeft.value)
+  const index = lowerBoundColumn(contentX + scrollLeft.value)
   return columnLayout.value[index] ?? null
 }
 
@@ -586,7 +649,12 @@ function onCanvasMouseDown(event: MouseEvent) {
 function onCanvasClick(event: MouseEvent) {
   const point = localPoint(event)
   const column = columnAtViewportX(point.x)
-  if (!column) return
+  if (!column) {
+    // Clicking a row number selects the whole row.
+    const gutterHit = point.x < GUTTER_WIDTH.value ? rowAtViewportY(point.y) : null
+    if (gutterHit) emit('row-click', gutterHit.row, event, gutterHit.index)
+    return
+  }
   if (point.y < HEADER_HEIGHT) {
     if (!hoveredResizeColumn()) emit('sort', column.column.name)
     return
@@ -594,7 +662,7 @@ function onCanvasClick(event: MouseEvent) {
   const hit = rowAtViewportY(point.y)
   if (!hit) return
   const fk = props.fkMap[column.column.name]
-  const xWithinColumn = point.x + scrollLeft.value - column.start
+  const xWithinColumn = point.x - viewportColumnX(column)
   const value = rawCellValue(hit.row, column.column.name)
   if (fk && value != null && xWithinColumn >= column.size - 28) {
     emit('navigate-related', fk.table, fk.column, value)
@@ -615,7 +683,14 @@ function onCanvasDoubleClick(event: MouseEvent) {
 function onCanvasContextMenu(event: MouseEvent) {
   const point = localPoint(event)
   const column = columnAtViewportX(point.x)
-  if (!column) return
+  if (!column) {
+    const gutterHit = point.x < GUTTER_WIDTH.value ? rowAtViewportY(point.y) : null
+    if (!gutterHit) return
+    event.preventDefault()
+    event.stopPropagation()
+    emit('row-contextmenu', gutterHit.row, event.clientX, event.clientY)
+    return
+  }
   event.preventDefault()
   event.stopPropagation()
   if (point.y < HEADER_HEIGHT) emit('column-contextmenu', column.column.name, event.clientX, event.clientY)
@@ -757,3 +832,10 @@ onBeforeUnmount(() => {
   if (ariaTimer !== null) clearTimeout(ariaTimer)
 })
 </script>
+
+<style scoped>
+.grid-editor {
+  font-family: var(--font-table, var(--font-mono));
+  font-size: var(--table-font-size, 12px);
+}
+</style>

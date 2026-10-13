@@ -14,47 +14,47 @@
     />
 
     <!-- Header -->
-    <div class="h-11 shrink-0 border-b flex items-center justify-between gap-2 px-3 bg-muted/25">
-      <div class="min-w-0">
-        <p class="text-[10px] font-bold text-muted-foreground uppercase tracking-wider truncate">
+    <div class="h-9 shrink-0 border-b flex items-center justify-between gap-2 px-2.5 bg-(--bg-1)">
+      <div class="min-w-0 leading-tight">
+        <p class="text-[10px] text-(--fg-4) truncate">
           {{ isReadOnly() ? 'Read-only row' : 'Selected row' }}
         </p>
-        <p class="text-[11px] font-mono font-semibold text-foreground truncate">
+        <p class="text-[11px] font-mono font-medium text-foreground truncate">
           {{ primaryKey ? (Array.isArray(primaryKey) ? primaryKey : [primaryKey]).map(key => `${key} = ${rawValue(key)}`).join(', ') : 'No primary key' }}
         </p>
       </div>
       <button
         type="button"
-        class="size-8 shrink-0 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+        class="size-6 shrink-0 flex items-center justify-center rounded-[4px] text-(--fg-3) hover:text-foreground hover:bg-(--bg-2) transition-colors"
         title="Close panel"
         @click="emit('close')"
       >
-        <XIcon class="size-4" />
+        <XIcon class="size-3.5" />
       </button>
     </div>
 
     <!-- Field search -->
-    <div class="px-3 py-2 border-b shrink-0">
+    <div class="px-2.5 py-1.5 border-b shrink-0">
       <div class="relative">
-        <SearchIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground/50" />
+        <SearchIcon class="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-(--fg-4)" />
         <input
           v-model="fieldSearch"
           type="text"
-          placeholder="Filter fields..."
-          class="w-full bg-muted/30 border border-input rounded-md pl-7 pr-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+          placeholder="Filter fields"
+          class="w-full h-6 bg-(--bg-0) border border-(--line-2) rounded-[4px] pl-6 pr-2 text-[11px] focus:outline-none focus:border-(--acc-line)"
         />
       </div>
     </div>
 
     <ScrollArea class="flex-1 min-h-0">
-      <div class="detail-fields p-3 pb-6" :class="settings.density === 'compact' ? 'space-y-1' : 'space-y-3.5'">
+      <div class="detail-fields p-2.5 pb-6" :class="settings.density === 'compact' ? 'space-y-1' : 'space-y-2.5'">
         <div
           v-for="col in filteredColumns()"
           :key="'detail-' + col.name"
           class="detail-field"
         >
           <div class="flex items-center justify-between gap-1">
-            <Label class="text-xs font-medium text-foreground">{{ col.name }}</Label>
+            <Label class="text-[11px] font-medium text-(--fg-2)">{{ col.name }}</Label>
             <span v-if="settings.density === 'compact'" class="flex-1 truncate text-[10px] text-muted-foreground font-mono" :title="col.type_name">{{ col.type_name }}</span>
             <button
               type="button"
@@ -68,9 +68,9 @@
             </button>
           </div>
           <div
-            class="detail-value rounded-md border border-input bg-background focus-within:ring-1 focus-within:ring-ring"
+            class="detail-value rounded-[4px] border border-(--line-2) bg-background focus-within:ring-1 focus-within:ring-ring"
             :class="[
-              fkMap[col.name] ? 'flex items-start px-3 py-1.5' : '',
+              fkMap[col.name] ? 'flex items-start px-2 py-1' : '',
               isPendingDelete() ? 'opacity-50 cursor-not-allowed' : '',
             ]"
           >
@@ -80,7 +80,7 @@
               class="min-w-0 text-xs font-mono resize-none overflow-hidden leading-relaxed focus:outline-none read-only:text-foreground/80 disabled:cursor-not-allowed"
               :class="fkMap[col.name]
                 ? 'shrink p-0'
-                : 'w-full rounded-md border-0 bg-background px-3 py-1.5 focus:ring-1 focus:ring-ring read-only:bg-muted/20 disabled:opacity-50'"
+                : 'w-full rounded-[4px] border-0 bg-background px-2 py-1 focus:ring-1 focus:ring-ring read-only:bg-muted/20 disabled:opacity-50'"
               :style="fkMap[col.name] ? { width: fieldWidth(row, col.name) } : undefined"
               :readonly="isReadOnly()"
               :disabled="isPendingDelete()"
@@ -103,7 +103,7 @@
               <ArrowRightIcon class="size-3" />
             </button>
           </div>
-          <p v-if="settings.density !== 'compact'" class="text-[10px] text-foreground/60 font-mono">{{ col.type_name }}</p>
+          <p v-if="settings.density !== 'compact'" class="text-[10px] text-(--fg-4) font-mono">{{ col.type_name }}</p>
         </div>
       </div>
     </ScrollArea>
@@ -178,7 +178,7 @@ const fieldWidth = (row: Record<string, any> | any[], colName: string) => {
 <style scoped>
 [data-row-detail-panel] textarea { font-family: var(--detail-font); font-size: var(--detail-size); max-height: 180px; overflow-y: auto; }
 .detail-field { display: grid; gap: 4px; }
-.row-detail-compact .h-11 { height: 30px; }
+.row-detail-compact .h-9 { height: 30px; }
 .row-detail-compact .detail-fields { padding: 6px 8px; }
 .row-detail-compact .detail-field { gap: 1px; }
 .row-detail-compact .detail-value { display: flex; align-items: center; }

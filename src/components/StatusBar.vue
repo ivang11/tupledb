@@ -135,57 +135,57 @@
     </div>
 
     <!-- ── Unified bottom bar ─────────────────────────────────────────────── -->
-    <div class="h-9 flex items-center shrink-0 select-none gap-2 px-3">
+    <div class="h-7 flex items-center shrink-0 select-none gap-1.5 px-2 text-[11px] bg-(--bg-1)">
 
       <!-- Query Log button -->
       <button
-        class="flex items-center gap-1.5 px-1.5 h-full text-xs font-mono transition-colors border-b-[1.5px] -mb-px"
-        :class="queryLog.isOpen ? 'border-(--acc) text-(--fg-1)' : 'border-transparent text-(--fg-1) hover:text-(--fg-2)'"
+        class="flex items-center gap-1.5 px-1.5 h-full font-medium transition-colors border-b-[1.5px] -mb-px"
+        :class="queryLog.isOpen ? 'border-(--acc) text-(--fg-1)' : 'border-transparent text-(--fg-2) hover:text-(--fg-1)'"
         @click="queryLog.toggle()"
       >
-        <TerminalIcon class="w-3.5 h-3.5 shrink-0" />
+        <TerminalIcon class="size-3 shrink-0" />
         <span>Query Log</span>
-        <span class="tabular-nums text-(--fg-3)">{{ visibleEntries.length }}</span>
+        <span class="tabular-nums text-(--fg-4)">{{ visibleEntries.length }}</span>
       </button>
 
       <!-- Clear log button -->
       <button
         v-if="queryLog.isOpen && visibleEntries.length > 0"
-        class="flex items-center justify-center w-5 h-5 rounded text-(--fg-1) hover:bg-(--bg-2) transition-colors"
+        class="flex items-center justify-center size-5 rounded text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1) transition-colors"
         title="Clear log"
         @click="clearVisibleLog"
       >
-        <TrashIcon class="w-3.5 h-3.5" />
+        <TrashIcon class="size-3" />
       </button>
 
-      <div class="w-px h-4 bg-(--line-2) mx-1" />
+      <div class="w-px h-3.5 bg-(--line-2) mx-0.5" />
 
       <!-- Import/export buttons (left-aligned, next to Query Log) -->
       <button
         v-if="progress.isImporting"
-        class="flex items-center gap-1.5 px-1.5 h-full text-xs font-mono transition-colors border-b-[1.5px] -mb-px"
-        :class="progress.importExpanded ? 'border-(--acc) text-(--fg-1)' : 'border-transparent text-(--fg-1) hover:text-(--fg-2)'"
+        class="flex items-center gap-1.5 px-1.5 h-full font-medium transition-colors border-b-[1.5px] -mb-px"
+        :class="progress.importExpanded ? 'border-(--acc) text-(--fg-1)' : 'border-transparent text-(--fg-2) hover:text-(--fg-1)'"
         @click="progress.importExpanded = !progress.importExpanded"
       >
-        <UploadIcon class="w-3.5 h-3.5 shrink-0 text-(--acc)" />
+        <UploadIcon class="size-3 shrink-0 text-(--acc)" />
         <span>Importing</span>
         <span class="tabular-nums text-(--acc)">{{ importPct }}%</span>
       </button>
 
       <button
         v-if="progress.isExporting"
-        class="flex items-center gap-1.5 px-1.5 h-full text-xs font-mono transition-colors border-b-[1.5px] -mb-px"
-        :class="progress.exportExpanded ? 'border-(--acc) text-(--fg-1)' : 'border-transparent text-(--fg-1) hover:text-(--fg-2)'"
+        class="flex items-center gap-1.5 px-1.5 h-full font-medium transition-colors border-b-[1.5px] -mb-px"
+        :class="progress.exportExpanded ? 'border-(--acc) text-(--fg-1)' : 'border-transparent text-(--fg-2) hover:text-(--fg-1)'"
         @click="progress.exportExpanded = !progress.exportExpanded"
       >
-        <DownloadIcon class="w-3.5 h-3.5 shrink-0 text-(--acc)" />
+        <DownloadIcon class="size-3 shrink-0 text-(--acc)" />
         <span>Exporting</span>
         <span class="tabular-nums text-(--acc)">{{ exportPct }}%</span>
       </button>
 
       <!-- Insert row mode -->
       <template v-if="isInsertingRow">
-        <span v-if="insertRowError" class="text-xs text-destructive truncate max-w-xs cursor-help" :title="insertRowError ?? ''">{{ insertRowError }}</span>
+        <span v-if="insertRowError" class="text-destructive truncate max-w-xs cursor-help" :title="insertRowError ?? ''">{{ insertRowError }}</span>
         <div class="flex-1" />
       </template>
 
@@ -193,12 +193,12 @@
       <template v-else-if="isDataView && viewMode">
         <div class="flex-1" />
 
-        <span class="font-mono text-xs text-(--fg-1)">{{ rowRangeLabel }}</span>
+        <span class="tabular-nums text-(--fg-2)">{{ rowRangeLabel }}</span>
 
         <button
           v-if="totalCountApproximate"
           type="button"
-          class="h-5 inline-flex items-center gap-1 rounded border border-(--line-2) px-1.5 text-[11px] font-semibold text-(--fg-1) hover:bg-(--bg-2) transition-colors disabled:opacity-50"
+          class="h-5 inline-flex items-center gap-1 rounded-[4px] border border-(--line-2) px-1.5 text-[10.5px] font-medium text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1) transition-colors disabled:opacity-50"
           :disabled="exactCountLoading"
           title="Calculate exact row count"
           @click="emit('request-exact-count')"
@@ -207,37 +207,41 @@
           {{ exactCountLoading ? 'Counting…' : 'Exact' }}
         </button>
 
-        <div class="w-px h-4 bg-(--line-2)" />
+        <div class="w-px h-3.5 bg-(--line-2) mx-0.5" />
 
-        <span class="font-mono text-[11px] text-(--fg-1) uppercase tracking-wider">limit</span>
-        <input
-          type="number"
-          :value="pageSize"
-          min="1"
-          class="font-mono text-xs text-(--fg-1) bg-(--bg-1) border border-(--line-2) rounded h-6 w-14 px-1.5 text-center focus:outline-none focus:border-(--acc-line) [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-          @change="emit('change-limit', +($event.target as HTMLInputElement).value)"
-        />
-        <span class="font-mono text-[11px] text-(--fg-1) uppercase tracking-wider">offset</span>
-        <input
-          type="number"
-          :value="(page ?? 0) * (pageSize ?? 0)"
-          min="0"
-          class="font-mono text-xs text-(--fg-1) bg-(--bg-1) border border-(--line-2) rounded h-6 w-16 px-1.5 text-center focus:outline-none focus:border-(--acc-line) [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-          @change="emit('goto-offset', +($event.target as HTMLInputElement).value)"
-        />
+        <label class="flex items-center gap-1 text-(--fg-4)">
+          Limit
+          <input
+            type="number"
+            :value="pageSize"
+            min="1"
+            class="tabular-nums text-[11px] text-(--fg-1) bg-(--bg-0) border border-(--line-2) rounded-[4px] h-5 w-12 px-1 text-center focus:outline-none focus:border-(--acc-line) [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            @change="emit('change-limit', +($event.target as HTMLInputElement).value)"
+          />
+        </label>
+        <label class="flex items-center gap-1 text-(--fg-4)">
+          Offset
+          <input
+            type="number"
+            :value="(page ?? 0) * (pageSize ?? 0)"
+            min="0"
+            class="tabular-nums text-[11px] text-(--fg-1) bg-(--bg-0) border border-(--line-2) rounded-[4px] h-5 w-14 px-1 text-center focus:outline-none focus:border-(--acc-line) [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            @change="emit('goto-offset', +($event.target as HTMLInputElement).value)"
+          />
+        </label>
 
-        <div class="flex items-center gap-0.5">
+        <div class="flex items-center">
           <button
-            class="size-6 flex items-center justify-center rounded text-(--fg-1) hover:bg-(--bg-2) transition-colors disabled:opacity-20 disabled:cursor-default"
+            class="size-5 flex items-center justify-center rounded-[4px] text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1) transition-colors disabled:opacity-25 disabled:cursor-default"
             :disabled="!canPrevPage"
             @click="emit('change-page', -1)"
-          ><ChevronLeftIcon class="size-3.5" /></button>
-          <span class="font-mono text-xs text-(--fg-1) tabular-nums w-6 text-center">{{ (page ?? 0) + 1 }}</span>
+          ><ChevronLeftIcon class="size-3" /></button>
+          <span class="tabular-nums text-(--fg-1) w-5 text-center">{{ (page ?? 0) + 1 }}</span>
           <button
-            class="size-6 flex items-center justify-center rounded text-(--fg-1) hover:bg-(--bg-2) transition-colors disabled:opacity-20 disabled:cursor-default"
+            class="size-5 flex items-center justify-center rounded-[4px] text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1) transition-colors disabled:opacity-25 disabled:cursor-default"
             :disabled="!canNextPage"
             @click="emit('change-page', 1)"
-          ><ChevronRightIcon class="size-3.5" /></button>
+          ><ChevronRightIcon class="size-3" /></button>
         </div>
       </template>
 

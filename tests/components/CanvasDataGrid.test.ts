@@ -155,7 +155,7 @@ describe('CanvasDataGrid rendering and hit testing', () => {
     })
     const scroller = wrapper.get<HTMLElement>('.custom-scrollbar')
 
-    expect(wrapper.get<HTMLElement>('[data-grid-scroll-sizer]').element.style.width).toBe('24000px')
+    expect(wrapper.get<HTMLElement>('[data-grid-scroll-sizer]').element.style.width).toBe('24036px')
     drawContext.fillText.mockClear()
     scroller.element.scrollLeft = 24_000 - 800
     await scroller.trigger('scroll')
@@ -197,15 +197,15 @@ describe('CanvasDataGrid rendering and hit testing', () => {
     await canvas.trigger('contextmenu', { clientX: 220, clientY: 20 })
     expect(wrapper.emitted('column-contextmenu')?.at(-1)).toEqual(['name', 220, 20])
 
-    await canvas.trigger('click', { clientX: 530, clientY: 60 })
+    await canvas.trigger('click', { clientX: 566, clientY: 60 })
     expect(wrapper.emitted('navigate-related')?.at(-1)).toEqual(['parents', 'id', 9])
   })
 
   it('detects a column resize boundary', async () => {
     const wrapper = await mountGrid()
     const canvas = wrapper.get('canvas')
-    await canvas.trigger('mousemove', { clientX: 180, clientY: 20 })
-    await canvas.trigger('mousedown', { clientX: 180, clientY: 20 })
+    await canvas.trigger('mousemove', { clientX: 216, clientY: 20 })
+    await canvas.trigger('mousedown', { clientX: 216, clientY: 20 })
     expect(wrapper.emitted('start-col-resize')?.at(-1)?.[1]).toBe('id')
   })
 
@@ -241,10 +241,10 @@ describe('CanvasDataGrid rendering and hit testing', () => {
     const scroller = wrapper.get<HTMLElement>('.custom-scrollbar')
     scroller.element.scrollLeft = 180
     await scroller.trigger('scroll'); await vi.runAllTimersAsync()
-    expect(wrapper.get<HTMLElement>('[data-grid-edit]').element.style.left).toBe('0px')
+    expect(wrapper.get<HTMLElement>('[data-grid-edit]').element.style.left).toBe('36px')
     await wrapper.get('canvas').trigger('contextmenu', { clientX: 40, clientY: 60 })
     expect(wrapper.emitted('cell-contextmenu')?.at(-1)?.[1]).toBe('id')
-    expect(drawContext.fillText).toHaveBeenCalledWith(expect.stringContaining('id'), 12, expect.any(Number))
+    expect(drawContext.fillText).toHaveBeenCalledWith(expect.stringContaining('id'), 44, expect.any(Number))
   })
 
   it('preserves composite identities when compact source rows use reordered visible columns', async () => {

@@ -3,91 +3,81 @@
     class="shrink-0 flex flex-col bg-sidebar relative select-none"
     :style="{ width: width + 'px' }"
   >
-    <!-- Database selector for the active connection -->
+    <!-- Active connection: compact identity row -->
     <div
       v-if="selectedConnectionId && openConnections[selectedConnectionId]"
-      class="shrink-0 px-3 pt-3 pb-2"
+      class="shrink-0 px-2 pt-2 pb-1"
     >
       <div
-        class="flex items-center gap-0 group overflow-hidden transition-colors rounded-lg ring-1 ring-inset"
-        :class="getConnectionCardColor(openConnections[selectedConnectionId].connection.environment)"
+        class="flex h-7 items-center gap-2 rounded-md px-2 transition-colors hover:bg-(--bg-1)"
+        :title="`${openConnections[selectedConnectionId].connection.name} · ${activeConnectionStatus} · ${activeConnectionDetail}`"
         @contextmenu="emit('context-menu-connection', $event, openConnections[selectedConnectionId].connection)"
       >
-        <div class="flex-1 px-3 py-2 min-w-0">
-          <div class="flex items-center gap-2">
-            <span class="text-[13px] truncate flex-1 font-semibold text-white">
-              {{ openConnections[selectedConnectionId].connection.name }}
-            </span>
-            <span
-              class="inline-flex items-center rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] ring-1 ring-inset"
-              :class="getEnvColor(openConnections[selectedConnectionId].connection.environment)"
-            >
-              {{ openConnections[selectedConnectionId].connection.environment }}
-            </span>
-          </div>
-          <div class="mt-1 flex items-center gap-1.5 text-[11px] text-white/72">
-            <ServerIcon class="size-3" />
-            <span
-              class="font-semibold"
-              :class="activeConnection?.status === 'error' ? 'text-red-100' : ''"
-              :title="activeConnectionStatusTitle"
-            >
-              {{ activeConnectionStatus }}
-            </span>
-            <span class="text-white/35">|</span>
-            <span class="truncate text-white/62">{{ activeConnectionDetail }}</span>
-          </div>
-        </div>
+        <span
+          class="size-2 shrink-0 rounded-full"
+          :class="activeConnection?.status === 'error' ? 'bg-destructive' : getEnvDotColor(openConnections[selectedConnectionId].connection.environment)"
+          :title="activeConnectionStatusTitle"
+        />
+        <span class="min-w-0 flex-1 truncate text-[12px] font-semibold text-(--fg-1)">
+          {{ openConnections[selectedConnectionId].connection.name }}
+        </span>
+        <span class="truncate text-[11px] text-(--fg-3)">{{ activeConnectionDetail }}</span>
+        <span
+          class="inline-flex shrink-0 items-center rounded-[3px] px-1 py-px text-[9px] font-semibold uppercase tracking-[0.06em] ring-1 ring-inset"
+          :class="getEnvColor(openConnections[selectedConnectionId].connection.environment)"
+        >
+          {{ openConnections[selectedConnectionId].connection.environment }}
+        </span>
       </div>
     </div>
 
     <div
       v-if="selectedConnectionId && openConnections[selectedConnectionId]"
       ref="dbDropdownRef"
-      class="shrink-0 px-3 pb-2 relative"
+      class="shrink-0 px-2 pb-1 relative"
     >
-      <div class="flex items-center gap-1.5">
+      <div class="flex items-center gap-1">
         <button
           type="button"
-          class="min-w-0 flex-1 flex items-center gap-2 px-3 py-2 rounded-lg bg-black/20 hover:bg-black/30 transition-colors text-left"
+          class="min-w-0 flex-1 flex items-center gap-1.5 h-7 px-2 rounded-md bg-(--bg-1) ring-1 ring-inset ring-(--line-2) hover:bg-(--bg-2) transition-colors text-left"
           @click="toggleDbDropdown"
           @contextmenu="activeDb && emit('context-menu-database', $event, selectedConnectionId, activeDb)"
         >
-          <DatabaseIcon class="size-3.5 shrink-0 text-foreground/50" />
-          <span class="flex-1 truncate text-[13px] font-semibold" :class="activeDb ? 'text-foreground' : 'text-foreground/40'">
+          <DatabaseIcon class="size-3 shrink-0 text-(--fg-3)" />
+          <span class="flex-1 truncate text-[12px] font-medium" :class="activeDb ? 'text-(--fg-1)' : 'text-(--fg-4)'">
             {{ activeDb || 'Select database' }}
           </span>
           <ChevronDownIcon
-            class="size-3.5 shrink-0 text-foreground/40 transition-transform duration-150"
+            class="size-3 shrink-0 text-(--fg-4) transition-transform duration-150"
             :class="{ 'rotate-180': dbDropdownOpen }"
           />
         </button>
         <button
           type="button"
-          class="size-9 shrink-0 rounded-lg bg-black/20 hover:bg-black/30 text-foreground/80 hover:text-foreground transition-colors flex items-center justify-center"
+          class="size-7 shrink-0 rounded-md bg-(--bg-1) ring-1 ring-inset ring-(--line-2) hover:bg-(--bg-2) text-(--fg-3) hover:text-(--fg-1) transition-colors flex items-center justify-center"
           title="New Database"
           v-if="activeConnection?.capabilities?.createDatabase"
           @click="emit('new-database', selectedConnectionId)"
         >
-          <PlusIcon class="size-4" :stroke-width="2.5" />
+          <PlusIcon class="size-3.5" :stroke-width="2.25" />
         </button>
       </div>
 
       <!-- Dropdown list -->
       <div
         v-if="dbDropdownOpen"
-        class="absolute left-3 right-3 top-full mt-1 z-50 rounded-lg border border-foreground/10 bg-popover shadow-2xl overflow-hidden"
+        class="absolute left-2 right-2 top-full mt-1 z-50 rounded-md border border-(--line-1) bg-popover shadow-xl overflow-hidden"
       >
         <!-- Search input -->
-        <div class="p-2 border-b border-foreground/8">
+        <div class="p-1.5 border-b border-(--line-2)">
           <div class="relative">
-            <SearchIcon class="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-foreground/30" />
+            <SearchIcon class="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-(--fg-4)" />
             <input
               ref="dbSearchInput"
               v-model="dbSearch"
               type="text"
               placeholder="Search..."
-              class="w-full bg-foreground/5 rounded-md pl-7 pr-3 py-1.5 text-[12px] text-foreground placeholder:text-foreground/30 focus:outline-none focus:bg-foreground/8 transition-colors"
+              class="w-full h-6 bg-(--bg-0) rounded-[4px] pl-6 pr-2 text-[11.5px] text-foreground placeholder:text-(--fg-4) focus:outline-none ring-1 ring-inset ring-(--line-2) focus:ring-(--acc-line) transition-colors"
               @keydown="onDbSearchKeydown"
               aria-label="Search databases"
             />
@@ -101,11 +91,11 @@
             :key="db"
             data-db-option
             type="button"
-            class="w-full flex items-center gap-2.5 px-3 py-2 text-[12.5px] font-medium transition-colors text-left"
+            class="w-full flex items-center gap-2 px-2.5 h-6 text-[11.5px] transition-colors text-left"
             :class="index === highlightedDbIndex
-              ? 'text-foreground bg-foreground/10'
-              : db === activeDb ? 'text-foreground bg-foreground/5'
-              : 'text-foreground/70 hover:text-foreground hover:bg-foreground/5'"
+              ? 'text-(--fg-1) bg-(--bg-3)'
+              : db === activeDb ? 'text-(--fg-1) bg-(--bg-2)'
+              : 'text-(--fg-2) hover:text-(--fg-1) hover:bg-(--bg-2)'"
             @click="selectDb(db)"
           >
             <span
@@ -114,7 +104,7 @@
             />
             {{ db }}
           </button>
-          <p v-if="filteredDatabases.length === 0" class="px-3 py-3 text-[12px] text-foreground/30 italic">
+          <p v-if="filteredDatabases.length === 0" class="px-3 py-2 text-[11.5px] text-(--fg-4) italic">
             No matches
           </p>
         </div>
@@ -125,23 +115,23 @@
     <div
       v-if="selectedConnectionId && openConnections[selectedConnectionId]"
       ref="searchContainerRef"
-      class="shrink-0 px-3 pb-2"
+      class="shrink-0 px-2 pb-1"
     >
       <div class="relative">
         <SearchIcon
-          class="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-sidebar-foreground/62"
+          class="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-(--fg-4)"
         />
         <Input
           :model-value="search"
           @update:model-value="emit('update:search', String($event))"
-          placeholder="Search tables and views"
+          placeholder="Filter tables"
           aria-label="Search tables and views"
           @keydown="onTableSearchKeydown"
-          class="h-8 pl-9 pr-9 text-xs text-foreground placeholder:text-sidebar-foreground/58 bg-accent border border-foreground/10 rounded-lg focus-visible:ring-0 focus-visible:border-primary/60"
+          class="h-7 pl-6.5 pr-7 text-[11.5px] md:text-[11.5px] text-foreground placeholder:text-(--fg-4) bg-(--bg-0) border border-(--line-2) rounded-md shadow-none focus-visible:ring-0 focus-visible:border-(--acc-line)"
         />
         <button
           v-if="search"
-          class="absolute right-2 top-1/2 -translate-y-1/2 size-5 rounded flex items-center justify-center text-sidebar-foreground/55 hover:text-foreground transition-colors"
+          class="absolute right-1.5 top-1/2 -translate-y-1/2 size-4 rounded flex items-center justify-center text-(--fg-4) hover:text-foreground transition-colors"
           title="Clear search"
           @click="emit('update:search', '')"
         >
@@ -151,26 +141,26 @@
     </div>
 
     <!-- Tables for selected database -->
-    <ScrollArea class="flex-1 py-1">
+    <ScrollArea class="flex-1 py-0.5">
       <template v-if="selectedConnectionId && openConnections[selectedConnectionId] && activeDatabase">
-        <div class="px-3 pb-3">
-          <div class="flex items-center justify-between px-2 pb-1 text-[11px] text-sidebar-foreground/60">
+        <div class="px-2 pb-2">
+          <div class="flex items-center justify-between pl-2 pr-1 h-6 text-[10.5px] font-medium uppercase tracking-[0.06em] text-(--fg-4)">
             <span aria-live="polite">{{ objectSummary }}</span>
             <button type="button" title="Refresh schema" aria-label="Refresh schema"
-              class="size-6 rounded flex items-center justify-center hover:bg-accent hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
+              class="size-5 rounded flex items-center justify-center hover:bg-(--bg-2) hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary"
               @click="emit('refresh-schema', activeConnId, activeDb)">
-              <RefreshCwIcon class="size-3" />
+              <RefreshCwIcon class="size-2.5" />
             </button>
           </div>
-          <section v-for="group in tableGroups" :key="group.key" class="mb-1">
+          <section v-for="group in tableGroups" :key="group.key" class="mb-0.5">
             <button v-if="showTableGroups" type="button" :aria-expanded="isGroupExpanded(group.key)"
-              class="w-full flex items-center gap-1.5 px-2 py-1.5 text-[11px] font-medium text-sidebar-foreground/65 hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary rounded"
+              class="w-full flex items-center gap-1 px-1.5 h-6 text-[11px] font-medium text-(--fg-3) hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary rounded"
               @click="toggleGroup(group.key)">
               <ChevronDownIcon class="size-3 transition-transform" :class="{ '-rotate-90': !isGroupExpanded(group.key) }" />
               <span class="flex-1 truncate text-left">{{ group.label }}</span>
-              <span class="tabular-nums text-sidebar-foreground/45">{{ group.tables.length }}</span>
+              <span class="tabular-nums text-(--fg-4)">{{ group.tables.length }}</span>
             </button>
-            <div v-if="isGroupExpanded(group.key)" class="space-y-px">
+            <div v-if="isGroupExpanded(group.key)">
               <button v-for="table in group.tables" :key="tableHandle(table)"
                 :ref="(el) => setTableRef(el as HTMLElement | null, tableHandle(table), activeDb, activeConnId)"
                 type="button" :title="tableLabel(table.reference ?? table.name)"
@@ -181,13 +171,13 @@
                 :class="tableButtonClasses(tableHandle(table), activeDb, activeConnId)">
                 <EyeIcon v-if="isView(table)" :class="tableIconClasses(tableHandle(table), activeDb, activeConnId)" />
                 <TableIcon v-else :class="tableIconClasses(tableHandle(table), activeDb, activeConnId)" />
-                <span class="flex-1 truncate text-[12px] font-medium">{{ table.name }}</span>
+                <span class="flex-1 truncate text-[11.5px]">{{ table.name }}</span>
                 <span v-if="isTableOpen(tableHandle(table), activeDb, activeConnId) && !isTableActive(tableHandle(table), activeDb, activeConnId)"
-                  class="size-1.5 rounded-full shrink-0 bg-primary/50" />
+                  class="size-1.5 rounded-full shrink-0 bg-primary/60" />
               </button>
             </div>
           </section>
-          <p v-if="visibleTables.length === 0" class="px-2 py-4 text-xs text-sidebar-foreground/60 leading-relaxed">
+          <p v-if="visibleTables.length === 0" class="px-2 py-3 text-[11.5px] text-(--fg-4) leading-relaxed">
             {{ search ? 'No matching tables or views. Try another search.' : 'No tables or views in this database.' }}
           </p>
         </div>
@@ -195,10 +185,10 @@
 
 <div
         v-else-if="selectedConnectionId && openConnections[selectedConnectionId]"
-        class="px-4 py-8 text-center"
+        class="px-4 py-6 text-center"
       >
-        <DatabaseIcon class="size-7 mx-auto text-sidebar-foreground/18 mb-3" />
-        <p class="text-xs font-medium text-sidebar-foreground/45">Select a database to browse tables.</p>
+        <DatabaseIcon class="size-6 mx-auto text-(--fg-5) mb-2" />
+        <p class="text-[11.5px] text-(--fg-4)">Select a database to browse tables.</p>
       </div>
     </ScrollArea>
 
@@ -221,7 +211,6 @@ import { ref, computed, nextTick, onMounted, onUnmounted, watch } from "vue";
 import {
   SearchIcon,
   DatabaseIcon,
-  ServerIcon,
   ChevronDownIcon,
   TableIcon,
   EyeIcon,
@@ -338,7 +327,7 @@ function isView(table: any) {
 }
 
 function tableButtonClasses(tableName: string, db: string, connId: string) {
-  const base = 'w-full flex items-center gap-2 px-2.5 h-7 rounded-md transition-colors text-left group/tbl focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-[-2px]'
+  const base = 'w-full flex items-center gap-1.5 pl-2 pr-1.5 h-6 rounded-[4px] transition-colors text-left group/tbl focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-[-2px]'
   const action = props.pendingTableAction(tableName, db, connId)
 
   if (action === 'drop') {
@@ -348,18 +337,18 @@ function tableButtonClasses(tableName: string, db: string, connId: string) {
     return `${base} bg-amber-500/14 text-amber-200 line-through ring-1 ring-inset ring-amber-500/25`
   }
   if (props.isTableSelected(connId, db, tableName)) return `${base} bg-primary/15 text-primary`
-  if (props.isTableActive(tableName, db, connId)) return `${base} bg-accent text-foreground shadow-none`
-  return `${base} hover:bg-accent/70 text-sidebar-foreground/90 hover:text-foreground`
+  if (props.isTableActive(tableName, db, connId)) return `${base} bg-(--bg-3) text-(--fg-1) shadow-none`
+  return `${base} hover:bg-(--bg-2) text-(--fg-2) hover:text-(--fg-1)`
 }
 
 function tableIconClasses(tableName: string, db: string, connId: string) {
   const action = props.pendingTableAction(tableName, db, connId)
 
-  if (action === 'drop') return 'size-2.5 shrink-0 text-destructive/85'
-  if (action === 'truncate') return 'size-2.5 shrink-0 text-amber-300/90'
-  if (props.isTableActive(tableName, db, connId)) return 'size-2.5 shrink-0 text-foreground/70'
-  if (props.isTableSelected(connId, db, tableName)) return 'size-2.5 shrink-0 text-primary/85'
-  return 'size-2.5 shrink-0 text-sidebar-foreground/68 group-hover/tbl:text-sidebar-foreground/90'
+  if (action === 'drop') return 'size-3 shrink-0 text-destructive/85'
+  if (action === 'truncate') return 'size-3 shrink-0 text-amber-300/90'
+  if (props.isTableActive(tableName, db, connId)) return 'size-3 shrink-0 text-(--fg-2)'
+  if (props.isTableSelected(connId, db, tableName)) return 'size-3 shrink-0 text-primary/85'
+  return 'size-3 shrink-0 text-(--fg-4) group-hover/tbl:text-(--fg-3)'
 }
 
 const getEnvColor = (env: Environment): string => {
@@ -375,16 +364,12 @@ const getEnvColor = (env: Environment): string => {
   }
 };
 
-const getConnectionCardColor = (env: Environment): string => {
+const getEnvDotColor = (env: Environment): string => {
   switch (env) {
-    case "PRODUCTION":
-      return "bg-red-900/80 ring-red-400/20";
-    case "STAGING":
-      return "bg-orange-800/80 ring-orange-300/20";
-    case "DEV":
-      return "bg-blue-800/80 ring-blue-300/20";
-    default:
-      return "bg-[#1f6a44] ring-green-300/20";
+    case "PRODUCTION": return "bg-(--env-prod)";
+    case "STAGING": return "bg-(--env-staging)";
+    case "DEV": return "bg-(--env-dev)";
+    default: return "bg-(--env-local)";
   }
 };
 

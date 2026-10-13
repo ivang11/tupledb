@@ -82,6 +82,8 @@
     :connection="sidebarContextMenu.connection"
     :can-create-database="!!sidebarContextMenu.connection && store.openConnections[sidebarContextMenu.connection.id]?.capabilities.createDatabase"
     :is-connected="!!sidebarContextMenu.connection && !!store.openConnections[sidebarContextMenu.connection.id]"
+    :variant="sidebarContextMenu.source"
+    :open-connection-count="Object.keys(store.openConnections).length"
     @edit="
       (conn) => {
         openEditConnDialog(conn);
@@ -92,6 +94,12 @@
     @disconnect="
       (id) => {
         disconnectConn(id);
+        sidebarContextMenu.show = false;
+      }
+    "
+    @disconnect-others="
+      (id) => {
+        for (const other of Object.keys(store.openConnections)) if (other !== id) disconnectConn(other);
         sidebarContextMenu.show = false;
       }
     "

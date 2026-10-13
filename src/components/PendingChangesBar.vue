@@ -1,32 +1,32 @@
 <template>
-  <div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-4 bg-card border border-primary/20 shadow-2xl rounded-full px-5 py-2.5 animate-in fade-in slide-in-from-bottom-4 duration-300">
-    <div class="flex items-center gap-3">
-      <div class="size-2 rounded-full bg-amber-500 animate-pulse"></div>
-      <span class="whitespace-nowrap text-xs font-bold uppercase tracking-wide text-foreground">
+  <div class="absolute bottom-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-popover border border-(--line-1) shadow-xl rounded-lg px-3 py-1.5 animate-in fade-in slide-in-from-bottom-2 duration-200">
+    <div class="flex items-center gap-2">
+      <div class="size-1.5 rounded-full bg-amber-400"></div>
+      <span class="whitespace-nowrap text-[11.5px] font-medium text-foreground">
         {{ pendingLabel }}
       </span>
     </div>
 
-    <div class="h-4 w-px bg-border"></div>
+    <div class="h-3.5 w-px bg-(--line-2)"></div>
 
-    <div class="flex items-center gap-2">
-      <div v-if="hasDataChanges" class="flex items-center gap-2 mr-2">
-        <label v-if="supportsFkChecks !== false" class="flex items-center gap-2 cursor-pointer group">
+    <div class="flex items-center gap-1.5">
+      <div v-if="hasDataChanges" class="flex items-center gap-2 mr-1">
+        <label v-if="supportsFkChecks !== false" class="flex items-center gap-1.5 cursor-pointer group">
           <input
             type="checkbox"
             :checked="disableFkChecks"
             @change="emit('update:disableFkChecks', ($event.target as HTMLInputElement).checked)"
-            class="size-3.5 rounded border-input accent-primary"
+            class="size-3 rounded border-input accent-primary"
           />
-          <span class="whitespace-nowrap text-[10px] font-bold text-muted-foreground group-hover:text-foreground transition-colors uppercase tracking-tight">
-            FK Checks
+          <span class="whitespace-nowrap text-[11px] text-muted-foreground group-hover:text-foreground transition-colors">
+            Skip FK checks
           </span>
         </label>
       </div>
-      <Button variant="outline" size="sm" class="h-8 text-xs" @click="emit('preview')">Review SQL</Button>
-      <Button variant="ghost" size="sm" class="h-8 text-xs font-bold uppercase tracking-tight" @click="emit('discard')">Discard</Button>
-      <Button size="sm" class="h-8 px-4 text-xs font-bold uppercase tracking-tight shadow-lg" :disabled="isSaving" @click="emit('apply')">
-        {{ isSaving ? 'Saving...' : 'Apply Changes' }}
+      <Button variant="outline" size="sm" class="h-7 px-2.5 text-[11.5px]" @click="emit('preview')">Review SQL</Button>
+      <Button variant="ghost" size="sm" class="h-7 px-2.5 text-[11.5px]" @click="emit('discard')">Discard</Button>
+      <Button size="sm" class="h-7 px-3 text-[11.5px] font-semibold" :disabled="isSaving" @click="emit('apply')">
+        {{ isSaving ? 'Saving…' : 'Apply' }}
       </Button>
     </div>
   </div>

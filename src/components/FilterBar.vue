@@ -1,33 +1,33 @@
 <template>
-  <div class="bg-sidebar/40 border-b border-border p-2 space-y-2">
+  <div class="bg-(--bg-1) border-b border-(--line-2) px-2 py-1.5 space-y-1.5">
     <!-- Global Actions -->
-    <div class="flex items-center justify-between px-1">
+    <div class="flex items-center justify-between px-0.5">
       <div class="flex items-center gap-2">
-        <span class="text-[10px] font-bold uppercase text-muted-foreground">Filters</span>
-        <Badge variant="outline" class="text-[9px] py-0 h-4 px-1.5 cursor-pointer hover:bg-accent" @click="filterSet.match_all = !filterSet.match_all">
-          Match: {{ filterSet.match_all ? 'AND' : 'OR' }}
+        <span class="text-[11px] font-medium text-(--fg-2)">Filters</span>
+        <Badge variant="outline" class="text-[10px] font-medium py-0 h-[18px] px-1.5 rounded-[4px] cursor-pointer hover:bg-accent" @click="filterSet.match_all = !filterSet.match_all">
+          Match {{ filterSet.match_all ? 'all (AND)' : 'any (OR)' }}
         </Badge>
       </div>
       <div class="flex items-center gap-1">
-        <Button variant="ghost" size="sm" class="h-6 px-2 text-[10px] font-bold uppercase tracking-tight" @click="clearFilters">
-          <Trash2Icon class="size-3 mr-1.5" /> Clear
+        <Button variant="ghost" size="sm" class="h-6 px-2 text-[11px] font-medium" @click="clearFilters">
+          <Trash2Icon class="size-3 mr-1" /> Clear
         </Button>
-        <Button variant="secondary" size="sm" class="h-6 px-2 text-[10px] font-bold uppercase tracking-tight" @click="applyFilters">
-          <PlayIcon class="size-3 mr-1.5" /> Apply All
+        <Button variant="secondary" size="sm" class="h-6 px-2 text-[11px] font-medium" @click="applyFilters">
+          <PlayIcon class="size-3 mr-1" /> Apply
         </Button>
-        <Button size="icon" class="h-6 w-6" @click="addRow">
+        <Button size="icon" class="h-6 w-6" title="Add filter" @click="addRow">
           <PlusIcon class="size-3" />
         </Button>
       </div>
     </div>
 
     <!-- Filter Rows -->
-    <div v-if="filterSet.rows.length > 0" class="space-y-1.5 pb-1">
-      <div v-for="(row, i) in filterSet.rows" :key="i" class="flex items-center gap-2 px-1 group">
+    <div v-if="filterSet.rows.length > 0" class="space-y-1 pb-0.5">
+      <div v-for="(row, i) in filterSet.rows" :key="i" class="flex items-center gap-1.5 px-0.5 group">
         <input type="checkbox" v-model="row.active" class="size-3.5 rounded border-input accent-primary" />
-        
+
         <Select v-model="row.column">
-          <SelectTrigger class="h-7 text-[11px] w-35 bg-background/50 border-dashed px-2 py-0">
+          <SelectTrigger class="h-6 text-[11px] w-35 bg-(--bg-0) px-2 py-0 rounded-[4px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -38,7 +38,7 @@
         </Select>
 
         <Select v-model="row.operator">
-          <SelectTrigger class="h-7 text-[11px] w-27.5 bg-background/50 border-dashed px-2 py-0">
+          <SelectTrigger class="h-6 text-[11px] w-27.5 bg-(--bg-0) px-2 py-0 rounded-[4px]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -48,27 +48,27 @@
           </SelectContent>
         </Select>
 
-        <Input 
-          v-model="row.value" 
-          class="h-7 text-[11px] flex-1 bg-background/50 border-dashed focus-visible:ring-1" 
-          placeholder="Value..."
+        <Input
+          v-model="row.value"
+          class="h-6 text-[11px] md:text-[11px] flex-1 bg-(--bg-0) rounded-[4px] shadow-none px-2 focus-visible:ring-1"
+          placeholder="Value"
           @keyup.enter="applyFilters"
           v-if="!['is_null', 'is_not_null', 'true', 'false'].includes(row.operator)"
         />
         <div v-else class="flex-1"></div>
 
         <div class="flex items-center gap-0.5 shrink-0">
-          <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-foreground" title="Apply this filter" @click="applySingleRow(row)">
+          <Button variant="ghost" size="icon" class="h-6 w-6 text-muted-foreground hover:text-foreground" title="Apply this filter" @click="applySingleRow(row)">
             <PlayIcon class="size-3" />
           </Button>
-          <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:text-destructive" @click="removeRow(i)">
+          <Button variant="ghost" size="icon" class="h-6 w-6 text-muted-foreground hover:text-destructive" title="Remove filter" @click="removeRow(i)">
             <XIcon class="size-3" />
           </Button>
         </div>
       </div>
     </div>
-    <div v-else class="px-2 py-1 text-[10px] text-muted-foreground italic">
-      No active filters. Click [+] to add one.
+    <div v-else class="px-0.5 text-[11px] text-(--fg-4)">
+      No filters yet. Add one with the + button.
     </div>
   </div>
 </template>

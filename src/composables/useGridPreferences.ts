@@ -18,5 +18,5 @@ export function useGridPreferences(key: () => string | undefined) {
   function persist() { try { localStorage.setItem(`tupledb:grid:${key() ?? 'query'}`, JSON.stringify(preferences.value)) } catch {} }
   watch(preferences, () => { clearTimeout(timer); timer = setTimeout(persist, 150) }, { deep: true })
   onBeforeUnmount(() => { clearTimeout(timer); persist() })
-  return { preferences, rowHeight: computed(() => Math.max(settings.value.tableFontSize + 10, settings.value.density === 'compact' ? 25 : 34)) }
+  return { preferences, rowHeight: computed(() => Math.max(settings.value.tableFontSize + 8, settings.value.density === 'compact' ? 22 : 26)) }
 }

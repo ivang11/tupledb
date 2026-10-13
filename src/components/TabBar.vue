@@ -1,12 +1,12 @@
 <template>
   <div
     v-if="tabs.length > 0 || hasOpenConnections"
-    class="flex items-center bg-(--bg-0) overflow-hidden shrink-0 px-1.5 pt-1 border-b border-(--line-2)"
-    style="height: 38px"
+    class="flex items-center bg-(--bg-0) overflow-hidden shrink-0 px-1 border-b border-(--line-2)"
+    style="height: 32px"
   >
     <div
       v-if="workspaceLabel"
-      class="mr-2 hidden max-w-52 shrink-0 items-center gap-1.5 rounded-md border border-(--line-2) bg-(--bg-1) px-2.5 h-7 text-[11px] font-semibold text-(--fg-3) lg:flex"
+      class="mr-1.5 hidden max-w-52 shrink-0 items-center gap-1.5 rounded-[5px] border border-(--line-2) bg-(--bg-1) px-2 h-6 text-[10.5px] font-medium text-(--fg-3) lg:flex"
       :title="workspaceLabel"
     >
       <DatabaseIcon class="size-3 shrink-0 opacity-60" />
@@ -18,7 +18,7 @@
       @dragover.prevent
       @drop="emit('tab-drop', null, $event)"
     >
-      <!-- Tabs (Brave-style pill) -->
+      <!-- Tabs -->
       <button
         v-for="tab in tabs"
         :key="tab.id"
@@ -30,10 +30,10 @@
         @dragover.prevent
         @drop.stop="emit('tab-drop', tab.id, $event)"
         :class="[
-          'relative flex items-center gap-2 px-2.5 h-7 rounded-lg transition-colors min-w-30 max-w-50 shrink-0 group/tab font-mono text-[11.5px]',
+          'relative flex items-center gap-1.5 pl-2 pr-1.5 h-6 rounded-[5px] transition-colors min-w-24 max-w-44 shrink-0 group/tab text-[11.5px] font-medium',
           tab.id === activeTabId
             ? 'bg-(--bg-2) text-(--fg-1)'
-            : 'text-(--fg-3) hover:bg-(--bg-2)/50 hover:text-(--fg-2)',
+            : 'text-(--fg-3) hover:bg-(--bg-1) hover:text-(--fg-2)',
         ]"
         :title="
           tab.type === 'query'
@@ -68,7 +68,7 @@
         <span
           @click.stop="emit('close-tab', tab.id, $event)"
           :class="[
-            'shrink-0 size-4 flex items-center justify-center rounded transition-all text-(--fg-4) hover:text-(--fg-1) hover:bg-(--bg-3)',
+            'shrink-0 size-3.5 flex items-center justify-center rounded-[3px] transition-all text-(--fg-4) hover:text-(--fg-1) hover:bg-(--bg-3)',
             tab.id === activeTabId
               ? 'opacity-100'
               : 'opacity-0 group-hover/tab:opacity-100',
@@ -79,12 +79,12 @@
       </button>
     </div>
 
-    <div class="flex shrink-0 items-center gap-0.5 border-l border-(--line-2) ml-1 pl-1.5">
+    <div class="flex shrink-0 items-center gap-0.5 border-l border-(--line-2) ml-1 pl-1">
     <!-- New query -->
     <button
       v-if="hasOpenConnections && firstConnectionId && canOpenQuery"
       @click="emit('new-query', firstConnectionId)"
-      class="flex items-center gap-1 px-2 h-7 rounded-md text-[11px] text-(--fg-1) hover:bg-(--bg-2) transition-colors shrink-0"
+      class="flex items-center gap-1 px-2 h-6 rounded-[5px] text-[11px] font-medium text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1) transition-colors shrink-0"
       title="New Query (SQL)"
     >
       SQL
@@ -96,23 +96,23 @@
         <button
           type="button"
           :class="[
-            'size-7 flex items-center justify-center rounded-md transition-colors',
+            'size-6 flex items-center justify-center rounded-[5px] transition-colors',
             showFilters
               ? 'bg-(--acc-soft) text-(--acc)'
-              : 'text-(--fg-1) hover:bg-(--bg-2)',
+              : 'text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1)',
           ]"
           title="Toggle Filters"
           @click="emit('toggle-filters')"
         >
-          <FilterIcon class="size-4" />
+          <FilterIcon class="size-3.5" />
         </button>
         <button
           type="button"
-          class="size-7 flex items-center justify-center rounded-md text-(--fg-1) hover:bg-(--bg-2) transition-colors"
+          class="size-6 flex items-center justify-center rounded-[5px] text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1) transition-colors"
           title="Refresh"
           @click="emit('refresh')"
         >
-          <RefreshCwIcon class="size-4" />
+          <RefreshCwIcon class="size-3.5" />
         </button>
       </div>
     </template>
@@ -122,35 +122,35 @@
       v-if="showFocusButton"
       @click="emit('toggle-focus')"
       :class="[
-        'flex items-center justify-center size-7 rounded-md transition-colors shrink-0',
+        'flex items-center justify-center size-6 rounded-[5px] transition-colors shrink-0',
         isFocused
           ? 'text-(--acc) bg-(--acc-soft) hover:brightness-110'
-          : 'text-(--fg-1) hover:bg-(--bg-2)',
+          : 'text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1)',
       ]"
       :title="isFocused ? `Unpin pane (${focusPaneKey})` : `Pin pane — focus (${focusPaneKey})`"
     >
-      <PinOffIcon v-if="isFocused" class="size-4" />
-      <PinIcon v-else class="size-4" />
+      <PinOffIcon v-if="isFocused" class="size-3.5" />
+      <PinIcon v-else class="size-3.5" />
     </button>
 
     <!-- Split pane -->
     <button
       v-if="isLastPane && !isFocused && canSplitPane"
       @click="emit('add-pane')"
-      class="flex items-center justify-center size-7 rounded-md text-(--fg-1) hover:bg-(--bg-2) transition-colors shrink-0"
+      class="flex items-center justify-center size-6 rounded-[5px] text-(--fg-2) hover:bg-(--bg-2) hover:text-(--fg-1) transition-colors shrink-0"
       title="Split pane"
     >
-      <PanelRightOpenIcon class="size-4" />
+      <PanelRightOpenIcon class="size-3.5" />
     </button>
 
     <!-- Close pane -->
     <button
       v-if="showClosePaneButton && !isFocused"
       @click="emit('remove-pane')"
-      class="flex items-center justify-center size-7 rounded-md text-(--fg-4) hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0"
+      class="flex items-center justify-center size-6 rounded-[5px] text-(--fg-4) hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0"
       title="Close pane"
     >
-      <XIcon class="size-4" />
+      <XIcon class="size-3.5" />
     </button>
     </div>
     <ContextMenuSurface :show="tabMenu.show" :x="tabMenu.x" :y="tabMenu.y" @dismiss="tabMenu.show = false">
@@ -260,6 +260,6 @@ const focusPaneKey = computed(() => formatKeybinding(getBinding('focusPane')));
 </script>
 
 <style scoped>
-.tab-menu-item { display: block; width: 100%; text-align: left; padding: 7px 12px; border-radius: 4px; font-size: 12px; }
+.tab-menu-item { display: block; width: 100%; text-align: left; padding: 5px 10px; border-radius: 4px; font-size: 12px; }
 .tab-menu-item:hover:not(:disabled) { background: var(--muted); }
 </style>

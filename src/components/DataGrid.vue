@@ -42,12 +42,12 @@
     <!-- Empty state -->
     <div
       v-if="rows && rows.length === 0 && pendingInserts.length === 0"
-      class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center p-12"
+      class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center p-8"
     >
-      <DatabaseIcon class="size-8 text-muted-foreground/15" />
+      <DatabaseIcon class="size-6 text-(--fg-5)" />
       <div>
-        <p class="text-sm font-semibold text-foreground/60">No records</p>
-        <p class="text-xs text-muted-foreground/40 mt-1">
+        <p class="text-[12.5px] font-medium text-(--fg-2)">No records</p>
+        <p class="text-[11.5px] text-(--fg-4) mt-0.5">
           This table is empty or your filters didn't match any rows.
         </p>
       </div>
@@ -85,18 +85,18 @@
             @click="sortColumnClick(virtualColumn.column.name)"
             @contextmenu.prevent.stop="openColumnMenu(virtualColumn.column.name, $event.clientX, $event.clientY)"
           >
-            <div class="flex items-center justify-between gap-2 px-3 py-2">
+            <div class="flex h-full items-center justify-between gap-2 px-2 leading-none" :title="virtualColumn.column.type_name">
               <!-- Name + PK badge -->
               <div class="flex items-center gap-1.5 min-w-0">
                 <span
-                  class="text-xs font-bold font-mono truncate"
+                  class="text-[11.5px] font-semibold font-mono truncate"
                   :class="sortColumn === virtualColumn.column.name ? 'text-primary' : 'text-foreground/95'"
                 >
                   {{ virtualColumn.column.name }}
                 </span>
                 <span
                   v-if="isPrimaryKeyColumn(primaryKey, virtualColumn.column.name)"
-                  class="text-[8px] font-black text-amber-500/90 border border-amber-500/30 bg-amber-500/8 px-1 py-px rounded shrink-0 leading-none"
+                  class="text-[8px] font-bold text-(--pk) shrink-0 leading-none"
                 >
                   PK
                 </span>
@@ -106,13 +106,6 @@
               <ArrowDownIcon  v-if="sortColumn === virtualColumn.column.name && sortDesc"  class="size-3 text-primary shrink-0" />
               <ArrowUpIcon    v-else-if="sortColumn === virtualColumn.column.name"         class="size-3 text-primary shrink-0" />
               <ArrowUpDownIcon v-else                                      class="size-3 text-muted-foreground/25 shrink-0 opacity-0 group-hover/th:opacity-100 transition-opacity" />
-            </div>
-
-            <!-- Type label -->
-            <div class="px-3 pb-1.5 -mt-1">
-              <span class="text-[9px] font-semibold font-mono text-muted-foreground/82 leading-none">
-                {{ virtualColumn.column.type_name }}
-              </span>
             </div>
 
             <!-- Column resize handle -->
@@ -160,7 +153,7 @@
               virtualColumn.start,
             ]"
             role="cell"
-            class="absolute top-0 px-3 text-sm group/cell overflow-hidden"
+            class="absolute top-0 px-2 text-xs group/cell overflow-hidden"
             :style="columnPositionStyle(virtualColumn)"
             :aria-colindex="virtualColumn.index + 1"
             :class="[
@@ -524,7 +517,7 @@ watch(
   },
 )
 
-const HEADER_HEIGHT = 42
+const HEADER_HEIGHT = 28
 const ROW_HEIGHT = rowHeight
 
 const virtualizer = useVirtualizer(computed(() => ({

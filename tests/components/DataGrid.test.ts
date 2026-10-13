@@ -322,7 +322,7 @@ describe('DataGrid — column preferences and cell actions', () => {
     const wrapper = grid('settings-test')
     settings.value.density = 'compact'; settings.value.columnWidth = 'narrow'
     await wrapper.vm.$nextTick()
-    expect((wrapper.findAll('[role="row"]')[1].element as HTMLElement).style.height).toBe('25px')
+    expect((wrapper.findAll('[role="row"]')[1].element as HTMLElement).style.height).toBe('22px')
     expect((wrapper.findAll('[role="columnheader"]')[0].element as HTMLElement).style.width).toBe('100px')
     expect(wrapper.find('select[aria-label="Column width"]').exists()).toBe(false)
     reset(); wrapper.unmount()
