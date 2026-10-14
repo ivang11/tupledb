@@ -64,13 +64,7 @@
           <template v-if="tab === 'general'">
             <label>Restore workspace on startup<ToggleSwitch v-model="settings.restoreSession" /></label>
             <p>Restored SQL drafts are never executed automatically.</p>
-            <div class="flex items-center justify-between gap-5 border-t border-(--line-faint) pt-4">
-              <span class="text-[12.5px] text-(--fg-1)">App updates</span>
-              <button type="button" class="h-8 rounded-lg border border-(--line-2) bg-(--bg-1) px-3 text-[12.5px] font-medium text-(--fg-1) transition-colors hover:bg-(--bg-2)" @click="checkUpdates">
-                Check for updates
-              </button>
-            </div>
-            <p>Updates are also checked automatically when the app starts. Progress shows in the main window.</p>
+            <SettingsUpdates />
             <div class="flex items-center justify-between gap-5 border-t border-(--line-faint) pt-4">
               <span class="text-[12.5px] text-(--fg-1)">Source code</span>
               <button type="button" class="flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12.5px] text-(--fg-2) transition-colors hover:bg-(--bg-1) hover:text-(--fg-1)" @click="openRepository">
@@ -92,7 +86,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
-import { getCurrentWebviewWindow, WebviewWindow } from '@tauri-apps/api/webviewWindow'
+import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import {
   CodeIcon,
   FileOutputIcon,
@@ -105,6 +99,7 @@ import {
 } from 'lucide-vue-next'
 import KeyboardShortcutsPanel from '@/components/KeyboardShortcutsPanel.vue'
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue'
+import SettingsUpdates from '@/components/SettingsUpdates.vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { REPOSITORY_URL } from '@/lib/links'
 import WindowResizeHandles from '@/components/WindowResizeHandles.vue'
@@ -112,8 +107,6 @@ import { useAppSettings, FONT_OPTIONS } from '@/composables/useAppSettings'
 import { usesNativeMacWindowControls } from '@/lib/platform'
 import { SETTINGS_TAB_EVENT } from '@/lib/settingsWindow'
 import type { UnlistenFn } from '@tauri-apps/api/event'
-
-const CHECK_UPDATES_EVENT = 'tupledb:check-updates'
 
 const nativeChrome = usesNativeMacWindowControls
 const win = getCurrentWebviewWindow()
@@ -135,13 +128,6 @@ const activeSection = computed(() => sections.find((section) => section.id === t
 
 async function close() {
   await win.close()
-}
-
-// The update dialog lives in the main window, so hand the check over there.
-async function checkUpdates() {
-  await win.emitTo('main', CHECK_UPDATES_EVENT)
-  const main = await WebviewWindow.getByLabel('main')
-  await main?.setFocus()
 }
 
 function openRepository() {

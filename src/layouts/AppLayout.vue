@@ -22,6 +22,7 @@ import WindowResizeHandles from '@/components/WindowResizeHandles.vue'
 import ToastContainer from '@/components/ToastContainer.vue'
 import WorkspaceView from '@/views/WorkspaceView.vue'
 import { useUpdater } from '@/composables/useUpdater'
+import { useUpdaterBridge } from '@/composables/useUpdaterBridge'
 import { usesNativeMacWindowControls } from '@/lib/platform'
 import { useSidebarState } from '@/composables/useSidebarState'
 import { openSettingsWindow } from '@/lib/settingsWindow'
@@ -31,10 +32,10 @@ import ConnectionStorageNotice from '@/components/ConnectionStorageNotice.vue'
 const UpdaterDialog = defineAsyncComponent(() => import('@/components/dialogs/UpdaterDialog.vue'))
 
 useAppearance()
+useUpdaterBridge()
 const { checkForUpdates, dialogOpen } = useUpdater()
 const AUTO_UPDATE_CHECK_DELAY_MS = 30_000
 
-let stopUpdateRequests: UnlistenFn | undefined
 let stopMenuEvents: UnlistenFn | undefined
 const { sidebarVisible } = useSidebarState()
 
@@ -53,8 +54,6 @@ function onMenuAction(action: string) {
 
 onMounted(async () => {
   stopMenuEvents = await listen<string>('tupledb:menu', event => onMenuAction(String(event.payload)))
-  // The settings window asks for update checks here, where the update dialog lives.
-  stopUpdateRequests = await listen('tupledb:check-updates', () => void checkForUpdates())
   if (!import.meta.env.PROD) return
 
   window.setTimeout(() => {
@@ -62,7 +61,7 @@ onMounted(async () => {
   }, AUTO_UPDATE_CHECK_DELAY_MS)
 })
 
-onBeforeUnmount(() => { stopUpdateRequests?.(); stopMenuEvents?.() })
+onBeforeUnmount(() => { stopMenuEvents?.() })
 </script>
 
 <style>

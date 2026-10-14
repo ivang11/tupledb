@@ -5,6 +5,9 @@ import { useToast } from '@/composables/useToast'
 const isChecking = ref(false)
 const isInstalling = ref(false)
 const dialogOpen = ref(false)
+const errorMessage = ref<string | null>(null)
+const isUpToDate = ref(false)
+let inlinePresentation = false
 const availableUpdate = shallowRef<Update | null>(null)
 const downloadedBytes = ref(0)
 const totalBytes = ref(0)
@@ -14,7 +17,7 @@ const downloadPercent = computed(() => (
   totalBytes.value > 0 ? Math.min(100, Math.round((downloadedBytes.value / totalBytes.value) * 100)) : 0
 ))
 
-function formatBytes(bytes: number) {
+export function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 B'
 
   const units = ['B', 'KB', 'MB', 'GB']
@@ -32,9 +35,19 @@ function formatBytes(bytes: number) {
 export function useUpdater() {
   const toast = useToast()
 
-  async function checkForUpdates(options: { silent?: boolean } = {}) {
+  function presentInline() {
+    inlinePresentation = true
+    dialogOpen.value = false
+  }
+
+  async function checkForUpdates(options: { silent?: boolean; inline?: boolean } = {}) {
+    if (options.inline) presentInline()
+    if (status.value === 'readyToRestart' || status.value === 'restarting') return
     if (isChecking.value || isInstalling.value) return
 
+    inlinePresentation = options.inline === true
+    errorMessage.value = null
+    isUpToDate.value = false
     isChecking.value = true
 
     try {
@@ -42,7 +55,10 @@ export function useUpdater() {
       const update = await check()
 
       if (!update) {
-        if (!options.silent) {
+        availableUpdate.value = null
+        status.value = 'idle'
+        isUpToDate.value = true
+        if (!options.silent && !inlinePresentation) {
           toast.show({
             type: 'info',
             title: 'TupleDB is up to date',
@@ -56,9 +72,10 @@ export function useUpdater() {
       downloadedBytes.value = 0
       totalBytes.value = 0
       status.value = 'available'
-      dialogOpen.value = true
+      dialogOpen.value = !inlinePresentation
     } catch (error) {
-      if (!options.silent) {
+      errorMessage.value = error instanceof Error ? error.message : String(error)
+      if (!options.silent && !inlinePresentation) {
         toast.error(
           'Could not check for updates',
           error instanceof Error ? error.message : String(error),
@@ -83,6 +100,7 @@ export function useUpdater() {
     if (!availableUpdate.value || isInstalling.value) return
 
     try {
+      errorMessage.value = null
       isInstalling.value = true
       status.value = 'downloading'
       downloadedBytes.value = 0
@@ -104,10 +122,8 @@ export function useUpdater() {
 
       status.value = 'readyToRestart'
     } catch (error) {
-      toast.error(
-        'Could not update TupleDB',
-        error instanceof Error ? error.message : String(error),
-      )
+      errorMessage.value = error instanceof Error ? error.message : String(error)
+      if (!inlinePresentation) toast.error('Could not update TupleDB', errorMessage.value)
       status.value = availableUpdate.value ? 'available' : 'idle'
     } finally {
       isInstalling.value = false
@@ -119,12 +135,23 @@ export function useUpdater() {
 
     status.value = 'restarting'
     isInstalling.value = true
-    const { relaunch } = await import('@tauri-apps/plugin-process')
-    await relaunch()
+    errorMessage.value = null
+    try {
+      const { relaunch } = await import('@tauri-apps/plugin-process')
+      await relaunch()
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : String(error)
+      status.value = 'readyToRestart'
+      isInstalling.value = false
+      if (!inlinePresentation) toast.error('Could not restart TupleDB', errorMessage.value)
+    }
   }
 
   return {
     availableUpdate,
+    presentInline,
+    errorMessage,
+    isUpToDate,
     checkForUpdates,
     dialogOpen,
     dismissUpdate,

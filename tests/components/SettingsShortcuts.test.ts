@@ -28,15 +28,15 @@ async function render() {
 }
 
 describe('Settings window', () => {
-  it('reveals itself after rendering and hands update checks to the main window', async () => {
+  it('reveals itself after rendering and requests updates without focusing the main window', async () => {
     const wrapper = await render()
     expect(transport.show).toHaveBeenCalledOnce()
     expect(wrapper.find('[data-slot="dialog-content"]').exists()).toBe(false)
     expect(wrapper.find('[data-tauri-drag-region]').exists()).toBe(true)
     await wrapper.findAll('button').find(button => button.text() === 'Check for updates')!.trigger('click')
     await flushPromises()
-    expect(transport.emitTo).toHaveBeenCalledWith('main', 'tupledb:check-updates')
-    expect(transport.mainFocus).toHaveBeenCalledOnce()
+    expect(transport.emitTo).toHaveBeenCalledWith('main', 'tupledb:updater-request', 'check')
+    expect(transport.mainFocus).not.toHaveBeenCalled()
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await flushPromises()
     expect(transport.close).toHaveBeenCalledOnce()
