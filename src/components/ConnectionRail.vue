@@ -1,33 +1,36 @@
 <template>
-  <aside class="w-12 shrink-0 bg-(--rail) border-r border-(--line-2) flex flex-col items-center py-2 select-none">
-    <div class="flex flex-col gap-1 mb-2">
-      <button
-        class="size-8 rounded-md flex items-center justify-center text-(--fg-3) hover:text-(--fg-1) hover:bg-(--bg-2) transition-colors"
-        title="Workspace"
-        @click="emit('home')"
-      >
-        <HomeIcon class="size-3.5" />
-      </button>
-    </div>
+  <aside class="w-20 shrink-0 bg-(--rail) border-r border-(--line-2) flex flex-col items-center select-none">
+    <button
+      class="flex h-11 w-full shrink-0 items-center justify-center border-b border-(--line-2) text-(--fg-3) hover:text-(--fg-1) hover:bg-(--bg-2) transition-colors"
+      title="Workspace"
+      @click="emit('home')"
+    >
+      <HomeIcon class="size-4" />
+    </button>
 
-    <div class="flex flex-col gap-1">
+    <div class="rail-items flex min-h-0 w-full flex-1 flex-col overflow-y-auto">
       <button
         v-for="item in railItems"
         :key="item.database === null ? `connection:${item.connectionId}` : `database:${item.connectionId}:${item.database}`"
-        class="relative size-8 rounded-md flex items-center justify-center transition-colors ring-1 ring-inset"
-        :class="[
-          getEnvRailColor(item.connection.environment, item.active),
-          item.active ? 'ring-white/15' : 'ring-white/5',
-        ]"
+        class="flex min-h-20 w-full shrink-0 flex-col items-center justify-center gap-2 border-b border-(--line-2) px-1.5 py-3 transition-colors hover:bg-(--bg-2) focus-visible:outline-2 focus-visible:outline-(--acc) focus-visible:outline-offset-[-2px]"
+        :class="item.active ? 'bg-(--bg-2)' : ''"
+        :aria-current="item.active ? 'page' : undefined"
         :title="`${item.connection.name} / ${item.database ?? 'Choose database'}`"
         @click="selectItem(item)"
         @contextmenu="openItemContextMenu($event, item)"
       >
-        <span class="text-[10.5px] font-bold uppercase">{{ initial(item.database ?? item.connection.name) }}</span>
-        <component :is="item.database === null ? ServerIcon : DatabaseIcon" class="absolute right-1 bottom-1 size-2 opacity-60" />
+        <component
+          :is="item.database === null ? ServerIcon : DatabaseIcon"
+          class="size-5 shrink-0"
+          :class="getEnvRailColor(item.connection.environment)"
+          :stroke-width="1.6"
+        />
+        <span class="rail-label w-full text-center text-[10.5px] font-medium leading-[13px]"
+          :class="item.active ? 'text-(--fg-1)' : 'text-(--fg-2)'">
+          {{ item.database ?? item.connection.name }}
+        </span>
       </button>
     </div>
-    <div class="mt-auto" />
   </aside>
 </template>
 
@@ -62,24 +65,12 @@ const emit = defineEmits<{
   "context-menu-database": [e: MouseEvent, connId: string, db: string];
 }>();
 
-const getEnvRailColor = (env: Environment, active: boolean): string => {
+const getEnvRailColor = (env: Environment): string => {
   switch (env) {
-    case "PRODUCTION":
-      return active
-        ? "bg-red-600 text-white"
-        : "bg-red-500/14 text-red-200/80 hover:bg-red-500/24 hover:text-red-50";
-    case "STAGING":
-      return active
-        ? "bg-orange-600 text-white"
-        : "bg-orange-500/14 text-orange-200/80 hover:bg-orange-500/24 hover:text-orange-50";
-    case "DEV":
-      return active
-        ? "bg-blue-600 text-white"
-        : "bg-blue-500/14 text-blue-200/80 hover:bg-blue-500/24 hover:text-blue-50";
-    default:
-      return active
-        ? "bg-(--acc) text-white"
-        : "bg-green-500/14 text-green-200/80 hover:bg-green-500/24 hover:text-green-50";
+    case "PRODUCTION": return "text-(--env-prod)";
+    case "STAGING": return "text-(--env-staging)";
+    case "DEV": return "text-(--env-dev)";
+    default: return "text-(--acc)";
   }
 };
 
@@ -125,7 +116,10 @@ function openItemContextMenu(event: MouseEvent, item: RailItem) {
   }
 }
 
-function initial(name: string) {
-  return name.slice(0, 1).toUpperCase();
-}
 </script>
+
+<style scoped>
+.rail-items { scrollbar-width: none; }
+.rail-items::-webkit-scrollbar { display: none; }
+.rail-label { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+</style>
