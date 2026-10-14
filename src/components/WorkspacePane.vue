@@ -83,6 +83,7 @@
       />
 
       <FilterBar
+        :visible="pane.viewMode === 'content' && pane.showFilters"
         v-show="pane.viewMode === 'content' && pane.showFilters"
         :key="pane.activeTabId ?? pane.id"
         :columns="(getPaneTab(pane)?.tableStructure ?? []).map((c: any) => ({ name: c.field, type_name: c.type }))"

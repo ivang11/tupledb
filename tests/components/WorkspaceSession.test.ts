@@ -46,15 +46,17 @@ describe('workspace recovery', () => {
     session.save()
     const text = localStorage.getItem('tupledb:workspace-session:v1')!
     expect(text).toContain('SELECT * FROM users'); expect(text).toContain('Draft')
+    expect(JSON.parse(text).panes[0].tabs[0].filters).toEqual(table().filters)
     expect(text).not.toContain('result-not-to-save'); expect(text).not.toContain('query-result'); expect(text).not.toContain('never-store-this')
   })
   it('restores table filters and drafts without executing SQL', async () => {
     localStorage.setItem('tupledb:workspace-session:v1', JSON.stringify({ version: 1, connections: [{ id: 'local', database: 'app' }], activePaneId: 'restored', panes: [{ id: 'restored', activeTabId: 'table', page: 2, pageSize: 50, viewMode: 'content', showFilters: true, tabs: [table(), { type: 'query', id: 'draft', connectionId: 'local', database: 'app', sql: 'DELETE FROM users' }] }] }))
     const { panes, connect, showWorkspace } = await setup()
+    expect((panes.value[0].tabs[0] as TableTab).filters).toEqual(table().filters)
     expect(connect).toHaveBeenCalledOnce(); expect(showWorkspace).toHaveBeenCalledOnce()
     expect(panes.value[0].tabs[1]).toMatchObject({ sql: 'DELETE FROM users', queryResult: null })
     expect(invoke.mock.calls.some(([command]) => command === 'execute_query')).toBe(false)
-    expect(invoke).toHaveBeenCalledWith('get_table_data', expect.objectContaining({ page: 2, pageSize: 50, sortColumn: 'id', sortDesc: true }))
+    expect(invoke).toHaveBeenCalledWith('get_table_data', expect.objectContaining({ page: 2, pageSize: 50, filters: table().filters, sortColumn: 'id', sortDesc: true }))
     expect(invoke).toHaveBeenCalledWith('get_foreign_keys', expect.objectContaining({ database: 'app', table: expect.objectContaining({ name: 'users' }) }))
   })
   it('keeps pending changes when close is cancelled and discards them before native close', async () => {

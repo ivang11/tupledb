@@ -84,6 +84,7 @@ import type { FilterSet, FilterRow, Operator } from '@/types/filters'
 import { useActionShortcut } from '@/composables/useKeyboardShortcut'
 
 const props = defineProps<{
+  visible: boolean
   columns: { name: string, type_name: string }[]
   initialFilter?: { match_all: boolean; rows: FilterRow[] } | null
 }>()
@@ -155,10 +156,7 @@ function applySingleRow(row: FilterRow) {
   emit('apply', singleSet)
 }
 
-// Add initial row if empty
-watch(() => props.columns, (cols) => {
-  if (cols.length > 0 && filterSet.value.rows.length === 0) {
-    // addRow() // Don't auto-add, let user click [+]
-  }
+watch(() => [props.visible, props.columns.length], () => {
+  if (props.visible && props.columns.length > 0 && filterSet.value.rows.length === 0) addRow()
 }, { immediate: true })
 </script>
