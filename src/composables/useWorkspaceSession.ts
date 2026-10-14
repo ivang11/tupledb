@@ -111,11 +111,12 @@ export function useWorkspaceSession(ctx: {
     try {
       if (!store.openConnections[tab.connectionId]?.tables[tab.database]) await store.fetchTablesForConnection(tab.connectionId, tab.database)
       const target = tab.reference ?? tab.tableName
-      const [data, structure] = await Promise.all([
+      const [data, structure, foreignKeys] = await Promise.all([
         store.fetchTableData(tab.connectionId, tab.database, target, tab.page, tab.pageSize, tab.filters, tab.sortColumn ? { column: tab.sortColumn, desc: tab.sortDesc } : null),
         store.fetchTableStructure(tab.connectionId, tab.database, target),
+        store.fetchForeignKeys(tab.connectionId, tab.database, target),
       ])
-      tab.queryResult = data; tab.tableStructure = structure
+      tab.queryResult = data; tab.tableStructure = structure; tab.foreignKeys = foreignKeys
     } catch (error) { useToast().error(`Could not restore ${tab.tableName}`, String(error)) }
   }
   watch(() => ctx.panes.value.map(pane => [pane.id, pane.activeTabId, ...Object.keys(store.openConnections)].join(':')).join('|'), () => {

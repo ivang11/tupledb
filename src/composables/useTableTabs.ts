@@ -75,16 +75,18 @@ export function useTableTabs(ctx: WorkspaceContext) {
     if (!tab) { console.error('[fetchInitialTabData] getPaneTab returned null'); return }
     const { connectionId, database } = tab
     const tableName = tab.reference ?? tab.tableName
-    const [queryResult, tableStructure] = await Promise.all([
+    const [queryResult, tableStructure, foreignKeys] = await Promise.all([
       store.fetchTableData(connectionId, database, tableName, page, pageSize, filters, sort).catch((e: any) => {
         console.error('[fetchTableData]', e);
         return { columns: [], rows: [], total_count: 0, total_count_is_estimate: false };
       }),
       store.fetchTableStructure(connectionId, database, tableName).catch((e: any) => { console.error('[fetchTableStructure]', e); return [] }),
+      store.fetchForeignKeys(connectionId, database, tableName),
     ])
     // Write to the reactive proxy so Vue detects the changes
     tab.queryResult = queryResult
     tab.tableStructure = tableStructure
+    tab.foreignKeys = foreignKeys
   }
 
   async function ensureTableMetadata(pane: PaneState) {

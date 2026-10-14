@@ -498,8 +498,20 @@ function drawStoredRow(
       ctx.fillText(text, x + CELL_PADDING, midY)
     }
     if (hasFk) {
-      ctx.fillStyle = colors.secondary
-      ctx.fillText('›', x + item.size - 13, midY)
+      const arrowX = x + item.size - 18
+      ctx.save()
+      ctx.strokeStyle = colors.secondary
+      ctx.lineWidth = 1
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+      ctx.beginPath()
+      ctx.moveTo(arrowX + 2.5, midY)
+      ctx.lineTo(arrowX + 9.5, midY)
+      ctx.moveTo(arrowX + 6, midY - 3.5)
+      ctx.lineTo(arrowX + 9.5, midY)
+      ctx.lineTo(arrowX + 6, midY + 3.5)
+      ctx.stroke()
+      ctx.restore()
     }
     ctx.strokeStyle = colors.border
     ctx.beginPath()
@@ -795,7 +807,7 @@ watch(
 )
 
 watch(
-  () => [props.rows, props.columns, props.columnWidths, props.selectedRowPk, props.selectedRowPks, props.sortColumn, props.sortDesc, props.rowHeight, props.pinnedColumns],
+  () => [props.rows, props.columns, props.fkMap, props.columnWidths, props.selectedRowPk, props.selectedRowPks, props.sortColumn, props.sortDesc, props.rowHeight, props.pinnedColumns],
   () => {
     scheduleDraw()
     scheduleAriaUpdate(0)

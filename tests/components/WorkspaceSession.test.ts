@@ -55,6 +55,7 @@ describe('workspace recovery', () => {
     expect(panes.value[0].tabs[1]).toMatchObject({ sql: 'DELETE FROM users', queryResult: null })
     expect(invoke.mock.calls.some(([command]) => command === 'execute_query')).toBe(false)
     expect(invoke).toHaveBeenCalledWith('get_table_data', expect.objectContaining({ page: 2, pageSize: 50, sortColumn: 'id', sortDesc: true }))
+    expect(invoke).toHaveBeenCalledWith('get_foreign_keys', expect.objectContaining({ database: 'app', table: expect.objectContaining({ name: 'users' }) }))
   })
   it('keeps pending changes when close is cancelled and discards them before native close', async () => {
     const { panes, guard } = await setup()

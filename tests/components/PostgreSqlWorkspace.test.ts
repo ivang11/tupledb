@@ -10,6 +10,8 @@ import NewDatabaseDialog from '@/components/dialogs/NewDatabaseDialog.vue'
 import { useConnectionStore } from '@/stores/connections'
 import { useWorkspace } from '@/composables/useWorkspace'
 import { useTableTabs } from '@/composables/useTableTabs'
+import { useRowEditing } from '@/composables/useRowEditing'
+import RowDetailPanel from '@/components/RowDetailPanel.vue'
 import { tableHandle } from '@/lib/tableReference'
 import type { Connection, DatabaseCapabilities } from '@/types/connection'
 
@@ -145,6 +147,35 @@ describe('PostgreSQL workspace', () => {
     invoke.mockClear()
     await tabs.refreshActiveTab()
     expect(invoke).toHaveBeenCalledWith('get_table_data', expect.objectContaining({ table: tables[0].reference }))
+  })
+
+  it('loads relation shortcuts in content view and navigates from row details with the exact ID', async () => {
+    const store = useConnectionStore()
+    const target = { catalog: 'app', schema: 'sales', name: 'accounts' }
+    const relation = { constraint_name: 'users_account_fk', position: 1, column: 'account_id', referenced: target, referenced_column: 'id' }
+    vi.spyOn(store, 'fetchForeignKeys').mockResolvedValue([relation])
+    const workspace = useWorkspace(ref(null))
+    const tabs = useTableTabs(workspace)
+    await tabs.loadTableData(tableHandle(tables[0]), 'pg', 'app')
+    const pane = workspace.getPane()
+    expect(pane.viewMode).toBe('content')
+    expect(workspace.getFkMap(pane)).toEqual({ account_id: { table: target, column: 'id' } })
+    const wrapper = mount(RowDetailPanel, { props: {
+      paneId: pane.id, width: 300, row: [1, '9007199254740993'], columns: [{ name: 'id' }, { name: 'account_id' }],
+      primaryKey: ['id'], fkMap: workspace.getFkMap(pane), pendingDeletions: {},
+      getCellValue: (row: any, column: string) => String(row[column === 'id' ? 0 : 1]),
+    }, global: { stubs: { ScrollArea: { template: '<div><slot /></div>' } } } })
+    await wrapper.find('[title="Go to sales.accounts"]').trigger('click')
+    const args = wrapper.emitted('navigate-related')![0]
+    expect(args).toEqual([target, 'id', '9007199254740993'])
+    const editing = useRowEditing({ ...workspace, ...tabs })
+    await editing.navigateToRelated(pane, args[0] as typeof target, args[1] as string, args[2])
+    expect(workspace.getPaneTab(pane)?.reference).toEqual(target)
+    expect(workspace.getPaneTab(pane)?.filters?.rows).toEqual([{ active: true, column: 'id', operator: 'equals', value: '9007199254740993' }])
+    expect(pane.showFilters).toBe(true)
+    await tabs.refreshActiveTab()
+    expect(store.fetchForeignKeys).toHaveBeenLastCalledWith('pg', 'app', target)
+    wrapper.unmount()
   })
 
   it('does not turn unsupported DDL inspection into a connection error', async () => {
