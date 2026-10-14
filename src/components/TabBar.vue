@@ -14,7 +14,7 @@
     </div>
 
     <div
-      class="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden pr-1"
+      class="tab-strip flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto overflow-y-hidden pr-1"
       @dragover.prevent
       @drop="emit('tab-drop', null, $event)"
     >
@@ -260,6 +260,8 @@ const focusPaneKey = computed(() => formatKeybinding(getBinding('focusPane')));
 </script>
 
 <style scoped>
+.tab-strip { scrollbar-width: none; }
+.tab-strip::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .tab-menu-item { display: block; width: 100%; text-align: left; padding: 5px 10px; border-radius: 4px; font-size: 12px; }
 .tab-menu-item:hover:not(:disabled) { background: var(--muted); }
 </style>
