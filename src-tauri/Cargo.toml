@@ -1,6 +1,6 @@
 [package]
 name = "tupledb"
-version = "0.8.5"
+version = "0.8.6"
 description = "A secure MySQL client built with Tauri and Vue"
 authors = ["Ivan"]
 license = "MIT"
