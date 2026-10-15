@@ -31,6 +31,29 @@ function render() {
 }
 
 describe('Sidebar navigation', () => {
+  it('opens database actions from the table area, headings and an empty search result', async () => {
+    const wrapper = render()
+    await wrapper.find('[data-table-list]').trigger('contextmenu', { clientX: 150, clientY: 300 })
+    expect(wrapper.emitted('context-menu-database')?.[0]?.slice(1)).toEqual(['pg', 'app'])
+    expect((wrapper.emitted('context-menu-database')![0][0] as MouseEvent).defaultPrevented).toBe(true)
+    await wrapper.find('[aria-live="polite"]').trigger('contextmenu')
+    expect(wrapper.emitted('context-menu-database')).toHaveLength(2)
+    await wrapper.setProps({ search: 'missing', filteredTables: () => [] })
+    await wrapper.find('[data-table-list] p').trigger('contextmenu')
+    expect(wrapper.emitted('context-menu-database')).toHaveLength(3)
+    await wrapper.setProps({ selectedConnectionId: null })
+    await wrapper.find('[data-table-list]').trigger('contextmenu')
+    expect(wrapper.emitted('context-menu-database')).toHaveLength(3)
+  })
+
+  it('keeps table context actions separate from the database menu', async () => {
+    const wrapper = render()
+    const users = wrapper.findAll('button').filter(button => button.text() === 'users')
+    await users[1].trigger('contextmenu')
+    expect(wrapper.emitted('context-menu-table')?.[0]?.slice(1)).toEqual(['pg', 'app', tableHandle(tables[1])])
+    expect(wrapper.emitted('context-menu-database')).toBeUndefined()
+  })
+
   it('collapses schema groups and reveals them again when a search changes', async () => {
     const wrapper = render()
     const group = wrapper.findAll('section > button').find(button => button.text().includes('public · Tables'))!

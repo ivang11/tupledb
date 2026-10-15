@@ -141,7 +141,7 @@
     </div>
 
     <!-- Tables for selected database -->
-    <ScrollArea class="flex-1 py-0.5">
+    <ScrollArea data-table-list class="flex-1 py-0.5" @contextmenu="onTableAreaContextMenu">
       <template v-if="selectedConnectionId && openConnections[selectedConnectionId] && activeDatabase">
         <div class="px-2 pb-2">
           <div class="flex items-center justify-between pl-2 pr-1 h-6 text-[10.5px] font-medium uppercase tracking-[0.06em] text-(--fg-4)">
@@ -167,7 +167,7 @@
                 :aria-current="isTableActive(tableHandle(table), activeDb, activeConnId) ? 'page' : undefined"
                 @click="handleTableClick($event, activeConnId, activeDb, tableHandle(table))"
                 @keydown="onTableKeydown($event, table)"
-                @contextmenu="emit('context-menu-table', $event, activeConnId, activeDb, tableHandle(table))"
+                @contextmenu.prevent.stop="emit('context-menu-table', $event, activeConnId, activeDb, tableHandle(table))"
                 :class="tableButtonClasses(tableHandle(table), activeDb, activeConnId)">
                 <EyeIcon v-if="isView(table)" :class="tableIconClasses(tableHandle(table), activeDb, activeConnId)" />
                 <TableIcon v-else :class="tableIconClasses(tableHandle(table), activeDb, activeConnId)" />
@@ -380,6 +380,11 @@ const activeConnection = computed(() =>
 )
 const activeDatabase = computed(() => activeConnection.value?.selectedDatabase ?? null)
 const activeDb = computed(() => activeDatabase.value ?? '')
+function onTableAreaContextMenu(event: MouseEvent) {
+  if (!activeConnection.value || !activeDatabase.value) return
+  event.preventDefault()
+  emit('context-menu-database', event, activeConnId.value, activeDb.value)
+}
 const visibleTables = computed(() => props.filteredTables(activeConnId.value, activeDb.value))
 const collapsedGroups = ref(new Set<string>())
 const tableGroups = computed(() => groupSidebarTables(visibleTables.value))
