@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Seek, Write};
 use std::sync::Arc;
 
 // --------------------------------------------------------------------------
@@ -122,51 +122,83 @@ impl Default for ExportOptions {
     }
 }
 
-enum ExportWriter {
+enum ExportStream {
     Plain(BufWriter<File>),
     Gzip(GzEncoder<BufWriter<File>>),
 }
 
+struct ExportWriter {
+    stream: ExportStream,
+    destination: Option<(tempfile::NamedTempFile, std::path::PathBuf)>,
+}
+
 impl ExportWriter {
     fn new(path: &str, compress_gzip: bool) -> Result<Self, String> {
-        let file = File::create(path).map_err(|e| format!("Failed to create file: {}", e))?;
-        Ok(Self::from_file(file, compress_gzip))
+        // Each export owns a separate file. Opening the destination directly
+        // with truncate can create sparse holes if another export still writes
+        // through its old file descriptor at a later offset.
+        let target = std::path::PathBuf::from(path);
+        let parent = target
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(std::path::Path::new("."));
+        let temporary = tempfile::NamedTempFile::new_in(parent)
+            .map_err(|e| format!("Failed to create export file: {e}"))?;
+        let file = temporary.reopen().map_err(|e| e.to_string())?;
+        let mut writer = Self::from_file(file, compress_gzip);
+        writer.destination = Some((temporary, target));
+        Ok(writer)
     }
 
     fn from_file(file: File, compress_gzip: bool) -> Self {
         let writer = BufWriter::new(file);
-        if compress_gzip {
-            Self::Gzip(GzEncoder::new(writer, Compression::default()))
-        } else {
-            Self::Plain(writer)
+        Self {
+            stream: if compress_gzip {
+                ExportStream::Gzip(GzEncoder::new(writer, Compression::default()))
+            } else {
+                ExportStream::Plain(writer)
+            },
+            destination: None,
         }
     }
 
     fn finish(self) -> Result<(), String> {
-        match self {
-            Self::Plain(mut writer) => writer.flush().map_err(|e| format!("Flush error: {}", e)),
-            Self::Gzip(writer) => {
+        match self.stream {
+            ExportStream::Plain(mut writer) => {
+                writer.flush().map_err(|e| format!("Flush error: {e}"))?
+            }
+            ExportStream::Gzip(writer) => {
                 let mut writer = writer
                     .finish()
-                    .map_err(|e| format!("Gzip finish error: {}", e))?;
-                writer.flush().map_err(|e| format!("Flush error: {}", e))
+                    .map_err(|e| format!("Gzip finish error: {e}"))?;
+                writer.flush().map_err(|e| format!("Flush error: {e}"))?;
             }
         }
+        if let Some((temporary, target)) = self.destination {
+            temporary
+                .as_file()
+                .sync_all()
+                .map_err(|e| format!("Failed to sync export: {e}"))?;
+            temporary
+                .persist(target)
+                .map_err(|e| format!("Cannot publish export: {}", e.error))?;
+        }
+        Ok(())
     }
 }
 
 impl Write for ExportWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        match self {
-            Self::Plain(writer) => writer.write(buf),
-            Self::Gzip(writer) => writer.write(buf),
+        match &mut self.stream {
+            ExportStream::Plain(writer) => writer.write(buf),
+            ExportStream::Gzip(writer) => writer.write(buf),
         }
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        match self {
-            Self::Plain(writer) => writer.flush(),
-            Self::Gzip(writer) => writer.flush(),
+        match &mut self.stream {
+            ExportStream::Plain(writer) => writer.flush(),
+            ExportStream::Gzip(writer) => writer.flush(),
         }
     }
 }
@@ -188,18 +220,7 @@ async fn export_native_sql_file(
     if is_canceled() {
         return Err("Export cancelled".into());
     }
-    // Publish atomically only after the entire dump and compression finish.
-    // Errors/cancellation never replace an existing user file with a partial dump.
-    let target = std::path::Path::new(path);
-    let parent = target
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(std::path::Path::new("."));
-    let temporary = tempfile::NamedTempFile::new_in(parent).map_err(|e| e.to_string())?;
-    let mut writer = ExportWriter::from_file(
-        temporary.reopen().map_err(|e| e.to_string())?,
-        options.compress_gzip,
-    );
+    let mut writer = ExportWriter::new(path, options.compress_gzip)?;
     let rows = driver
         .export_sql(
             database,
@@ -214,13 +235,10 @@ async fn export_native_sql_file(
             on_progress,
         )
         .await?;
-    writer.finish()?;
     if is_canceled() {
         return Err("Export cancelled".into());
     }
-    temporary
-        .persist(target)
-        .map_err(|e| format!("Cannot publish SQL export: {}", e.error))?;
+    writer.finish()?;
     on_progress(tables.len(), tables.len(), "Export complete".into());
     Ok(rows)
 }
@@ -606,6 +624,39 @@ pub async fn export_database_file(
     Ok(total_rows)
 }
 
+// Validate before opening an import session: a damaged dump must not leave a
+// partially imported database or send a giant NUL-filled command to the server.
+fn validate_sql_dump(
+    reader: &mut (impl BufRead + Seek),
+    is_canceled: &(dyn Fn() -> bool + Send + Sync),
+) -> Result<(), String> {
+    let mut offset = 0usize;
+    loop {
+        if is_canceled() {
+            return Err("Import cancelled".to_string());
+        }
+        let chunk = reader
+            .fill_buf()
+            .map_err(|e| format!("Failed while reading SQL dump: {e}"))?;
+        if chunk.is_empty() {
+            break;
+        }
+        if let Some(position) = chunk.iter().position(|byte| *byte == 0) {
+            return Err(format!(
+                "Invalid SQL dump: NUL byte at byte offset {}. The file may be corrupted or use an unsupported binary encoding. Export a new UTF-8 SQL dump before importing. No SQL statements were executed.",
+                offset + position,
+            ));
+        }
+        let len = chunk.len();
+        reader.consume(len);
+        offset += len;
+    }
+    reader
+        .rewind()
+        .map_err(|e| format!("Failed to rewind SQL dump: {e}"))?;
+    Ok(())
+}
+
 pub async fn import_sql_file(
     driver: Arc<dyn DatabaseDriver>,
     database: &str,
@@ -638,6 +689,12 @@ pub async fn import_sql_file(
             )
             .await;
     }
+    emit_progress(Progress {
+        current: 0,
+        total: total_bytes,
+        status: "Validating SQL dump...".to_string(),
+    });
+    validate_sql_dump(&mut reader, is_canceled)?;
     let mut splitter = driver.import_parser()?;
     driver.begin_import_session(database, import_id).await?;
 
@@ -911,7 +968,7 @@ pub async fn export_table_file(
         format != "sql" || driver.capabilities().export_sql,
         "SQL export",
     )?;
-    use std::io::{BufWriter, Write};
+    use std::io::Write;
     use tokio::sync::mpsc;
 
     if format != "csv" && format != "json" && format != "sql" {
@@ -945,8 +1002,7 @@ pub async fn export_table_file(
     let stream_handle =
         tokio::spawn(async move { driver_clone.stream_all_rows(&table_clone, tx).await });
 
-    let file = std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {}", e))?;
-    let mut writer = BufWriter::new(file);
+    let mut writer = ExportWriter::new(&path, false)?;
     let mut columns: Vec<ColumnInfo> = Vec::new();
     let mut row_count: usize = 0;
     let mut header_written = false;
@@ -1038,13 +1094,12 @@ pub async fn export_table_file(
         }
     }
 
-    writer.flush().map_err(|e| format!("Write error: {}", e))?;
-
-    // Propagate any streaming error
+    // Propagate any streaming error before publishing the destination.
     stream_handle
         .await
         .map_err(|e| format!("Stream task error: {}", e))??;
 
+    writer.finish()?;
     emit_progress(100, 100, "Export complete".to_string());
 
     Ok(row_count)
@@ -1060,6 +1115,91 @@ mod tests {
     use crate::database::drivers::mysql::script::{parse_compactable_insert, SqlStatementSplitter};
     use crate::database::sql::SqlImportParser;
     use serde_json::json;
+
+    #[test]
+    fn overlapping_exports_publish_whole_files_without_sparse_holes() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("dump.sql");
+        std::fs::write(&target, b"previous successful export").unwrap();
+        let path = target.to_str().unwrap();
+        let prefix = vec![b'x'; 64 * 1024];
+        let mut first = ExportWriter::new(path, false).unwrap();
+        first.write_all(&prefix).unwrap();
+        first.flush().unwrap();
+        let mut second = ExportWriter::new(path, false).unwrap();
+        second.write_all(b"second export").unwrap();
+        second.flush().unwrap();
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"previous successful export"
+        );
+        second.finish().unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), b"second export");
+        first.write_all(b"first export suffix").unwrap();
+        first.finish().unwrap();
+        let expected = [prefix.as_slice(), b"first export suffix"].concat();
+        assert_eq!(std::fs::read(&target).unwrap(), expected);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn unfinished_exports_preserve_the_previous_file_and_remove_temporary_files() {
+        for gzip in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let target = dir.path().join("dump.sql");
+            std::fs::write(&target, b"previous export").unwrap();
+            {
+                let mut writer = ExportWriter::new(target.to_str().unwrap(), gzip).unwrap();
+                writer.write_all(b"partial data").unwrap();
+                writer.flush().unwrap();
+            }
+            assert_eq!(std::fs::read(&target).unwrap(), b"previous export");
+            assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        }
+    }
+
+    #[test]
+    fn gzip_exports_are_finished_before_publication() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("dump.sql.gz");
+        let mut writer = ExportWriter::new(target.to_str().unwrap(), true).unwrap();
+        writer.write_all(b"SELECT 1;\n").unwrap();
+        writer.finish().unwrap();
+        let mut decoder = flate2::read::GzDecoder::new(File::open(target).unwrap());
+        let mut contents = String::new();
+        std::io::Read::read_to_string(&mut decoder, &mut contents).unwrap();
+        assert_eq!(contents, "SELECT 1;\n");
+    }
+
+    #[test]
+    fn sql_dump_validation_rejects_nul_bytes_across_buffer_boundaries() {
+        let mut reader = BufReader::with_capacity(
+            4,
+            std::io::Cursor::new(b"SELECT 1;\n\0\0INSERT INTO users VALUES (1);"),
+        );
+        let error = validate_sql_dump(&mut reader, &|| false).unwrap_err();
+        assert!(error.contains("NUL byte at byte offset 10"));
+        assert!(error.contains("No SQL statements were executed"));
+    }
+
+    #[test]
+    fn sql_dump_validation_accepts_escaped_nuls_and_rewinds() {
+        let sql = b"INSERT INTO messages VALUES ('escaped \\0; text');\n";
+        let mut reader = BufReader::with_capacity(4, std::io::Cursor::new(sql));
+        validate_sql_dump(&mut reader, &|| false).unwrap();
+        let mut contents = String::new();
+        std::io::Read::read_to_string(&mut reader, &mut contents).unwrap();
+        assert_eq!(contents.as_bytes(), sql);
+    }
+
+    #[test]
+    fn sql_dump_validation_respects_cancellation() {
+        let mut reader = std::io::Cursor::new(b"SELECT 1;");
+        assert_eq!(
+            validate_sql_dump(&mut reader, &|| true).unwrap_err(),
+            "Import cancelled"
+        );
+    }
 
     #[test]
     fn escape_csv_quotes_only_when_needed() {
@@ -1097,6 +1237,7 @@ mod tests {
         assert_eq!(sql_export_value(Some(&Value::Bool(true))), "1");
         assert_eq!(sql_export_value(Some(&Value::Bool(false))), "0");
         assert_eq!(sql_export_value(Some(&json!(123))), "123");
+        assert_eq!(sql_export_value(Some(&json!("a\0b"))), "'a\\0b'");
         assert_eq!(
             sql_export_value(Some(&Value::String("O'Reilly\\books".into()))),
             "'O\\'Reilly\\\\books'"

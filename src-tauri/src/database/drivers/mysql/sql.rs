@@ -35,7 +35,12 @@ pub(super) fn sql_literal(value: &Value) -> String {
             }
         }
         Value::Number(v) => v.to_string(),
-        Value::String(v) => format!("'{}'", v.replace('\\', "\\\\").replace('\'', "\\'")),
+        Value::String(v) => format!(
+            "'{}'",
+            v.replace('\\', "\\\\")
+                .replace('\0', "\\0")
+                .replace('\'', "\\'")
+        ),
         other => format!(
             "'{}'",
             other.to_string().replace('\\', "\\\\").replace('\'', "\\'")

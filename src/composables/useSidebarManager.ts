@@ -405,8 +405,12 @@ export function useSidebarManager(ctx: SidebarContext) {
     path: string,
   ) {
     const importId = crypto.randomUUID();
+    progressStore.importReport = null;
+    progressStore.importErrorsOpen = false;
     progressStore.isImporting = true;
     progressStore.importConnectionId = connectionId;
+    progressStore.importDatabase = database;
+    progressStore.importFileName = path.split(/[\\/]/).pop() ?? path;
     progressStore.importId = importId;
     progressStore.isCancellingImport = false;
     progressStore.importExpanded = true;
@@ -433,10 +437,13 @@ export function useSidebarManager(ctx: SidebarContext) {
           importId,
         },
       );
-      await store.fetchTablesForConnection(connectionId, database);
-      const tab = getPaneTab(getPane());
-      if (tab && tab.connectionId === connectionId && tab.database === database)
-        await loadTableData(tab.reference ?? tab.tableName, connectionId, database);
+      progressStore.importReport = {
+        database,
+        fileName: progressStore.importFileName ?? path,
+        executed: result.executed,
+        errors: [...result.errors],
+      };
+      if (result.errors.length > 0) progressStore.importExpanded = true;
       const toastSummary = `Completed in ${formatImportDuration(result.metrics.total_ms)}. ${result.executed.toLocaleString()} statements imported.`;
       const detailedSummary = `${toastSummary} ${formatImportSummary(result.metrics)}.`;
       recordQueryLogEntry({
@@ -445,18 +452,22 @@ export function useSidebarManager(ctx: SidebarContext) {
         sql: `-- IMPORT SQL INTO \`${database}\`\n${detailedSummary}`,
         timestamp: nowTimestamp(),
         duration_ms: result.metrics.total_ms,
-        error: result.errors.length > 0 ? result.errors[result.errors.length - 1] : null,
+        error: result.errors.length > 0 ? result.errors.map((error, index) => `${index + 1}. ${error}`).join("\n\n") : null,
       });
-      if (result.errors.length > 0) {
-        toastError(
-          `Import finished with ${result.errors.length} error${result.errors.length !== 1 ? 's' : ''}`,
-          toastSummary,
-        );
-      } else {
+      if (result.errors.length === 0) {
         toastSuccess(
           'Import complete',
           toastSummary,
         );
+      }
+      try {
+        await store.fetchTablesForConnection(connectionId, database);
+        const tab = getPaneTab(getPane());
+        if (tab && tab.connectionId === connectionId && tab.database === database)
+          await loadTableData(tab.reference ?? tab.tableName, connectionId, database);
+      } catch (refreshError) {
+        if (!progressStore.importReport?.errors.length)
+          toastError('Could not refresh database after import', String(refreshError));
       }
     } catch (e: any) {
       const msg = String(e);
@@ -475,11 +486,22 @@ export function useSidebarManager(ctx: SidebarContext) {
           message: 'The SQL import was stopped by the user.',
         });
       } else {
-        toastError('Import failed', msg);
+        progressStore.importReport = { database, fileName: progressStore.importFileName ?? path, executed: null, errors: [msg] };
+        progressStore.importExpanded = true;
+        recordQueryLogEntry({
+          connection_id: connectionId,
+          database,
+          sql: `-- IMPORT SQL INTO \`${database}\`\nImport failed.`,
+          timestamp: nowTimestamp(),
+          duration_ms: 0,
+          error: msg,
+        });
       }
     } finally {
       progressStore.isImporting = false;
       progressStore.importConnectionId = null;
+      progressStore.importDatabase = null;
+      progressStore.importFileName = null;
       progressStore.importId = null;
       progressStore.isCancellingImport = false;
       if (unlisten) unlisten();
@@ -534,6 +556,7 @@ export function useSidebarManager(ctx: SidebarContext) {
   });
 
   async function openExportSelector(connectionId: string, database: string) {
+    if (progressStore.isExporting) { progressStore.exportExpanded = true; return; }
     exportContext.value = { connectionId, database };
     currentExportMode.value = "full";
     selectedExportTables.value = [];
@@ -555,6 +578,7 @@ export function useSidebarManager(ctx: SidebarContext) {
   }
 
   async function startExport(payload: ExportStartPayload) {
+    if (progressStore.isExporting) { progressStore.exportExpanded = true; return; }
     if (!exportContext.value) return;
     showTableSelector.value = false;
     if (selectedExportTables.value.length === 0) return;
@@ -583,6 +607,7 @@ export function useSidebarManager(ctx: SidebarContext) {
       filters: [{ name: filterName, extensions: filterExts }],
     });
     if (!path) return;
+    if (progressStore.isExporting) { progressStore.exportExpanded = true; return; }
     progressStore.isExporting = true;
     progressStore.exportExpanded = true;
     progressStore.exportProgress = { current: 0, total: 0, status: "" };
@@ -590,6 +615,7 @@ export function useSidebarManager(ctx: SidebarContext) {
     progressStore.exportDoneCount = 0;
     progressStore.exportStartTime = Date.now();
     progressStore.exportConnectionId = connectionId;
+    progressStore.exportDatabase = database;
     progressStore.exportId = uuidv4();
     progressStore.isCancellingExport = false;
     let unlisten: UnlistenFn | null = null;
@@ -652,6 +678,7 @@ export function useSidebarManager(ctx: SidebarContext) {
       progressStore.exportDoneCount = 0;
       progressStore.exportStartTime = null;
       progressStore.exportConnectionId = null;
+      progressStore.exportDatabase = null;
       progressStore.exportId = null;
       progressStore.isCancellingExport = false;
       if (unlisten) unlisten();

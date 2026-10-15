@@ -1,6 +1,6 @@
 <template>
   <DialogPortal>
-    <DialogOverlay />
+    <DialogOverlay :class="props.overlayClass" />
     <DialogContent
       data-slot="dialog-content"
       v-bind="{ ...$attrs, ...forwarded }"
@@ -42,6 +42,7 @@ defineOptions({
 });
 
 const props = defineProps({
+  overlayClass: { type: String, required: false },
   forceMount: { type: Boolean, required: false },
   disableOutsidePointerEvents: { type: Boolean, required: false },
   asChild: { type: Boolean, required: false },
@@ -62,7 +63,7 @@ const emits = defineEmits([
   "closeAutoFocus",
 ]);
 
-const delegatedProps = reactiveOmit(props, "class");
+const delegatedProps = reactiveOmit(props, "class", "overlayClass");
 
 const forwarded = useForwardPropsEmits(delegatedProps, emits);
 </script>

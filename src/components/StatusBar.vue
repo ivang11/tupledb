@@ -1,117 +1,6 @@
 <template>
   <div class="flex flex-col border-t border-(--line-2) bg-(--bg-0)">
 
-    <!-- Expanded import detail -->
-    <Transition
-      enter-active-class="transition-all duration-200 ease-out overflow-hidden"
-      enter-from-class="max-h-0 opacity-0"
-      enter-to-class="max-h-50 opacity-100"
-      leave-active-class="transition-all duration-150 ease-in overflow-hidden"
-      leave-from-class="max-h-50 opacity-100"
-      leave-to-class="max-h-0 opacity-0"
-    >
-      <div
-        v-if="progress.isImporting && progress.importExpanded"
-        class="border-b border-(--line-2) bg-(--bg-1) px-4 py-2.5"
-      >
-        <div class="flex items-center justify-between mb-1.5">
-          <span class="text-[11px] font-medium flex items-center gap-1.5 text-(--fg-2)">
-            <UploadIcon class="w-3 h-3 text-(--acc)" />
-            Importing
-          </span>
-          <div class="flex items-center gap-2">
-            <button
-              class="inline-flex items-center gap-1 rounded-md border border-(--line-2) px-2 py-0.5 text-[10px] font-medium text-(--fg-4) hover:text-red-400 hover:border-red-400/30 hover:bg-red-400/5 transition-colors disabled:opacity-40"
-              :disabled="progress.isCancellingImport"
-              @click="cancelImport"
-            >
-              <XIcon class="w-2.5 h-2.5 shrink-0" />
-              {{ progress.isCancellingImport ? 'Cancelling…' : 'Cancel' }}
-            </button>
-            <span class="text-[11px] font-semibold tabular-nums text-(--acc)">{{ importPct }}%</span>
-          </div>
-        </div>
-        <div class="h-0.75 w-full bg-(--bg-3) rounded-full overflow-hidden mb-1.5">
-          <div class="h-full bg-(--acc) transition-all duration-300 ease-out rounded-full" :style="{ width: `${importPct}%` }" />
-        </div>
-        <div class="flex items-center justify-between">
-          <span class="text-[11px] text-(--fg-4) font-mono truncate pr-2">{{ progress.importProgress.status }}</span>
-          <span class="text-[10px] text-(--fg-5) font-mono tabular-nums shrink-0">
-            {{ progress.importProgress.current.toLocaleString() }} / {{ progress.importProgress.total.toLocaleString() }}
-          </span>
-        </div>
-      </div>
-    </Transition>
-
-    <!-- Expanded export detail -->
-    <Transition
-      enter-active-class="transition-all duration-200 ease-out overflow-hidden"
-      enter-from-class="max-h-0 opacity-0"
-      enter-to-class="max-h-105 opacity-100"
-      leave-active-class="transition-all duration-150 ease-in overflow-hidden"
-      leave-from-class="max-h-105 opacity-100"
-      leave-to-class="max-h-0 opacity-0"
-    >
-      <div
-        v-if="progress.isExporting && progress.exportExpanded"
-        class="border-b border-(--line-2) bg-(--bg-1) px-4 pt-3 pb-2"
-      >
-        <div class="flex items-start justify-between mb-2.5">
-          <!-- Left: collapse button + done count -->
-          <div class="flex items-start gap-2">
-            <button
-              class="shrink-0 w-5 h-5 flex items-center justify-center rounded text-(--fg-4) hover:text-(--fg-1) hover:bg-(--bg-2) transition-colors mt-1"
-              title="Minimize"
-              @click="progress.exportExpanded = false"
-            >
-              <ChevronDownIcon class="w-3.5 h-3.5" />
-            </button>
-            <div>
-              <div class="font-mono text-[20px] font-bold text-(--fg-1) leading-none tabular-nums">
-                {{ progress.exportProgress.current }}
-                <span class="text-(--fg-4) font-normal text-[16px]"> / {{ progress.exportTables.length }}</span>
-              </div>
-              <div class="text-[11px] text-(--fg-4) mt-1">
-                tables · exporting
-              </div>
-            </div>
-          </div>
-          <!-- Right: current table progress + cancel -->
-          <div class="flex items-center gap-3 pt-0.5">
-            <div v-if="progress.exportProgress.status" class="flex items-center gap-1.5 text-[11px] font-mono">
-              <span class="text-(--fg-3) truncate max-w-40">{{ progress.exportProgress.status }}</span>
-              <div class="w-16 h-0.75 bg-(--bg-3) rounded-full overflow-hidden">
-                <div class="h-full bg-(--acc) rounded-full transition-all duration-300" :style="{ width: `${exportPct}%` }" />
-              </div>
-              <span class="text-(--acc) w-7 text-right tabular-nums">{{ exportPct }}%</span>
-            </div>
-            <button
-              class="h-6 px-2.5 rounded text-[11px] text-(--fg-3) border border-(--line-2) hover:text-red-400 hover:border-red-400/40 hover:bg-red-400/5 transition-colors disabled:opacity-40"
-              :disabled="progress.isCancellingExport"
-              @click="cancelExport"
-            >{{ progress.isCancellingExport ? 'Cancelling…' : 'Cancel' }}</button>
-          </div>
-        </div>
-        <div class="max-h-48 overflow-y-auto space-y-0.5 custom-scrollbar">
-          <div v-for="(table, idx) in progress.exportTables" :key="table" class="flex items-center gap-2 py-0.75">
-            <Loader2Icon v-if="idx === progress.exportProgress.current" class="w-3 h-3 shrink-0 text-(--acc) animate-spin" />
-            <CheckIcon v-else-if="idx < progress.exportProgress.current" class="w-3 h-3 shrink-0 text-(--acc)" />
-            <div v-else class="w-3 h-3 shrink-0 rounded-full border border-(--line-2)" />
-            <span
-              class="text-[11px] font-mono truncate"
-              :class="
-                idx === progress.exportProgress.current
-                  ? 'text-(--fg-1)'
-                  : idx < progress.exportProgress.current
-                    ? 'text-(--fg-3)'
-                    : 'text-(--fg-2)'
-              "
-            >{{ table }}</span>
-          </div>
-        </div>
-      </div>
-    </Transition>
-
     <!-- Query Log panel -->
     <div v-if="queryLog.isOpen" class="flex flex-col border-b border-border bg-background" :style="{ height: logHeight + 'px' }">
       <div class="h-2 shrink-0 cursor-row-resize flex items-center justify-center group" @mousedown="startLogResize">
@@ -162,14 +51,14 @@
 
       <!-- Import/export buttons (left-aligned, next to Query Log) -->
       <button
-        v-if="progress.isImporting"
+        v-if="progress.isImporting || progress.importReport?.errors.length"
         class="flex items-center gap-1.5 px-1.5 h-full font-medium transition-colors border-b-[1.5px] -mb-px"
         :class="progress.importExpanded ? 'border-(--acc) text-(--fg-1)' : 'border-transparent text-(--fg-2) hover:text-(--fg-1)'"
         @click="progress.importExpanded = !progress.importExpanded"
       >
         <UploadIcon class="size-3 shrink-0 text-(--acc)" />
-        <span>Importing</span>
-        <span class="tabular-nums text-(--acc)">{{ importPct }}%</span>
+        <span>{{ progress.isImporting ? 'Importing' : 'Import errors' }}</span>
+        <span class="tabular-nums text-(--acc)">{{ progress.isImporting ? `${importPct}%` : progress.importReport?.errors.length }}</span>
       </button>
 
       <button
@@ -255,28 +144,21 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, computed } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
 import {
   TerminalIcon,
   TrashIcon,
   UploadIcon,
   DownloadIcon,
-  XIcon,
-  Loader2Icon,
-  CheckIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  ChevronDownIcon,
   HashIcon,
 } from 'lucide-vue-next'
 import { useQueryLogStore } from '@/stores/queryLog'
 import { useProgressStore } from '@/stores/progress'
-import { useToast } from '@/composables/useToast'
 import type { TableViewMode } from '@/types/workspace'
 
 const queryLog = useQueryLogStore()
 const progress = useProgressStore()
-const { error: toastError } = useToast()
 
 const props = defineProps<{
   activeConnectionId?: string | null
@@ -408,48 +290,8 @@ function onScroll() {
 
 // ── Progress helpers ──────────────────────────────────────────────────────────
 
-const importPct = computed(() => {
-  const { current, total } = progress.importProgress
-  if (!total) return 0
-  const pct = (current / total) * 100
-  if (pct <= 0) return 0
-  if (pct >= 100) return 100
-  return Math.max(0.1, Math.round(pct * 10) / 10)
-})
-
-const exportPct = computed(() => {
-  const { current, total } = progress.exportProgress
-  return total ? Math.round((current / total) * 100) : 0
-})
-
-
-
-async function cancelExport() {
-  if (!progress.exportConnectionId || !progress.exportId || progress.isCancellingExport) return
-  progress.isCancellingExport = true
-  try {
-    await invoke('cancel_export', { exportId: progress.exportId })
-  } catch (e: any) {
-    progress.isCancellingExport = false
-    toastError('Failed to cancel export', String(e))
-  }
-}
-
-async function cancelImport() {
-  if (!progress.importConnectionId || !progress.importId || progress.isCancellingImport) return
-  progress.isCancellingImport = true
-  progress.importProgress.status = 'Cancelling import...'
-  try {
-    await invoke('cancel_import', {
-      connectionId: progress.importConnectionId,
-      importId: progress.importId,
-    })
-  } catch (e: any) {
-    progress.isCancellingImport = false
-    toastError('Failed to cancel import', String(e))
-  }
-}
-
+const importPct = computed(() => progress.importPercent)
+const exportPct = computed(() => progress.exportPercent)
 
 function clearVisibleLog() {
   queryLog.clearContext(props.activeConnectionId, props.activeDatabase)

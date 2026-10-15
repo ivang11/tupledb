@@ -8,7 +8,10 @@
       <WorkspaceView />
     </main>
 
-    <UpdaterDialog v-if="dialogOpen" />
+    <FloatingNoticeStack>
+      <UpdaterDialog v-if="dialogOpen" />
+      <TransferProgressNotices v-if="progress.isImporting || progress.isExporting || progress.importReport?.errors.length" />
+    </FloatingNoticeStack>
     <ToastContainer />
   </div>
 </template>
@@ -28,8 +31,12 @@ import { useSidebarState } from '@/composables/useSidebarState'
 import { openSettingsWindow } from '@/lib/settingsWindow'
 import { useToast } from '@/composables/useToast'
 import ConnectionStorageNotice from '@/components/ConnectionStorageNotice.vue'
+import FloatingNoticeStack from '@/components/FloatingNoticeStack.vue'
+import { useProgressStore } from '@/stores/progress'
 
 const UpdaterDialog = defineAsyncComponent(() => import('@/components/dialogs/UpdaterDialog.vue'))
+const TransferProgressNotices = defineAsyncComponent(() => import('@/components/TransferProgressNotices.vue'))
+const progress = useProgressStore()
 let updateCheckTimer: number | undefined
 
 useAppearance()

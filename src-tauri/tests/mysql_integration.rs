@@ -666,6 +666,13 @@ async fn export_table_file_writes_csv_json_sql_and_sql_can_be_reimported() {
     .execute(&pool)
     .await
     .expect("insert export rows");
+    sqlx::query(&format!(
+        "UPDATE `{db}`.exported_table SET note = ? WHERE id = 2"
+    ))
+    .bind("a\0b")
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let progress_statuses = Arc::new(Mutex::new(Vec::new()));
     for (format, path) in [
@@ -748,6 +755,7 @@ async fn export_table_file_writes_csv_json_sql_and_sql_can_be_reimported() {
         json!("comma, quote \" and newline\ninside")
     );
     assert_eq!(object_at(&reimported.rows, 1)["name"], Value::Null);
+    assert_eq!(object_at(&reimported.rows, 1)["note"], json!("a\0b"));
     assert_eq!(object_at(&reimported.rows, 2)["name"], json!("O'Reilly"));
     assert!(progress_statuses
         .lock()
@@ -1355,4 +1363,40 @@ async fn wait_for_server_sleep(pool: &MySqlPool, thread_id: u64) {
         );
         tokio::time::sleep(tokio::time::Duration::from_millis(25)).await;
     }
+}
+
+#[tokio::test]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
+async fn damaged_dump_is_rejected_before_any_sql_is_executed() {
+    let pool = test_pool().await;
+    let db = setup_database(&pool).await;
+    let driver = Arc::new(MySqlDriver::new(pool.clone(), false));
+    sqlx::raw_sql(&format!(
+        "CREATE TABLE `{db}`.preserved (id INT PRIMARY KEY); INSERT INTO `{db}`.preserved VALUES (1);"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("damaged.sql");
+    // Even valid SQL before the damaged section must never be executed.
+    std::fs::write(&path, b"DROP TABLE preserved;\n\0\0SELECT 1;").unwrap();
+    let error = import_sql_file(
+        driver.clone(),
+        &db,
+        path.to_str().unwrap(),
+        "damaged-dump",
+        &|| false,
+        &|_| {},
+    )
+    .await
+    .unwrap_err();
+    assert!(error.contains("NUL byte at byte offset 22"));
+    let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM `{db}`.preserved"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+    assert!(driver.get_thread_id_for_import("damaged-dump").is_none());
+    drop_database(&pool, &db).await;
 }
