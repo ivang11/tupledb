@@ -42,8 +42,11 @@ export function useUpdater() {
 
   async function checkForUpdates(options: { silent?: boolean; inline?: boolean } = {}) {
     if (options.inline) presentInline()
-    if (status.value === 'readyToRestart' || status.value === 'restarting') return
-    if (isChecking.value || isInstalling.value) return
+    if (isInstalling.value || status.value === 'readyToRestart' || status.value === 'restarting') {
+      if (!options.inline && !options.silent) { inlinePresentation = false; dialogOpen.value = true }
+      return
+    }
+    if (isChecking.value) return
 
     inlinePresentation = options.inline === true
     errorMessage.value = null
@@ -87,13 +90,8 @@ export function useUpdater() {
   }
 
   function dismissUpdate() {
-    if (isInstalling.value || status.value === 'restarting') return
-
+    // Dismiss the notice, retaining the update and any background installation.
     dialogOpen.value = false
-    availableUpdate.value = null
-    status.value = 'idle'
-    downloadedBytes.value = 0
-    totalBytes.value = 0
   }
 
   async function installUpdate() {

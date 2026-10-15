@@ -30,11 +30,12 @@ import { useToast } from '@/composables/useToast'
 import ConnectionStorageNotice from '@/components/ConnectionStorageNotice.vue'
 
 const UpdaterDialog = defineAsyncComponent(() => import('@/components/dialogs/UpdaterDialog.vue'))
+let updateCheckTimer: number | undefined
 
 useAppearance()
 useUpdaterBridge()
 const { checkForUpdates, dialogOpen } = useUpdater()
-const AUTO_UPDATE_CHECK_DELAY_MS = 30_000
+const AUTO_UPDATE_CHECK_DELAY_MS = 5_000
 
 let stopMenuEvents: UnlistenFn | undefined
 const { sidebarVisible } = useSidebarState()
@@ -56,12 +57,12 @@ onMounted(async () => {
   stopMenuEvents = await listen<string>('tupledb:menu', event => onMenuAction(String(event.payload)))
   if (!import.meta.env.PROD) return
 
-  window.setTimeout(() => {
+  updateCheckTimer = window.setTimeout(() => {
     void checkForUpdates({ silent: true })
   }, AUTO_UPDATE_CHECK_DELAY_MS)
 })
 
-onBeforeUnmount(() => { stopMenuEvents?.() })
+onBeforeUnmount(() => { window.clearTimeout(updateCheckTimer); stopMenuEvents?.() })
 </script>
 
 <style>

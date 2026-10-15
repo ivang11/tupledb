@@ -28,7 +28,7 @@ beforeEach(() => {
   bus.relaunch.mockResolvedValue(undefined)
   const updater = useUpdater()
   updater.isChecking.value = false; updater.isInstalling.value = false; updater.status.value = 'idle'
-  updater.dismissUpdate(); updater.errorMessage.value = null; updater.isUpToDate.value = false
+  updater.dismissUpdate(); updater.availableUpdate.value = null; updater.downloadedBytes.value = 0; updater.totalBytes.value = 0; updater.errorMessage.value = null; updater.isUpToDate.value = false
 })
 afterEach(() => { wrappers.forEach(wrapper => wrapper.unmount()); wrappers.length = 0 })
 async function render() {
