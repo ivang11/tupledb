@@ -49,6 +49,25 @@ describe('workspace recovery', () => {
     expect(JSON.parse(text).panes[0].tabs[0].filters).toEqual(table().filters)
     expect(text).not.toContain('result-not-to-save'); expect(text).not.toContain('query-result'); expect(text).not.toContain('never-store-this')
   })
+  it('restores all configured filter rows while loading data with the individually executed filter', async () => {
+    const first = await setup()
+    const tab = table()
+    tab.configuredFilters = { match_all: true, rows: [
+      ...tab.filters.rows,
+      { active: true, column: 'name', operator: 'contains', value: 'Alice' },
+    ] }
+    first.panes.value[0].tabs = [tab]
+    first.panes.value[0].activeTabId = tab.id
+    first.session.save()
+    const saved = JSON.parse(localStorage.getItem('tupledb:workspace-session:v1')!)
+    expect(saved.panes[0].tabs[0].configuredFilters.rows).toHaveLength(2)
+    wrappers.pop()!.unmount()
+    invoke.mockClear()
+    const restored = await setup()
+    expect((restored.panes.value[0].tabs[0] as TableTab).configuredFilters).toEqual(tab.configuredFilters)
+    expect(invoke).toHaveBeenCalledWith('get_table_data', expect.objectContaining({ filters: tab.filters }))
+  })
+
   it('restores table filters and drafts without executing SQL', async () => {
     localStorage.setItem('tupledb:workspace-session:v1', JSON.stringify({ version: 1, connections: [{ id: 'local', database: 'app' }], activePaneId: 'restored', panes: [{ id: 'restored', activeTabId: 'table', page: 2, pageSize: 50, viewMode: 'content', showFilters: true, tabs: [table(), { type: 'query', id: 'draft', connectionId: 'local', database: 'app', sql: 'DELETE FROM users' }] }] }))
     const { panes, connect, showWorkspace } = await setup()

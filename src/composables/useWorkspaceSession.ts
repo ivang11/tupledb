@@ -10,7 +10,7 @@ const SESSION_KEY = 'tupledb:workspace-session:v1'
 function draft(tab: AnyTab) {
   if (tab.type === 'query') return { type: tab.type, id: tab.id, connectionId: tab.connectionId, database: tab.database, sql: tab.sql }
   return { type: tab.type, id: tab.id, connectionId: tab.connectionId, database: tab.database, reference: tab.reference,
-    tableName: tab.tableName, page: tab.page, pageSize: tab.pageSize, viewMode: tab.viewMode, filters: tab.filters,
+    tableName: tab.tableName, page: tab.page, pageSize: tab.pageSize, viewMode: tab.viewMode, filters: tab.filters, configuredFilters: tab.configuredFilters,
     sortColumn: tab.sortColumn, sortDesc: tab.sortDesc, pendingChanges: tab.pendingChanges,
     pendingStructureChanges: tab.pendingStructureChanges, pendingDeletions: tab.pendingDeletions,
     pendingInserts: tab.pendingInserts, pendingTruncate: tab.pendingTruncate, pendingDrop: tab.pendingDrop,

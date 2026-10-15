@@ -90,7 +90,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'apply', filters: FilterSet): void
+  (e: 'apply', filters: FilterSet, configuredFilters?: FilterSet): void
   (e: 'clear'): void
 }>()
 
@@ -151,9 +151,9 @@ function applyFilters() {
 function applySingleRow(row: FilterRow) {
   const singleSet: FilterSet = {
     match_all: filterSet.value.match_all,
-    rows: [row]
+    rows: [{ ...row, active: true }]
   }
-  emit('apply', singleSet)
+  emit('apply', JSON.parse(JSON.stringify(singleSet)), JSON.parse(JSON.stringify(filterSet.value)))
 }
 
 watch(() => [props.visible, props.columns.length], () => {

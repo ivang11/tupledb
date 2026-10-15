@@ -84,12 +84,13 @@ export function useWorkspaceTableUi(ctx: WorkspaceTableUiContext) {
     return summarizePendingTabs(tab ? pendingTabsForDatabase(ctx.panes.value, tab) : []);
   }
 
-  async function applyFilters(pane: PaneState, filters: any) {
+  async function applyFilters(pane: PaneState, filters: any, configuredFilters = filters) {
     const t = ctx.getPaneTab(pane);
     if (!t) return;
     t.selectedRowPk = null;
     t.inlineEditColumn = null;
     t.filters = filters;
+    t.configuredFilters = configuredFilters;
     t.queryResult = await store.fetchTableData(
       t.connectionId,
       t.database,
@@ -107,6 +108,7 @@ export function useWorkspaceTableUi(ctx: WorkspaceTableUiContext) {
     t.selectedRowPk = null;
     t.inlineEditColumn = null;
     t.filters = null;
+    t.configuredFilters = null;
     t.queryResult = await store.fetchTableData(
       t.connectionId,
       t.database,

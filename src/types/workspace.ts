@@ -1,3 +1,4 @@
+import type { FilterSet } from './filters.js'
 import type { TableRef, ColumnStructure, ForeignKeyColumn } from './database.js'
 export type TableViewMode =
   | 'content'
@@ -25,6 +26,7 @@ export interface TableTab {
   pageSize: number
   viewMode: TableViewMode
   filters: any | null
+  configuredFilters?: FilterSet | null
   sortColumn: string | null
   sortDesc: boolean
   pendingChanges: Record<string, Record<string, any>>

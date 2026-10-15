@@ -87,8 +87,8 @@
         v-show="pane.viewMode === 'content' && pane.showFilters"
         :key="pane.activeTabId ?? pane.id"
         :columns="(getPaneTab(pane)?.tableStructure ?? []).map((c: any) => ({ name: c.field, type_name: c.type }))"
-        :initial-filter="getPaneTab(pane)?.filters"
-        @apply="(filters) => applyFilters(pane, filters)"
+        :initial-filter="getPaneTab(pane)?.configuredFilters ?? getPaneTab(pane)?.filters"
+        @apply="(filters, configuredFilters) => applyFilters(pane, filters, configuredFilters)"
         @clear="() => clearFilters(pane)"
       />
 
@@ -125,7 +125,7 @@
           :columns="tableGridColumns(pane)"
           :preference-key="getPaneTab(pane) ? JSON.stringify([getPaneTab(pane)!.connectionId, getPaneTab(pane)!.reference ?? [getPaneTab(pane)!.database, getPaneTab(pane)!.tableName]]) : undefined"
           :can-filter="true"
-          @filter-value="(column, value) => applyFilters(pane, { match_all: true, rows: [...(getPaneTab(pane)?.filters?.rows ?? []), { active: true, column, operator: value === null ? 'is_null' : 'equals', value: value === null ? '' : String(value) }] })"
+          @filter-value="(column, value) => applyFilters(pane, { match_all: true, rows: [...((getPaneTab(pane)?.configuredFilters ?? getPaneTab(pane)?.filters)?.rows ?? []), { active: true, column, operator: value === null ? 'is_null' : 'equals', value: value === null ? '' : String(value) }] })"
           @sort-direction="(column, desc) => onSortColumn(pane, column, desc)"
           :rows="getPaneTab(pane)?.queryResult?.rows ?? []"
           :primary-key="getPrimaryKey(pane)"
