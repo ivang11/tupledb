@@ -64,7 +64,7 @@ function menuItem(wrapper: ReturnType<typeof mount>, label: string) {
   return wrapper.findAll('[role="menu"] button').find(button => button.text().includes(label))!
 }
 
-describe('closing databases and connections from the rail', () => {
+describe('closing databases and connections', () => {
   it('closes one of two open databases and keeps the other', async () => {
     const { wrapper, store } = await openWorkspace()
     await wrapper.get('button[title="Local / Choose database"]').trigger('click')
@@ -73,7 +73,8 @@ describe('closing databases and connections from the rail', () => {
     await waitFor(() => wrapper.find('button[title="Local / other"]').exists())
     expect(store.openConnections.local.openedDatabases).toEqual(['app', 'other'])
 
-    await wrapper.get('button[title="Local / other"]').trigger('contextmenu', { clientX: 10, clientY: 10 })
+    await waitFor(() => wrapper.find('[data-table-list]').exists())
+    await wrapper.get('[data-table-list]').trigger('contextmenu', { clientX: 10, clientY: 10 })
     await waitFor(() => wrapper.find('[role="menu"]').exists())
     await menuItem(wrapper, 'Close DB').trigger('click')
     await settle()
@@ -88,7 +89,8 @@ describe('closing databases and connections from the rail', () => {
     await store.selectDatabase('local', 'app')
     await waitFor(() => wrapper.find('button[title="Local / app"]').exists())
 
-    await wrapper.get('button[title="Local / app"]').trigger('contextmenu', { clientX: 10, clientY: 10 })
+    await waitFor(() => wrapper.find('[data-table-list]').exists())
+    await wrapper.get('[data-table-list]').trigger('contextmenu', { clientX: 10, clientY: 10 })
     await waitFor(() => wrapper.find('[role="menu"]').exists())
     await menuItem(wrapper, 'Close DB').trigger('click')
     await settle()
