@@ -7,7 +7,6 @@
     @select-connection="selectedSidebarConnectionId = $event"
     @select-database="handleSelectDatabase"
     @context-menu-connection="openSidebarContextMenu"
-    @context-menu-database="openSidebarDatabaseContextMenu"
   />
 
   <Sidebar

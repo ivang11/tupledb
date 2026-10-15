@@ -13,7 +13,7 @@
         :disabled="(openConnectionCount ?? 0) <= 1"
         @click="emit('disconnect-others', connection.id)"
       >
-        <XIcon class="size-3.5 text-muted-foreground" /> Close other connections
+        <CopyXIcon class="size-3.5 text-muted-foreground" /> Close other connections
       </button>
     </template>
 
@@ -59,7 +59,7 @@
 
 <script setup lang="ts">
 import ContextMenuSurface from "./ContextMenuSurface.vue"
-import { PencilIcon, CopyIcon, XIcon, Trash2Icon, PlusIcon } from 'lucide-vue-next'
+import { PencilIcon, CopyIcon, CopyXIcon, XIcon, Trash2Icon, PlusIcon } from 'lucide-vue-next'
 import type { Connection } from '@/types/connection'
 
 defineProps<{

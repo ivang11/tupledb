@@ -62,7 +62,6 @@ const emit = defineEmits<{
   "select-database": [connId: string, db: string];
   home: [];
   "context-menu-connection": [e: MouseEvent, conn: Connection];
-  "context-menu-database": [e: MouseEvent, connId: string, db: string];
 }>();
 
 const getEnvRailColor = (env: Environment): string => {
@@ -109,11 +108,7 @@ function selectItem(item: RailItem) {
 }
 
 function openItemContextMenu(event: MouseEvent, item: RailItem) {
-  if (item.database === null) {
-    emit('context-menu-connection', event, item.connection);
-  } else {
-    emit('context-menu-database', event, item.connectionId, item.database);
-  }
+  emit('context-menu-connection', event, item.connection);
 }
 
 </script>
