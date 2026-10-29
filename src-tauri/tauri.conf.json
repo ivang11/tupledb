@@ -1,6 +1,6 @@
 {
   "productName": "TupleDB",
-  "version": "0.8.7",
+  "version": "0.8.8",
   "identifier": "com.tupledb.app",
   "build": {
     "beforeDevCommand": "npm run dev",
