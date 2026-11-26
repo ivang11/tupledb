@@ -41,3 +41,18 @@ test('EXPLAIN does not conceal a second statement in dialect-specific comments o
   assert.throws(() => explainSql("SELECT 'a\\'; DELETE FROM users; --'", 'postgresql'), /one statement/)
   assert.ok(explainSql('/* outer /* inner */ outer */ SELECT 1', 'postgresql').startsWith('EXPLAIN (FORMAT JSON)'))
 })
+
+test('SQL review uses the catalog relation kind and schema for pending drops', () => {
+  for (const engine of ['mysql', 'postgresql'] as const) {
+    for (const kind of ['BASE TABLE', 'VIEW', ...(engine === 'postgresql' ? ['MATERIALIZED VIEW', 'FOREIGN TABLE'] : [])]) {
+      const reference = { catalog: 'app', schema: engine === 'mysql' ? null : 'sales', name: 'quoted`"view' }
+      const tab = { tableName: reference.name, database: 'app', reference, pendingDrop: true } as TableTab
+      const tables = [
+        { name: reference.name, reference: { ...reference, schema: 'other' }, table_type: 'BASE TABLE' },
+        { name: reference.name, reference, table_type: kind },
+      ]
+      const relation = engine === 'mysql' ? '`app`.`quoted``"view`' : '"sales"."quoted`""view"'
+      assert.equal(pendingSqlPreview([tab], engine, tables), `DROP ${kind === 'BASE TABLE' ? 'TABLE' : kind} ${relation};`)
+    }
+  }
+})

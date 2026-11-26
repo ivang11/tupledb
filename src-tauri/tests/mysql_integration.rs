@@ -447,6 +447,55 @@ async fn views_are_listed_as_views_and_readable() {
 
 #[tokio::test]
 #[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
+async fn drop_views_individually_and_in_mixed_selections() {
+    let pool = test_pool().await;
+    let db = setup_database(&pool).await;
+    let driver = MySqlDriver::new(pool.clone(), false);
+    sqlx::raw_sql(&format!(
+        "CREATE TABLE `{db}`.`keep` (id INT PRIMARY KEY);
+         INSERT INTO `{db}`.`keep` VALUES (1);
+         CREATE VIEW `{db}`.`quoted``view` AS SELECT id FROM `{db}`.`keep`;
+         CREATE VIEW `{db}`.`batch view` AS SELECT id FROM `{db}`.`keep`;
+         CREATE TABLE `{db}`.`batch table` (id INT);"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    driver
+        .drop_table(&TableRef::new(&db, "quoted`view"), false)
+        .await
+        .unwrap();
+    assert!(driver
+        .get_tables(&db)
+        .await
+        .unwrap()
+        .iter()
+        .all(|table| table.name != "quoted`view"));
+    driver
+        .drop_tables(
+            &db,
+            &[
+                TableRef::new(&db, "batch table"),
+                TableRef::new(&db, "batch view"),
+            ],
+            true,
+        )
+        .await
+        .unwrap();
+    let remaining = driver.get_tables(&db).await.unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].name, "keep");
+    let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM `{db}`.`keep`"))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+    drop_database(&pool, &db).await;
+}
+
+#[tokio::test]
+#[ignore = "requires TUPLEDB_TEST_MYSQL_URL pointing to a MySQL server"]
 async fn get_table_structure_marks_primary_key_and_nullable_columns() {
     let pool = test_pool().await;
     let db = setup_database(&pool).await;

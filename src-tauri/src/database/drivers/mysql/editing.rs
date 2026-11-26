@@ -290,14 +290,29 @@ impl EditDriver for MySqlDriver {
     async fn drop_table(&self, target: &TableRef, disable_fk_checks: bool) -> Result<(), String> {
         let (database, table) = mysql_table_parts(target)?;
         let mut conn = self.pool.acquire().await.map_err(|e| e.to_string())?;
+        let metadata = sqlx::query(
+            "SELECT TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
+        )
+        .bind(database)
+        .bind(table)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(|e| e.to_string())?;
+        let object_type = if get_str_lossy(&metadata, 0) == "VIEW" {
+            "VIEW"
+        } else {
+            "TABLE"
+        };
         if disable_fk_checks {
+            conn.close_on_drop();
             sqlx::query("SET FOREIGN_KEY_CHECKS = 0")
                 .execute(&mut *conn)
                 .await
                 .map_err(|e| e.to_string())?;
         }
         let res = sqlx::query(&format!(
-            "DROP TABLE {}.{}",
+            "DROP {} {}.{}",
+            object_type,
             quote_identifier(database)?,
             quote_identifier(table)?
         ))

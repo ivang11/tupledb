@@ -155,6 +155,7 @@ pub trait EditDriver: Send + Sync {
         new_type: &str,
     ) -> Result<String, String>;
 
+    /// Drops a catalog relation using its native kind (table, view, etc.).
     async fn drop_table(&self, target: &TableRef, disable_fk_checks: bool) -> Result<(), String>;
 
     async fn drop_tables(

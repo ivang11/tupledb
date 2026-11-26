@@ -83,6 +83,100 @@ fn change(column: &str, value: Value) -> TableChange {
 
 #[tokio::test]
 #[ignore = "requires TUPLEDB_TEST_POSTGRESQL_URL"]
+async fn drop_views_individually_and_in_mixed_selections() {
+    let db = Database::new().await;
+    db.seed(r#"
+        CREATE SCHEMA "quoted schema";
+        CREATE TABLE public.keep(id int PRIMARY KEY);
+        INSERT INTO public.keep VALUES (1);
+        CREATE TABLE public."quoted""view"(id int);
+        CREATE VIEW "quoted schema"."quoted""view" AS SELECT * FROM public.keep;
+        CREATE VIEW public."rollback view" AS SELECT 1;
+        CREATE MATERIALIZED VIEW public."single materialized" AS SELECT * FROM public.keep;
+        CREATE MATERIALIZED VIEW public."materialized view" AS SELECT * FROM public.keep;
+        CREATE VIEW public."batch view" AS SELECT * FROM public."materialized view";
+        CREATE MATERIALIZED VIEW public."dependent materialized" AS SELECT * FROM public."batch view";
+        CREATE TABLE public."batch parent"(id int PRIMARY KEY);
+        CREATE TABLE public."batch child"(id int REFERENCES public."batch parent");
+    "#).await;
+
+    db.driver
+        .drop_table(&db.table("quoted schema", "quoted\"view"), false)
+        .await
+        .unwrap();
+    assert!(db
+        .driver
+        .get_tables(&db.name)
+        .await
+        .unwrap()
+        .iter()
+        .any(|t| t.reference == db.table("public", "quoted\"view")));
+    db.driver
+        .drop_table(&db.table("public", "single materialized"), false)
+        .await
+        .unwrap();
+
+    // An unselected dependent view must block deletion without CASCADE.
+    assert!(db
+        .driver
+        .drop_table(&db.table("public", "keep"), false)
+        .await
+        .is_err());
+    assert!(db
+        .driver
+        .drop_tables(
+            &db.name,
+            &[
+                db.table("public", "rollback view"),
+                db.table("public", "batch child"),
+                db.table("public", "keep"),
+            ],
+            false
+        )
+        .await
+        .is_err());
+    assert!(db
+        .driver
+        .get_tables(&db.name)
+        .await
+        .unwrap()
+        .iter()
+        .any(|t| t.reference == db.table("public", "batch child")));
+    assert!(db
+        .driver
+        .get_tables(&db.name)
+        .await
+        .unwrap()
+        .iter()
+        .any(|t| t.reference == db.table("public", "rollback view")));
+
+    db.driver
+        .drop_tables(
+            &db.name,
+            &[
+                db.table("public", "rollback view"),
+                db.table("public", "batch parent"),
+                db.table("public", "batch child"),
+                db.table("public", "materialized view"),
+                db.table("public", "batch view"),
+                db.table("public", "dependent materialized"),
+            ],
+            false,
+        )
+        .await
+        .unwrap();
+    let remaining = db.driver.get_tables(&db.name).await.unwrap();
+    assert_eq!(remaining.len(), 2);
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM public.keep")
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+    db.close().await;
+}
+
+#[tokio::test]
+#[ignore = "requires TUPLEDB_TEST_POSTGRESQL_URL"]
 async fn one_saved_connection_routes_catalogs_and_creates_databases_safely() {
     let db = Database::new().await;
     let other = format!("{} .\"other", db.name);

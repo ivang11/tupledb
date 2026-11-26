@@ -1,6 +1,6 @@
 use super::queries::{bind_value, column};
 use super::*;
-use sqlx::{Column, Executor, Postgres, QueryBuilder};
+use sqlx::{Acquire, Column, Executor, Postgres, QueryBuilder};
 use std::collections::HashSet;
 
 fn key_predicate(
@@ -211,13 +211,12 @@ impl EditDriver for PostgreSqlDriver {
     }
 
     async fn drop_table(&self, table: &TableRef, disable_fk_checks: bool) -> Result<(), String> {
-        self.check_write(disable_fk_checks)?;
-        let pool = self.pool_for(&table.catalog).await?;
-        sqlx::query(&format!("DROP TABLE {}", self.relation(table)?))
-            .execute(&pool)
-            .await
-            .map_err(|e| e.to_string())?;
-        Ok(())
+        self.drop_tables(
+            &table.catalog,
+            std::slice::from_ref(table),
+            disable_fk_checks,
+        )
+        .await
     }
     async fn drop_tables(
         &self,
@@ -238,11 +237,66 @@ impl EditDriver for PostgreSqlDriver {
         if relations.is_empty() {
             return Ok(());
         }
-        sqlx::query(&format!("DROP TABLE {}", relations.join(", ")))
-            .execute(&pool)
+        let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+        let mut statements = Vec::new();
+        let mut base_tables = Vec::new();
+        let mut foreign_tables = Vec::new();
+        for (table, relation) in tables.iter().zip(relations) {
+            let kind: String = sqlx::query_scalar(
+                "SELECT c.relkind::text FROM pg_catalog.pg_class c
+                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                 WHERE n.nspname = $1 AND c.relname = $2",
+            )
+            .bind(table.schema.as_deref())
+            .bind(&table.name)
+            .fetch_one(&mut *tx)
             .await
             .map_err(|e| e.to_string())?;
-        Ok(())
+            match kind.as_str() {
+                "v" => statements.push(format!("DROP VIEW {relation}")),
+                "m" => statements.push(format!("DROP MATERIALIZED VIEW {relation}")),
+                "f" => foreign_tables.push(relation),
+                "r" | "p" => base_tables.push(relation),
+                _ => return Err(format!("Unsupported relation type: {kind}")),
+            }
+        }
+        // Keep tables together so selected foreign-key dependencies remain valid.
+        if !foreign_tables.is_empty() {
+            statements.push(format!("DROP FOREIGN TABLE {}", foreign_tables.join(", ")));
+        }
+        if !base_tables.is_empty() {
+            statements.push(format!("DROP TABLE {}", base_tables.join(", ")));
+        }
+        // Views and materialized views can depend on each other in either order.
+        // Retry dependency failures after removing other selected objects. Each
+        // attempt has a savepoint; the outer transaction keeps the batch atomic.
+        while !statements.is_empty() {
+            let previous_len = statements.len();
+            let mut blocked = Vec::new();
+            let mut dependency_error = String::new();
+            for statement in statements {
+                let mut attempt = tx.begin().await.map_err(|e| e.to_string())?;
+                match sqlx::query(&statement).execute(&mut *attempt).await {
+                    Ok(_) => attempt.commit().await.map_err(|e| e.to_string())?,
+                    Err(error) => {
+                        let is_dependency =
+                            error.as_database_error().and_then(|e| e.code()).as_deref()
+                                == Some("2BP01");
+                        attempt.rollback().await.map_err(|e| e.to_string())?;
+                        if !is_dependency {
+                            return Err(error.to_string());
+                        }
+                        dependency_error = error.to_string();
+                        blocked.push(statement);
+                    }
+                }
+            }
+            if blocked.len() == previous_len {
+                return Err(dependency_error);
+            }
+            statements = blocked;
+        }
+        tx.commit().await.map_err(|e| e.to_string())
     }
     async fn truncate_table(
         &self,

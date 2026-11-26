@@ -2,14 +2,23 @@ import { decodeRowKey, primaryKeyColumns } from './tableIdentity.js'
 import { normalizeChangeValue } from './tableEditing.js'
 import type { TableTab } from '../types/workspace.js'
 import type { DatabaseEngine } from '../types/connection.js'
+import type { DatabaseTable } from '../types/database.js'
+import { tableHandle } from './tableReference.js'
 
 /** Review text only; mutations continue through the validated, parameterized driver. */
-export function pendingSqlPreview(tabs: TableTab[], engine: DatabaseEngine): string {
+export function pendingSqlPreview(tabs: TableTab[], engine: DatabaseEngine, tables: DatabaseTable[] = []): string {
   const quote = (name: string) => engine === 'mysql' ? `\`${name.replaceAll('`', '``')}\`` : `"${name.replaceAll('"', '""')}"`
   const output: string[] = []
   for (const tab of tabs) {
     const relation = engine === 'mysql' ? `${quote(tab.database)}.${quote(tab.tableName)}` : `${quote(tab.reference?.schema ?? 'public')}.${quote(tab.tableName)}`
-    if (tab.pendingDrop) { output.push(`DROP TABLE ${relation};`); continue }
+    if (tab.pendingDrop) {
+      const kind = tables.find(table => tableHandle(table) === tableHandle(tab.reference ?? { name: tab.tableName }))?.table_type
+      const objectType = kind === 'VIEW' ? 'VIEW'
+        : engine === 'postgresql' && kind === 'MATERIALIZED VIEW' ? 'MATERIALIZED VIEW'
+        : engine === 'postgresql' && kind === 'FOREIGN TABLE' ? 'FOREIGN TABLE' : 'TABLE'
+      output.push(`DROP ${objectType} ${relation};`)
+      continue
+    }
     if (tab.pendingTruncate) output.push(`TRUNCATE TABLE ${relation};`)
     const keys = primaryKeyColumns(tab.tableStructure)
     const statement = (build: (bind: (value: unknown) => string) => string) => {

@@ -322,7 +322,11 @@ function openSqlPreview() {
   const tab = getPaneTab(props.pane);
   if (!tab) return;
   try {
-    sqlPreview.value = pendingSqlPreview(pendingTabsForDatabase(panes.value, tab), getPaneConnection(props.pane)?.database.engine ?? 'mysql');
+    sqlPreview.value = pendingSqlPreview(
+      pendingTabsForDatabase(panes.value, tab),
+      getPaneConnection(props.pane)?.database.engine ?? 'mysql',
+      connectionStore.openConnections[tab.connectionId]?.tables[tab.database] ?? [],
+    );
     sqlPreviewOpen.value = true;
   } catch (error) { useToast().error('Could not preview changes', String(error)); }
 }
